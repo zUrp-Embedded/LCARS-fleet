@@ -25,6 +25,9 @@ setup() {
   # The verb resolves its rail next to ITSELF, so the subject is a copy with a stub beside it.
   BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN"
   cp "$BATS_TEST_DIRNAME/../../bin/lcars" "$BIN/lcars"
+  # ⚖ decision 3 : le CLI SOURCE le lecteur des faits, qu'il cherche a cote de lui. Le decor ne
+  # copie que le CLI : on lui NOMME le vrai lecteur, qui resout les vrais faits depuis son chemin.
+  export LCARS_FACTS_SH="$BATS_TEST_DIRNAME/../../services/lib/facts.sh"
   SUT="$BIN/lcars"
   RAILLOG="$BATS_TEST_TMPDIR/raillog"
 

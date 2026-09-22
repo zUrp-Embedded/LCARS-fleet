@@ -3,18 +3,16 @@
 # AUTHOR: DrDree
 # STARDATE: (posee par /push-github)
 # STATUS: PROTO-V2 — les faces locales des projets, convergees depuis la forge
-# APPLY-ON: any
-# CHECK-ON: any
-# NEEDS: human
-# AFTER: 50-catalogues 63-forge-tokens 70-human
+# JOUE PAR : le convergeur d'humains, pour chaque humain de la fleet, dans l'ordre des noms.
+# Ni terrain ni dependance ne se declarent ici : ces en-tetes ne sont lus que dans
+# `deploy/modules.d`, et les recopier ici promettait une mecanique que personne ne joue.
 # JOUE COMME L'HUMAIN. Les faces lui appartiennent (owner `$LCARS_LOGIN`, groupe `fleet`), et un
 # import joue en root les poserait root:root — un `/home` que le proprietaire ne peut plus ecrire.
 # C'est aussi son `~/.lcars/fleet.env` qui porte l'adresse de la forge et le jeton.
 
 set -euo pipefail
-# Le protocole des modules per-humain, cote PRODUIT (Q3, 2026-09-04) : l'hote — le convergeur, ou
-# un temoin — nomme le fichier. Ce module sourcait la lib de l'INSTALLEUR, que son hote reel ne
-# posait pas : il mourait ici, a chaque humain, sur les deux rails.
+# L'hote nomme le protocole per-humain (LCARS_HUMAN_PROTOCOL) : le convergeur, ou un temoin. Le
+# contrat de ce dialecte est dans le fichier source, il ne se recopie pas ici.
 # shellcheck source=../lib/human-protocol.sh
 . "${LCARS_HUMAN_PROTOCOL:?LCARS_HUMAN_PROTOCOL non posé — lance via human-converger, pas le module nu}"
 

@@ -2,28 +2,13 @@
 # bats file_tags=structure
 # SOURCE: deploy/tests/heredocs_prose.bats
 # AUTHOR: alice
-# STARDATE: (posee par /push-github)
+# STARDATE: 2026-08-28
 # STATUS: mur — aucun accent grave dans le corps d'un heredoc NON quote
 #
-# ⚠ LE DEFAUT QUE CE MUR FERME S'EST PRODUIT DOUZE FOIS DANS CE DEPOT. Ce depot ecrit sa prose avec
-# des accents graves — c'est sa convention de citation. Dans un heredoc NON quote (`<<EOF` et non
-# `<<'EOF'`), bash y fait de la SUBSTITUTION DE COMMANDE : la prose est executee.
-#
-# CE QUE CA COUTE, MESURE SUR LE DOUZIEME (`forge-runner.sh`, generation du `config.yaml` du
-# runner) : `getent hosts forge`, `wget http://forge:3000/api/v1/version` et `git ls-remote …`
-# etaient lances a chaque generation. Sur cette machine, ou la forge ne resout pas, ils ecrivent
-# sur stderr et la prose sort AMPUTEE — « n'a que , , . ». Sur l'hote du runner, ou elle resout,
-# `git ls-remote` rend deux lignes a tabulations qui atterrissent HORS du `#` : le fichier produit
-# n'est plus du YAML valide, et le runner refuse sa config. `wget` telecharge un fichier au passage.
-#
-# ⚠ ET SHELLCHECK NE SUFFIT PAS, C'EST LE MOTIF DE CE FICHIER. Il voit ces backticks (SC2006) mais
-# sous le meme code que le backtick de STYLE dans du vrai code — « prefere $(…) ». Le jour ou
-# quelqu'un desactive SC2006 comme du bruit cosmetique, il rouvre celui-la sans le savoir. Onze
-# occurrences ont ete corrigees en debut de lot SANS qu'un mur soit pose : la douzieme est passee.
-#
-# ⚠ LIMITE ASSUMEE : un seul heredoc par ligne est suivi. Deux sur la meme ligne
-# (`cmd <<A <<B`) est une forme que ce depot n'emploie pas ; si elle apparait, c'est ici qu'il faut
-# descendre — sinon le second heredoc devient un angle mort.
+# La prose du dépôt cite avec des accents graves ; dans un heredoc non quoté (`<<EOF`), bash les
+# exécute comme des substitutions de commande. Shellcheck les signale sous SC2006, le même code
+# que le backtick de style : un SC2006 désactivé rouvrirait le défaut sans le dire. Un seul heredoc
+# par ligne est suivi.
 
 load refute
 
@@ -38,19 +23,14 @@ in_hd {
   l = $0
   if (strip) sub(/^\t+/, "", l)
   if (l == delim) { in_hd = 0; delim = ""; next }
-  # ⚠ UN BACKTICK ECHAPPE N'EST PAS EXECUTE. `\\`` traverse le heredoc non quote en litteral :
-  # c'est le geste correct quand la prose doit garder ses accents graves. On les retire AVANT de
-  # regarder. Sans ca le mur accuse la solution en meme temps que le defaut.
+  # un backtick échappé traverse le heredoc en littéral : c'est la forme correcte, retirée avant de regarder
   probe = $0
   gsub(/\\`/, "", probe)
   if (index(probe, "`") > 0) printf "%s:%d: %s\n", FILENAME, FNR, $0
   next
 }
 {
-  # ⚠ UNE LIGNE DE COMMENTAIRE N'OUVRE PAS DE HEREDOC, et l'oublier rend le scanner FOU. Ce
-  # fichier-ci PARLE de `<<EOF` dans son propre en-tete : le premier jet est entre en heredoc a la
-  # ligne 8 et n'en est jamais ressorti, signalant tout le reste du corpus. Un instrument qui
-  # sur-signale se fait desactiver aussi surement qu'un instrument aveugle.
+  # une ligne de commentaire n'ouvre pas de heredoc : l'en-tête de ce fichier cite `<<EOF`
   if ($0 ~ /^[ \t]*#/) next
   line = $0
   gsub(/<<</, "", line)                                 # `<<<` n ouvre rien

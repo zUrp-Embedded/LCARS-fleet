@@ -17,6 +17,8 @@ defmodule Fleet.Project do
       Fleet.GitRef,
       Fleet.Opts,
       Fleet.Labels,
+      # The system repository address names the system org — a name no project may carry.
+      Fleet.Toolchain,
       Fleet.Layout,
       Fleet.Catalogue,
       Fleet.Event,

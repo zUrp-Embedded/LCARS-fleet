@@ -2,18 +2,34 @@
 # bats file_tags=integration
 # SOURCE: deploy/tests/audit_machine.bats
 # AUTHOR: alice
-# STARDATE: (posee par /push-github)
+# STARDATE: 2026-08-28
 # STATUS: bats tests — `provision audit` : la TABLE opposee a la MACHINE
 
 # shellcheck disable=SC2016
 
 load refute
+load support/decor
 
 setup() {
-  RUNNER="$BATS_TEST_DIRNAME/../provision"
-  [ -f "$RUNNER" ]
-  export LCARS_SYSTEM_MANIFEST="$BATS_TEST_TMPDIR/system.manifest"
-  cat > "$LCARS_SYSTEM_MANIFEST" <<EOF
+  local _v
+  while read -r _v; do unset "$_v" 2>/dev/null || true; done \
+    < <(compgen -v | grep -E '^(LCARS_|PROV_)' || true)
+  decor_pose
+  # la table se lit à côté de la lib : un corpus à part porte la sienne
+  local src="$BATS_TEST_DIRNAME/.." sbx="$BATS_TEST_TMPDIR/prov"
+  mkdir -p "$sbx/lib" "$sbx/modules.d"
+  cp "$src/provision" "$src/installer-constants.env" "$sbx/"
+  cp "$src/lib/provision-lib.sh" "$src/lib/provision-audit.sh" "$src/lib/docker-endpoint.sh" "$sbx/lib/"
+  # ⚖ décision 3 : les faits du produit ne sont pas dans ce bac à sable — on les lui NOMME.
+  export PROV_PRODUCT_FACTS_FILE="$src/../runtime/etc/facts.env"
+  # ⚖ phase 6 : la lib SOURCE les primitives du produit, que ce bac à sable ne copie pas
+  export PROV_PRIMITIVES_SH="$src/../runtime/services/lib/primitives.sh"
+  printf '#!/usr/bin/env bash\n# APPLY-ON: any\n# CHECK-ON: any\n# NEEDS: human\nexit 0\n' > "$sbx/modules.d/10-x.sh"
+  RUNNER="$sbx/provision"
+  MANIFEST="$sbx/system.manifest"
+  JOURNAL="$LCARS_DECOR_ROOT/opt/lcars/var/install.journal"
+  mkdir -p "$(dirname "$JOURNAL")"
+  cat > "$MANIFEST" <<EOF
 dir       /opt/decor                 0755  root:root  any
 anchor    /etc/decor/pose.conf       0644  root:root  any
 dir       /opt/vers-<version>        0755  root:root  any
@@ -73,18 +89,17 @@ audit() { run bash "$RUNNER" audit --before "$AVANT" --after "$APRES"; }
 
 
 @test "APT : ce qu'un paquet JOURNALISE possede n'est pas un objet non declare" {
-  printf 'apt_installed decorpkg\n' > "$BATS_TEST_TMPDIR/journal"
-  cat > "$BATS_TEST_TMPDIR/dpkg" <<'STUB'
+  printf 'apt_installed decorpkg\n' > "$JOURNAL"
+  cat > "$DECOR_BIN/dpkg" <<'STUB'
 #!/usr/bin/env bash
 [[ "$1" == "-L" && "$2" == "decorpkg" ]] && { printf '/usr/lib/decor.so
 /usr/share/decor/x
 '; exit 0; }
 exit 1
 STUB
-  chmod +x "$BATS_TEST_TMPDIR/dpkg"
+  chmod +x "$DECOR_BIN/dpkg"
   snap /usr/lib/decor.so /usr/share/decor/x
-  LCARS_JOURNAL_FILE="$BATS_TEST_TMPDIR/journal" LCARS_DPKG="$BATS_TEST_TMPDIR/dpkg" \
-    run bash "$RUNNER" audit --before "$AVANT" --after "$APRES"
+  audit
   [ "$status" -eq 0 ]
   [[ "$output" == *"2 appartenant à un paquet apt"* ]]
 }
@@ -92,24 +107,23 @@ STUB
 @test "APT : un paquet NON journalise ne couvre rien — le journal decide, pas dpkg" {
   # `dpkg` sait ce qu'un paquet possede ; il ne sait pas si c'est LCARS qui l'a pose. Seul le
   # journal porte cette distinction, et c'est sa raison d'etre.
-  : > "$BATS_TEST_TMPDIR/journal"
-  cat > "$BATS_TEST_TMPDIR/dpkg" <<'STUB'
+  : > "$JOURNAL"
+  cat > "$DECOR_BIN/dpkg" <<'STUB'
 #!/usr/bin/env bash
 printf '/usr/lib/decor.so
 '; exit 0
 STUB
-  chmod +x "$BATS_TEST_TMPDIR/dpkg"
+  chmod +x "$DECOR_BIN/dpkg"
   snap /usr/lib/decor.so
-  LCARS_JOURNAL_FILE="$BATS_TEST_TMPDIR/journal" LCARS_DPKG="$BATS_TEST_TMPDIR/dpkg" \
-    run bash "$RUNNER" audit --before "$AVANT" --after "$APRES"
+  audit
   [ "$status" -ne 0 ]
   [[ "$output" == *"/usr/lib/decor.so"* ]]
 }
 
 @test "APT : sans journal lisible, l'audit DIT que son compte ne veut pas dire ce qu'il semble" {
   snap /var/surprise
-  LCARS_JOURNAL_FILE=/nexistepas run bash "$RUNNER" audit --before "$AVANT" --after "$APRES"
-  [[ "$output" == *"journal illisible"* ]]
+  audit
+  [[ "$output" == *"journal illisible ($JOURNAL)"* ]]
 }
 
 @test "GARDE D'INSTRUMENT : deux instantanes sont EXIGES, on ne devine pas" {
@@ -127,7 +141,7 @@ STUB
 }
 
 @test "un joker en TETE (person <human>) ne couvre PAS l'univers — deux chemins bidon sortent" {
-  printf 'person    <human>   -   -   any\n' >> "$LCARS_SYSTEM_MANIFEST"
+  printf 'person    <human>   -   -   any\n' >> "$MANIFEST"
   snap /etc/pwned-by-lcars /srv/nimportequoi
   audit
   [ "$status" -ne 0 ]
@@ -136,7 +150,7 @@ STUB
   [[ "$output" != *"Rien n'est apparu"* ]]
 }
 
-@test "M5 : un chmod sur un chemin preexistant ne fait pas un objet apparu" {
+@test "un chmod sur un chemin préexistant ne fait pas un objet apparu" {
   printf 'f -rw-r--r-- 0:0 /etc/pas-a-nous.conf\n' > "$AVANT"
   printf 'f -rw-rw-r-- 0:0 /etc/pas-a-nous.conf\n' > "$APRES"
   audit
@@ -145,7 +159,7 @@ STUB
   refute grep -q '/etc/pas-a-nous.conf' <<<"$output"
 }
 
-@test "M5 : TEMOIN DU TEMOIN — le meme chemin ABSENT de l'avant est bien apparu (et non couvert)" {
+@test "le même chemin, absent de l'instantané d'avant, est un objet apparu et non couvert" {
   : > "$AVANT"
   printf 'f -rw-rw-r-- 0:0 /etc/pas-a-nous.conf\n' > "$APRES"
   audit

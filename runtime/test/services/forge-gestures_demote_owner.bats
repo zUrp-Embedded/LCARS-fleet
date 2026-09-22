@@ -21,7 +21,7 @@
 #   2. la PRECONDITION EST LUE, jamais supposee — sans le compte systeme dans la liste, on ne retire
 #      rien. Une org sans proprietaire ne se repare pas sans site-admin, et l'ordre des gestes ne
 #      suffit pas a le garantir : une passe ou tofu n'a pas encore pose l'adhesion doit s'arreter
-#      la. C'est la meme discipline que `toolchain-protection` — la RELECTURE fait foi, pas
+#      la. C'est la meme discipline que partout dans ce geste — la RELECTURE fait foi, pas
 #      l'ordre suppose.
 #
 # Le script est SOURCE, pas execute : appeler la fonction seule evite de monter un `cmd_apply`

@@ -67,7 +67,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
   end
 
   # Compare forge-identity logins in both directions, including ReservedSeats.
-  # PROV_ROLES overrides the token minter's default during provisioning.
+  # The installer carries NO role floor: the product declares the roles (`lcars tool roles`).
   @doc false
   @spec check_roles_provisioning_locked(String.t()) :: Support.result()
   def check_roles_provisioning_locked(root) do
@@ -85,7 +85,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     sh_path = Path.join(root, "services/provision-role-tokens.sh")
 
     tf_path = Path.expand("services/forge-recipe/forge.tf", root)
-    lib_path = Path.expand("../deploy/lib/provision-lib.sh", root)
 
     # Absence of deploy skips both Terraform and deploy lists, even though forge.tf is in-tree.
     # A present tree with unreadable anchors fails; the token-minter list is always required.
@@ -107,11 +106,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
          ),
          "add/remove the role in the `roles` variable default (forge account) — the canon is the " <>
            "source: a role only in forge.tf needs its cap-profile or a ReservedSeat, or loses " <>
-           "its account"},
-        {"provision-lib.sh PROV_ROLES", tree_scope(Path.expand("../deploy", root)),
-         read_list(lib_path, ~r/\$\{PROV_ROLES:=([^}]*)\}/, :plain),
-         "add/remove the role in PROV_ROLES (the list that WINS the mint on deploy — a role " <>
-           "absent here gets no token on a fresh fleet)"}
+           "its account"}
+        # ⚠ `installer-constants.env PROV_ROLES` N'EST PLUS UNE LISTE, ET C'EST UN GAIN : depuis la
+        # décision 2 (2026-09-19) l'installeur ne porte aucun plancher de rôles. Le produit les
+        # déclare, `lcars tool roles` les rend, et une écriture de moins ne se remplace pas par une
+        # ligne ici. Trois listes suffisent — le canon, la recette, le minteur.
       ]
 
     {lists, skipped} = split_out_of_scope(lists)
@@ -132,11 +131,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
       broken: if(canon == [], do: "canon catalogue empty/not found — fail-closed"),
       findings: evidence,
       note:
-        "four-list STRICT equality (BL-6-45)" <>
+        "three-list STRICT equality (BL-6-45)" <>
           placement_note <>
           ": canon{forge_identity} PROJECTED into " <>
           "`<catalogue>_<role>` logins (#{length(canon)} roles, seats included) == forge.tf == " <>
-          "ROLES == PROV_ROLES — any delta is a defect, named" <>
+          "ROLES — any delta is a defect, named (the installer carries NO role floor since 2026-09-19)" <>
           skipped_note(skipped)
     })
   end
@@ -245,19 +244,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
   end
 
   # Face zones need privileged creation before runtime onboarding.
-  # Check container init and native provisioning mirrors; no deploy tree skips the whole check.
+  # Check container init and native provisioning mirrors, and the mode and owner the manifest gives
+  # the native mirror (25-directories lists paths only); no deploy tree skips the whole check.
   @doc false
   @spec check_face_roots_provisioned(String.t()) :: Support.result()
   def check_face_roots_provisioned(root) do
-    entrypoint = Path.expand("services/container/init.sh", root)
-    module = Path.expand("../deploy/modules.d/25-directories.sh", root)
-    expected = read_face_roots(Path.expand("lib/fleet/layout.ex", root))
-
-    remediation =
-      "add the face root to the `install -d` line of runtime/services/container/init.sh — a face declared " <>
-        "in Fleet.Layout with no zone on the machine makes the container look healthy and kills the " <>
-        "first onboard that needs it (the runtime runs as the human; /home belongs to root)"
-
     case tree_scope(Path.expand("../deploy", root)) do
       :out_of_scope ->
         %{
@@ -269,55 +260,92 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
         }
 
       :required ->
-        case {expected, read_install_zone_paths(entrypoint), read_provision_zone_paths(module)} do
-          {nil, _, _} ->
-            %{
-              id: "layout.face_roots_provisioned",
-              remediation: remediation,
-              status: :fail,
-              evidence: ["lib/fleet/layout.ex"],
-              note: "face_root/1 unreadable in Fleet.Layout — guard fail-closed, nothing measured"
-            }
+        face_roots_measured(root)
+    end
+  end
 
-          {_, nil, _} ->
-            %{
-              id: "layout.face_roots_provisioned",
-              remediation: remediation,
-              status: :fail,
-              evidence: [Path.relative_to(entrypoint, root)],
-              note: "the `install -d -m 2775 -g fleet` anchor is unreadable — guard fail-closed"
-            }
+  @face_root_mode "2775"
+  @face_root_owner "root:fleet"
 
-          {_, _, nil} ->
-            %{
-              id: "layout.face_roots_provisioned",
-              remediation: remediation,
-              status: :fail,
-              evidence: [Path.relative_to(module, root)],
-              note:
-                "the provision module's `2775` zone table is unreadable — guard fail-closed " <>
-                  "(this is the creator on every substrate; the entrypoint only covers docker)"
-            }
+  defp face_roots_measured(root) do
+    entrypoint = Path.expand("services/container/init.sh", root)
+    module = Path.expand("../deploy/modules.d/25-directories.sh", root)
+    manifest = Path.expand("../deploy/system.manifest", root)
 
-          {expected, at_boot, on_every_substrate} ->
-            missing =
-              Enum.map(expected -- at_boot, &"#{&1}: absent de container/init.sh (conteneur)") ++
-                Enum.map(
-                  expected -- on_every_substrate,
-                  &"#{&1}: absent du module provision (donc absent sur wsl et linux)"
-                )
+    remediation =
+      "add the face root to the `install -d` line of runtime/services/container/init.sh, to the " <>
+        "directory list of deploy/modules.d/25-directories.sh, and declare it `dir <root> " <>
+        "#{@face_root_mode} #{@face_root_owner}` in deploy/system.manifest — a face declared in " <>
+        "Fleet.Layout with no zone on the machine makes the container look healthy and kills the " <>
+        "first onboard that needs it (the runtime runs as the human; /home belongs to root)"
 
-            %{
-              id: "layout.face_roots_provisioned",
-              remediation: remediation,
-              status: if(missing == [], do: :pass, else: :fail),
-              evidence: missing,
-              note:
-                "les #{length(expected)} racines de face de Fleet.Layout sont créées par les DEUX " <>
-                  "miroirs — le module provision (tout substrat) et l'entrypoint docker (l'ordre " <>
-                  "de boot l'exige avant `provision apply`) : #{Enum.join(expected, ", ")}"
-            }
-        end
+    readings = [
+      {read_face_roots(Path.expand("lib/fleet/layout.ex", root)), "lib/fleet/layout.ex",
+       "face_root/1 unreadable in Fleet.Layout — guard fail-closed, nothing measured"},
+      {read_install_zone_paths(entrypoint), Path.relative_to(entrypoint, root),
+       "the `install -d -m 2775 -g fleet` anchor is unreadable — guard fail-closed"},
+      {read_provision_zone_paths(module), Path.relative_to(module, root),
+       "the provision module's directory list is unreadable — guard fail-closed " <>
+         "(25-directories is the creator on every substrate; container/init.sh only " <>
+         "covers the container volumes)"},
+      {read_manifest_dirs(manifest), Path.relative_to(manifest, root),
+       "deploy/system.manifest has no readable `dir` row — guard fail-closed (the mode and " <>
+         "owner of the native mirror live there)"}
+    ]
+
+    case Enum.find(readings, fn {value, _, _} -> is_nil(value) end) do
+      {nil, unreadable, note} ->
+        %{
+          id: "layout.face_roots_provisioned",
+          remediation: remediation,
+          status: :fail,
+          evidence: [unreadable],
+          note: note
+        }
+
+      nil ->
+        [expected, at_boot, on_every_substrate, declared] =
+          Enum.map(readings, fn {value, _, _} -> value end)
+
+        missing =
+          Enum.map(expected -- at_boot, &"#{&1}: absent de container/init.sh (conteneur)") ++
+            Enum.map(
+              expected -- on_every_substrate,
+              &"#{&1}: absent du module provision (donc absent sur wsl et linux)"
+            ) ++ Enum.flat_map(expected, &manifest_mismatch(&1, Map.get(declared, &1)))
+
+        %{
+          id: "layout.face_roots_provisioned",
+          remediation: remediation,
+          status: if(missing == [], do: :pass, else: :fail),
+          evidence: missing,
+          note:
+            "les #{length(expected)} racines de face de Fleet.Layout sont créées par les DEUX " <>
+              "miroirs — le module 25-directories (tout substrat) et container/init.sh (les " <>
+              "volumes du conteneur, au boot) — et déclarées #{@face_root_mode} " <>
+              "#{@face_root_owner} dans deploy/system.manifest : #{Enum.join(expected, ", ")}"
+        }
+    end
+  end
+
+  defp manifest_mismatch(_face_root, {@face_root_mode, @face_root_owner}), do: []
+
+  defp manifest_mismatch(face_root, nil),
+    do: ["#{face_root}: aucune ligne dir dans deploy/system.manifest"]
+
+  defp manifest_mismatch(face_root, {mode, owner}),
+    do: [
+      "#{face_root}: #{mode} #{owner} dans deploy/system.manifest, attendu " <>
+        "#{@face_root_mode} #{@face_root_owner}"
+    ]
+
+  # A `dir` row (trait included) names a path, its mode and its owner; nil when no row reads.
+  defp read_manifest_dirs(path) do
+    with {:ok, content} <- File.read(path),
+         [_ | _] = rows <- Regex.scan(~r/^dir(?::\S+)?\s+(\/\S+)\s+(\S+)\s+(\S+)/m, content) do
+      Map.new(rows, fn [_, dir, mode, owner] -> {dir, {mode, owner}} end)
+    else
+      _ -> nil
     end
   end
 
@@ -359,15 +387,49 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     end
   end
 
-  # Container init needs zones before provisioning runs; native provisioning carries its own table.
-  # Read only mode-2775 rows, excluding other provisioned directories.
+  # Container init needs zones before provisioning runs; native provisioning carries its own list.
+  # The module lists the directories it poses in the body of `prov_dirs()`, modes live in
+  # deploy/system.manifest. A row names its system path through `$(prov_decor <path>)`; the
+  # canonical path is its argument.
+  # `prov_dirs` is the list posed on EVERY substrate. Its body may splice helpers, and those count
+  # too — pinning the single name made this guard blind the day a root moved into one, reporting it
+  # missing while the module still posed it (2026-09-17).
+  #
+  # `prov_runtime_dirs` is the exception, and not by name alone: it returns early off `docker`, so
+  # what it lists is NOT posed everywhere. A face root cited there would be absent from a container,
+  # which is precisely the hole this guard exists to catch.
+  @conditional_zone_list "prov_runtime_dirs"
+
   defp read_provision_zone_paths(path) do
     with {:ok, content} <- File.read(path),
-         [_ | _] = rows <- Regex.scan(~r/^\s*"(\/[^"\s]+)\s+2775\s/m, content) do
-      rows |> Enum.map(fn [_, p] -> p end) |> Enum.sort()
+         [_, body] <- Regex.run(~r/^prov_dirs\(\) \{\n(.*?)^\}/ms, content),
+         [_ | _] = rows <- zone_rows(body, content) do
+      rows |> Enum.uniq() |> Enum.sort()
     else
       _ -> nil
     end
+  end
+
+  # The paths a body names directly, plus those of every unconditional helper it splices.
+  defp zone_rows(body, content) do
+    direct =
+      ~r/^\s*"\$\(prov_decor\s+'?"?(\/[^"'\s)]+)'?"?\)/m
+      |> Regex.scan(body)
+      |> Enum.map(fn [_, p] -> p end)
+
+    spliced =
+      ~r/^\s*(prov_[a-z_]+)\s*$/m
+      |> Regex.scan(body)
+      |> Enum.map(fn [_, name] -> name end)
+      |> Enum.reject(&(&1 == @conditional_zone_list))
+      |> Enum.flat_map(fn name ->
+        case Regex.run(~r/^#{name}\(\) \{\n(.*?)^\}/ms, content) do
+          [_, helper] -> zone_rows(helper, content)
+          _ -> []
+        end
+      end)
+
+    direct ++ spliced
   end
 
   # nil means unreadable file/anchor, distinct from a readable empty list.
@@ -470,17 +532,19 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     end
   end
 
-  # Compare Layout literals with CLI and provisioning shell defaults, excluding env overrides.
-  # No deploy tree skips its mirror; a present tree with a missing anchor fails.
+  # Compare Layout literals with the machine facts and the installer constant, excluding env
+  # overrides. No deploy tree skips its mirror; a present tree with a missing anchor fails.
+  # ⚖ Decision 3: the shell half used to be `bin/lcars`'s own defaults. The CLI reads the facts
+  # file now, so what has to agree with Layout is the FACT, not a copy of it in a script.
   @doc false
   @spec check_catalogue_paths_locked(String.t()) :: Support.result()
   def check_catalogue_paths_locked(root) do
     layout = "lib/fleet/layout.ex"
-    cli = "bin/lcars"
-    lib = "../deploy/lib/provision-lib.sh"
+    facts = "etc/facts.env"
+    constants = "../deploy/installer-constants.env"
     layout_src = read_or_empty(root, layout)
-    cli_src = read_or_empty(root, cli)
-    lib_src = read_or_empty(root, lib)
+    facts_src = read_or_empty(root, facts)
+    constants_src = read_or_empty(root, constants)
 
     # Read declared path literals so this comparison does not depend on loaded runtime values.
     attrs =
@@ -499,31 +563,33 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
         }
       end
 
-    # Shell assignment (:=) and fallback (:-) carry the same default value.
     deploy? = File.dir?(Path.expand("../deploy", root))
 
     sources =
-      [{cli, cli_src, expected || %{}}] ++
-        if deploy?, do: [{lib, lib_src, lib_expected(expected)}], else: []
+      [{facts, &installer_constant(facts_src, &1), expected || %{}}] ++
+        if deploy?,
+          do: [{constants, &installer_constant(constants_src, &1), constants_expected(expected)}],
+          else: []
 
     mismatches =
-      for {file, src, wanted} <- sources,
+      for {file, read, wanted} <- sources,
           {var, want} <- wanted,
-          got = resolved_default(src, var),
+          got = read.(var),
           got != want,
-          do: "#{var}: #{file} defaults to #{inspect(got)}, #{layout} says #{inspect(want)}"
+          do: "#{var}: #{file} says #{inspect(got)}, #{layout} says #{inspect(want)}"
 
     missing =
-      for {file, src, wanted} <- sources,
+      for {file, read, wanted} <- sources,
           {var, _} <- wanted,
-          is_nil(shell_default(src, var)),
+          is_nil(read.(var)),
           do: "#{var} (#{file})"
 
     measured_verdict("catalogue.install_paths_locked", %{
       remediation:
-        "make bin/lcars and deploy/lib/provision-lib.sh agree with Fleet.Layout (@platform_root, " <>
-          "@catalogues_dirname, @installed_catalogues_root) — provisioning that converges a " <>
-          "directory the runtime does not read reports every catalogue installed and serves none",
+        "make etc/facts.env and deploy/installer-constants.env agree with Fleet.Layout " <>
+          "(@platform_root, @catalogues_dirname, @installed_catalogues_root) — provisioning that " <>
+          "converges a directory the runtime does not read reports every catalogue installed and " <>
+          "serves none",
       broken:
         if(is_nil(expected),
           do: "#{layout}: a catalogue path attribute is gone or renamed"
@@ -532,23 +598,23 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
         if(missing == [],
           do: Enum.sort(mismatches),
           else: [
-            "no shell default for #{inspect(Enum.sort(missing))} — that half stopped carrying " <>
+            "no declaration for #{inspect(Enum.sort(missing))} — that half stopped carrying " <>
               "the path"
           ]
         ),
       note:
-        "3 catalogue paths, one fact each, agreed between #{layout} and #{cli}" <>
+        "3 catalogue paths, one fact each, agreed between #{layout} and #{facts}" <>
           if(deploy?,
-            do: " and #{lib}",
+            do: " and #{constants}",
             else:
-              " · #{lib} NOT CHECKED here (tree absent from this artifact — runtime-only context)"
+              " · #{constants} NOT CHECKED here (tree absent from this artifact — runtime-only context)"
           )
     })
   end
 
   # Provisioning writes the installed cache, not the image's seed catalogue.
-  defp lib_expected(nil), do: %{}
-  defp lib_expected(exp), do: %{"PROV_CATALOGUES_DIR" => exp["LCARS_CATALOGUES_DIR"]}
+  defp constants_expected(nil), do: %{}
+  defp constants_expected(exp), do: %{"PROV_CATALOGUES_DIR" => exp["LCARS_CATALOGUES_DIR"]}
 
   defp read_or_empty(root, rel) do
     path = Path.join(root, rel)
@@ -562,20 +628,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     end
   end
 
-  defp shell_default(source, var) do
-    case Regex.run(~r/\$\{#{var}:[-=]([^}]*)\}/, source) do
-      [_, default] -> default
+  # Une donnée `CLE=valeur` : `installer-constants.env` et `etc/facts.env` ont la MÊME forme, et se
+  # comparent telles qu'écrites, sans expansion — c'est ce qui fait qu'un lecteur n'a pas à parler shell.
+  defp installer_constant(source, var) do
+    case Regex.run(~r/^#{var}=(.*)$/m, source) do
+      [_, value] -> value
       nil -> nil
-    end
-  end
-
-  # Le defaut, RESOLU quand il est derive : `$PROV_ROOT/var/catalogues` vaut ce que la racine vaut,
-  # et la racine est ecrite UNE fois (`PROV_ROOT_CANON`, lot 0). Une declaration derivee est une
-  # declaration, pas un desaccord — `Support.shell_defaults/1`. Un litteral se resout a lui-meme.
-  defp resolved_default(source, var) do
-    case shell_default(source, var) do
-      nil -> nil
-      raw -> Support.resolve_shell(Support.shell_defaults(source), raw)
     end
   end
 end

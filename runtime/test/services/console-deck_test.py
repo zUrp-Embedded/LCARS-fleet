@@ -99,24 +99,11 @@ def silent_port():
     return port, s
 
 
-# LE SUJET DE CE TEST N'EST PAS DANS TOUS LES ARBRES OU CE TEST TOURNE. `console-deck.py` vit sous
-# `deploy/`, et l'etage `build` de l'image exclut cet arbre par construction (le layer resterait
-# invalide a chaque edition de compose, pour un gate de ~10 min). Le fichier partait donc en
-# `FileNotFoundError` a l'import : exit 1 SANS une seule ligne `FAIL:`, donc un gate rouge dont le
-# decompte disait `PASS=14 FAIL=0` — un rouge qui n'explique pas de quoi il est fait.
-#
-# Meme forme que GO-7 dans `shell_gate.sh`, et le discriminant est un FAIT, pas une devinette : un
-# depot porte une entree `.git`, l'artefact n'en a aucune. Sujet absent HORS depot = perimetre
-# declare ; sujet absent DANS un depot = ECHEC DUR — la, le fichier devrait etre la, et un saut
-# silencieux ferait disparaitre ce garde le jour ou quelqu'un supprime son sujet.
+# Un sujet absent est un ECHEC NOMME, pas un `FileNotFoundError` a l'import : celui-la sortirait 1
+# sans une seule ligne `FAIL:`, un rouge qui n'explique pas de quoi il est fait.
 if not os.path.isfile(DECK):
-    if os.path.exists(os.path.join(HERE, "..", "..", "..", ".git")):
-        print("FAIL: console-deck.py introuvable DANS un depot (%s) — sujet manquant, pas perimetre"
-              % DECK)
-        sys.exit(1)
-    print("--- perimetre : console-deck.py absent de cet artefact (`deploy/` hors du stage de"
-          " build) — contexte hors-depot, ce test NE MESURE RIEN ici. ---")
-    sys.exit(0)
+    print("FAIL: console-deck.py introuvable (%s) — sujet manquant" % DECK)
+    sys.exit(1)
 
 deck = load_deck()
 check(hasattr(deck, "fleet_pods"), "console-deck.py se charge et expose fleet_pods")
@@ -381,7 +368,7 @@ psrv.server_close()
 import urllib.error
 import urllib.request
 
-FAKE = {"login": "zoe", "groups": ["fleet", "fleet:humans"]}
+FAKE = {"login": "zoe", "groups": ["fleet", "lcars:humans"]}
 
 
 def fake_forge():
@@ -538,20 +525,20 @@ check("COMPTE RECONNU" in body,
 check("Set-Cookie" not in hdrs, "aucune session n'est ouverte pour un non-membre")
 
 # (4-bis) ADMIRAL : hors de l'equipe humans MAIS site-admin (is_admin) -> il ENTRE par la porte ADMIN.
-# admiral est le master/sysadmin : il n'est pas un worker (pas dans fleet:humans), mais il a sa
+# admiral est le master/sysadmin : il n'est pas un worker (pas dans lcars:humans), mais il a sa
 # console web (root via sudo une fois dedans, Guard B lui interdisant de lancer une fleet).
-FAKE["groups"] = ["fleet"]        # PAS fleet:humans
+FAKE["groups"] = ["fleet"]        # PAS lcars:humans
 FAKE["is_admin"] = True
 code, _, hdrs = fetch(dport, "/auth/login")
 issued = (urllib.parse.parse_qs(urllib.parse.urlparse(hdrs["Location"]).query)["state"])[0]
 code, body, hdrs = fetch(dport, "/auth/callback?state=%s&code=abc" % issued)
-check(code == 302, "admiral (site-admin hors fleet:humans) ENTRE par is_admin (vu: %d)" % code)
+check(code == 302, "admiral (site-admin hors lcars:humans) ENTRE par is_admin (vu: %d)" % code)
 check(hdrs.get("Set-Cookie", "").startswith(deck.SESSION_COOKIE + "="),
       "et recoit sa session (la porte admin s'ouvre)")
 FAKE["is_admin"] = False   # reset : les cas suivants sont des workers ordinaires
 
 # (5) MEMBRE, MAIS AUCUN UTILISATEUR SYSTEME : le convergeur n'est pas passe.
-FAKE["groups"] = ["fleet", "fleet:humans"]
+FAKE["groups"] = ["fleet", "lcars:humans"]
 deck.humans = lambda: []
 code, _, hdrs = fetch(dport, "/auth/login")
 issued = (urllib.parse.parse_qs(urllib.parse.urlparse(hdrs["Location"]).query)["state"])[0]
@@ -570,7 +557,7 @@ check(fetch(dport, "/api/state", cookie)[0] == 409,
 # aucun convergeur — GUARD A ne posera jamais son compte. Servir « ca converge tout seul » ici
 # accuse le convergeur d'un retard qui n'existe pas, aupres de quelqu'un qui n'a rien a corriger.
 FAKE["is_admin"] = True
-FAKE["groups"] = ["fleet", "fleet:humans"]
+FAKE["groups"] = ["fleet", "lcars:humans"]
 deck.humans = lambda: []
 code, _, hdrs = fetch(dport, "/auth/login")
 issued = (urllib.parse.parse_qs(urllib.parse.urlparse(hdrs["Location"]).query)["state"])[0]
@@ -767,15 +754,15 @@ t_zoe = fake_ttyd("zoe")
 t_zoe_pod = fake_ttyd("zoe", "pod.sock")
 t_max = fake_ttyd("max")
 
-deck._sessions["s-zoe"] = {"login": "zoe", "groups": ["fleet", "fleet:humans"],
+deck._sessions["s-zoe"] = {"login": "zoe", "groups": ["fleet", "lcars:humans"],
                            "exp": time.time() + 600}
-deck._sessions["s-max"] = {"login": "max", "groups": ["fleet", "fleet:humans"],
+deck._sessions["s-max"] = {"login": "max", "groups": ["fleet", "lcars:humans"],
                            "exp": time.time() + 600}
 # L'ADMINITE EST UN CHAMP DE SESSION, pose au callback depuis `is_admin` de la forge — plus une
 # equipe lue dans `groups`. Les groupes de cette session sont donc ceux de n'importe quel humain :
 # si un jour ce test repassait au vert en remettant `fleet:admins` ici, c'est que la seconde source
 # de verite serait revenue.
-deck._sessions["s-adm"] = {"login": "adm", "groups": ["fleet", "fleet:humans"], "admin": True,
+deck._sessions["s-adm"] = {"login": "adm", "groups": ["fleet", "lcars:humans"], "admin": True,
                            "exp": time.time() + 600}
 c_zoe = deck.SESSION_COOKIE + "=s-zoe"
 c_max = deck.SESSION_COOKIE + "=s-max"
@@ -892,7 +879,7 @@ try:
     # ⚠ ET IL LUI FAUT SON BLOC LOCAL, comme au relais plus haut : la porte du convergeur est AVANT
     # l'autorisation. Sans cette ligne le refus arrive quand meme, mais c'est celui du bloc absent
     # (200, page « pas de bloc ») — un vert qui aurait repondu a une autre question que la sienne.
-    deck._sessions["s-grp"] = {"login": "grp", "groups": ["fleet:humans", "fleet:admins"],
+    deck._sessions["s-grp"] = {"login": "grp", "groups": ["lcars:humans", "fleet:admins"],
                                "exp": time.time() + 600}
     deck.humans = lambda: [{"human": "zoe"}, {"human": "max"}, {"human": "adm"}, {"human": "grp"}]
     status, s = ws_get(dport, "/admin/ws", deck.SESSION_COOKIE + "=s-grp")
@@ -955,7 +942,7 @@ finally:
 
 # (9h) UN LOGIN QUI N'EST PAS UN NOM SIMPLE NE FABRIQUE PAS DE CHEMIN. La session est deja la source
 # du chemin apres `authorize` — donc la forme du login est la derniere chose entre nous et un `..`.
-deck._sessions["s-bad"] = {"login": "../../etc", "groups": ["fleet:humans"],
+deck._sessions["s-bad"] = {"login": "../../etc", "groups": ["lcars:humans"],
                            "exp": time.time() + 600}
 check(deck.socket_for(("console", "../../etc", "/ws")) is None,
       "un login non canonique ne produit AUCUN chemin de socket")
@@ -1235,16 +1222,16 @@ forge_srv.shutdown()
 # Ce que ce temoin tient : le deck et `human-converger.sh` nomment la MEME equipe a partir des
 # MEMES variables. Il y en avait deux jeux (`LCARS_DECK_TEAM` ici, une paire `LCARS_*` la-bas), personne n'en posait aucun, et les defauts portaient seuls l'accord.
 # Le renommage de l'org le rompait dans un seul sens : la forge emet `<org>:humans`, le deck
-# comparait a `fleet:humans` et refusait tout humain non-admin pendant que le convergeur creait
+# comparait a `lcars:humans` et refusait tout humain non-admin pendant que le convergeur creait
 # leurs comptes.
 #
 # La forme negative est la moitie qui compte : sans elle, un `HUMANS_TEAM` reste fige a
-# `fleet:humans` passerait le premier check par pure coincidence de defaut.
+# `lcars:humans` passerait le premier check par pure coincidence de defaut.
 _env_saved = {k: os.environ.get(k) for k in ("LCARS_FORGE_ORG", "LCARS_HUMANS_TEAM")}
 try:
     for _k in _env_saved:
         os.environ.pop(_k, None)
-    check(load_deck().HUMANS_TEAM == "fleet:humans",
+    check(load_deck().HUMANS_TEAM == "lcars:humans",
           "equipe: sans variable, le defaut vaut celui du convergeur (fleet + humans)")
 
     os.environ["LCARS_FORGE_ORG"] = "starfleet"

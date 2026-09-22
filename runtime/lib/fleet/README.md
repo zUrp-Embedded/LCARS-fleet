@@ -40,11 +40,13 @@ compile-invisible) are NOT in this table — see the "Seams runtime" section of 
 | pod primitives | `Fleet.Credentials` | 2 |
 | pod primitives | `Fleet.SPBuilder` | 2 |
 | pod primitives | `Fleet.TaskQueue` | 2 |
+| foundation | `Fleet.BootGuard` | 0 |
 | foundation | `Fleet.Catalogue` | 0 |
 | foundation | `Fleet.Conflict` | 0 |
 | foundation | `Fleet.DurableLog` | 0 |
 | foundation | `Fleet.EnvParse` | 0 |
 | foundation | `Fleet.Event` | 0 |
+| foundation | `Fleet.Facts` | 0 |
 | foundation | `Fleet.FindingsWire` | 0 |
 | foundation | `Fleet.GitRef` | 0 |
 | foundation | `Fleet.Grace` | 0 |

@@ -6,17 +6,10 @@
 # APPLY-ON: any
 # CHECK-ON: any
 # NEEDS: root
-# AFTER: 25-directories 48-forge-host
+# AFTER: 10-packages 25-directories 48-forge-host
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
 . "${PROVISION_LIB:?PROVISION_LIB non posé — ce module se joue par ./provision, pas nu}"
 
-exec env \
-  LCARS_MODULE_PROTOCOL="$(product_tree)/services/lib/module-protocol.sh" \
-  LCARS_MODULE_TAG="${PROV_MODULE_TAG:-}" \
-  FORGE_BASE_URL="${PROV_FORGE_URL:-}" \
-  LCARS_PRIVATE_DIR="${PROV_TOKENS_DIR:-}" \
-  LCARS_CATALOGUES_DIR="${PROV_CATALOGUES_DIR:-}" \
-  LCARS_LEGACY_CATALOGUES_DIR="${PROV_LEGACY_CATALOGUES_DIR:-}" \
-  bash "$(product_tree)/services/forge.d/catalogues.sh" "${1:?usage: 50-catalogues.sh <check|apply>}"
+prov_geste catalogues "${1:?usage: 50-catalogues.sh <check|apply>}"

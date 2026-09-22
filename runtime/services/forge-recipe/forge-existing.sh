@@ -18,7 +18,7 @@
 # on either stream, is reported by tofu as a failure of the whole plan.
 #
 #   in : {"gitea_url":…, "org":…, "users":"a,b,c", "teams":"x,y"}
-#   out: {"user:a":"13", "org:fleet":"10", "team:x":"4"}    -- only what EXISTS
+#   out: {"user:a":"13", "org:lcars":"10", "team:x":"4"}    -- only what EXISTS
 #
 # THE IDS ARE NUMERIC BECAUSE THE PROVIDER MAKES THEM SO: it converts an import id to an integer,
 # so importing by login fails with `user not found with id 0` (measured 2026-08-16). A login is a
@@ -36,6 +36,11 @@ FORGE="$(q gitea_url)"; FORGE="${FORGE%/}"
 ORG="$(q org)"
 USERS="$(q users)"
 TEAMS="$(q teams)"
+REPO="$(q repo)"
+STORE="$(q store)"
+BRANCHES="$(q branches)"
+FILES="$(q files)"
+PROTECTION="$(q protection)"
 
 [[ -n "$FORGE" ]] || { echo "forge-existing: gitea_url manquant dans la requete" >&2; exit 1; }
 
@@ -102,6 +107,65 @@ ORG_ID=""
 if [[ -n "$ORG" ]]; then
   ORG_ID="$(probe_id "orgs/$ORG" "org $ORG")"
   [[ -n "$ORG_ID" ]] && add "org:$ORG" "$ORG_ID"
+fi
+
+# A branch has no numeric id: only its existence is asked. 0 present, 1 absent, exit on anything else.
+probe_exists() { # $1=api path  $2=label for the error message
+  local code
+  code="$(forge_curl -o /dev/null -w '%{http_code}' "$FORGE/api/v1/$1")" || {
+    echo "forge-existing: la forge ne repond pas ($2)" >&2; exit 1; }
+  case "$code" in
+    200) return 0 ;;
+    404) return 1 ;;
+    *)   echo "forge-existing: HTTP $code sur $2 -- ni present ni absent, on refuse de conclure" >&2
+         exit 1 ;;
+  esac
+}
+
+# ─── the system repository and its branches ────────────────────────────────────────────────────
+# Public reads. The branch import id is `<repo id>/<name>`, the shape the provider gives a branch it
+# created (measured). Only asked for on the system org play: the query is empty otherwise.
+if [[ -n "$REPO" && -n "$ORG_ID" ]]; then
+  REPO_ID="$(probe_id "repos/$ORG/$REPO" "repo $ORG/$REPO")"
+  if [[ -n "$REPO_ID" ]]; then
+    add "repo:$REPO" "$REPO_ID"
+    IFS=',' read -r -a _branches <<< "$BRANCHES"
+    for b in "${_branches[@]}"; do
+      [[ -n "$b" ]] || continue
+      probe_exists "repos/$ORG/$REPO/branches/$b" "branch $b" && add "branch:$b" "$REPO_ID/$b"
+    done
+    # files: `<branch>:<path>`, imported as `<org>/<repo>/<branch>/<path with / encoded>` — the
+    # protected branch refuses a commit from the master once the protection exists, so a file the
+    # forge already holds MUST be imported, never re-created.
+    IFS=',' read -r -a _files <<< "$FILES"
+    for f in "${_files[@]}"; do
+      [[ -n "$f" ]] || continue
+      fb="${f%%:*}"; fp="${f#*:}"
+      probe_exists "repos/$ORG/$REPO/contents/$fp?ref=$fb" "file $fb:$fp" \
+        && add "file:$f" "$ORG/$REPO/$fb/${fp//\//%2F}"
+    done
+    # the protections need authority to be read: the master token is the caller's (TF_VAR_gitea_token).
+    # A LIST, like branches and files: `main` and `incidents` are protected too, so that the `write`
+    # an approver needs to sign on `tool_request` does not become a free push everywhere else.
+    IFS=',' read -r -a _prots <<< "$PROTECTION"
+    for pr in ${_prots[@]+"${_prots[@]}"}; do
+      [[ -n "$pr" ]] || continue
+      probe_exists "repos/$ORG/$REPO/branch_protections/$pr" "protection $pr" \
+        && add "protection:$pr" "$ORG/$REPO/$pr"
+    done
+  fi
+fi
+
+# ─── the catalogue store ────────────────────────────────────────────────────────────────────────
+# One repository, one branch per installed catalogue. Only its existence and its README are imported:
+# the branches are pushed by `catalogue install`, never declared by this recipe.
+if [[ -n "$STORE" && -n "$ORG_ID" ]]; then
+  STORE_ID="$(probe_id "repos/$ORG/$STORE" "repo $ORG/$STORE")"
+  if [[ -n "$STORE_ID" ]]; then
+    add "store:$STORE" "$STORE_ID"
+    probe_exists "repos/$ORG/$STORE/contents/README.md?ref=main" "file store-main:README.md" \
+      && add "file:store-main:README.md" "$ORG/$STORE/main/README.md"
+  fi
 fi
 
 # ─── teams ───────────────────────────────────────────────────────────────────────────────────────

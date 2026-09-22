@@ -6,6 +6,12 @@ defmodule Fleet.Toolchain do
   Callers open a PR containing the rendered manifest; human approval precedes reconciliation
   and privileged convergence. This module neither calls the forge nor installs tools.
 
+  ⚠ THIS RAIL SERVES PODS, NOT CI. A pod is sandboxed and reaches the network through an egress
+  proxy: an agent cannot download its own toolchain, which is why a privileged, human-approved
+  gesture exists at all. A CI job has network — it declares its toolchain with a setup action
+  (`erlef/setup-beam`, `actions/setup-*`), the way every forge does it. That the rail does not
+  reach the runner is the separation working, not a gap to close.
+
   `ecosystem` identifies the manifest; `evidence` explains the request to the human approver.
   MCP supplies the input schema, while `validate_form/1` separately requires one of apt
   (container packages), installer (SDK store), or sysroot (target tree). Combining forms
@@ -67,13 +73,26 @@ defmodule Fleet.Toolchain do
     end
   end
 
+  # Request branches are a named family on the system repo, and the ONLY branches the runtime ever
+  # creates there; the reconciler deletes them once their PR is merged or refused. A `/` after the
+  # protected name is impossible in git (a ref cannot be both a file and a directory), hence `-`.
+  @request_prefix "tool_request-"
+
   @doc """
   The request branch name for a work item — stable, so a retry lands on the SAME branch instead of
   opening a second pull request for one need.
   """
   @spec branch_for(String.t()) :: String.t()
   def branch_for(work_item_id) when is_binary(work_item_id),
-    do: "lcars/toolchain-" <> slug(work_item_id)
+    do: @request_prefix <> slug(work_item_id)
+
+  @doc """
+  True for a branch of the request family — what the reconciler may delete once drained. Never
+  the protected branch itself, never a branch of another family.
+  """
+  @spec request_branch?(String.t()) :: boolean()
+  def request_branch?(name) when is_binary(name),
+    do: String.starts_with?(name, @request_prefix) and name != @request_prefix
 
   @doc """
   Stable branch for a request without a work item, using a pod-specific prefix.
@@ -82,7 +101,7 @@ defmodule Fleet.Toolchain do
   """
   @spec branch_for_pod(String.t()) :: String.t()
   def branch_for_pod(pod_id) when is_binary(pod_id),
-    do: "lcars/toolchain-pod-" <> slug(pod_id)
+    do: @request_prefix <> "pod-" <> slug(pod_id)
 
   # Collapse byte-wise replacements of non-ASCII characters into readable separators.
   # Slugging is lossy: distinct input keys can produce the same branch suffix.
@@ -94,12 +113,12 @@ defmodule Fleet.Toolchain do
   end
 
   @doc """
-  Sysadmin repository: `:lcars_fleet, :pilot_ops_repo`, default `fleet/lcars`.
+  Sysadmin repository: `:lcars_fleet, :pilot_ops_repo`, default `lcars/_ops`.
   Keep this key/default aligned with IncidentRegistry.Escalation so requests and incidents
   reach the same repo. The reader is repeated because MCP cannot depend on Pilot.
   """
   @spec ops_repo() :: String.t()
-  def ops_repo, do: Application.get_env(:lcars_fleet, :pilot_ops_repo, "fleet/lcars")
+  def ops_repo, do: Application.get_env(:lcars_fleet, :pilot_ops_repo, "lcars/_ops")
 
   @doc """
   Protected manifest branch, fixed by design as `tool_request`.

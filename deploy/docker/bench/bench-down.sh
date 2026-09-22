@@ -5,69 +5,90 @@
 # STATUS: détruit un banc complet, volumes compris — le runner, le conteneur, la forge, le magasin
 #
 # USAGE : bench-down.sh --project <base> --yes
-# EXIT  : 0 détruit · 1 arguments · 2 rien à détruire sous ce nom
+# EXIT  : 0 détruit, relu après les retraits · 1 arguments, docker muet, ou ce qui porte ce nom n'est pas un banc ·
+#         2 rien à détruire sous ce nom · 3 un objet du banc reste après les retraits, ou docker ne le dit plus (nommés)
 #
 # Un banc = trois projets compose dérivés de la base : <base>-fleet (le conteneur), <base>-forge,
-# <base>-runner. Aucun défaut de projet : ce geste efface des volumes, le nom s'écrit.
+# <base>-runner, plus le magasin <base>-fleet-*. Aucun défaut de projet : ce geste efface des
+# volumes, le nom s'écrit.
 
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOCKER_DIR="$(cd "$HERE/.." && pwd)"
+BENCH_NOM=bench-down
+# shellcheck source=../../lib/bench.sh
+. "$DOCKER_DIR/../lib/bench.sh"
 
 PROJECT=""
 CONFIRM=0
-DOCKER_BIN="${DOCKER_BIN:-docker}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --project) PROJECT="${2:?}"; shift 2 ;;
+    --project) PROJECT="${2:?--project attend une base}"; shift 2 ;;
     --yes)     CONFIRM=1; shift ;;
     -h|--help) sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) echo "bench-down : option inconnue : $1" >&2; exit 1 ;;
+    *) die "option inconnue : $1" 1 ;;
   esac
 done
 
-[[ -n "$PROJECT" ]] || { echo "bench-down : --project est obligatoire (aucun défaut, par choix)" >&2; exit 1; }
-[[ "$CONFIRM" -eq 1 ]] || { echo "bench-down : --yes requis — ceci efface les volumes de « $PROJECT »" >&2; exit 1; }
+[[ -n "$PROJECT" ]] || die "--project est obligatoire (aucun défaut, par choix)" 1
+[[ "$CONFIRM" -eq 1 ]] || die "--yes requis — ceci efface les volumes de « $PROJECT »" 1
+bench_projets
 
-# le compose du conteneur exige LCARS_STORE_PREFIX pour se lire, même pour un down
-CONTAINER_PROJECT="${PROJECT}-fleet"
-export LCARS_STORE_PREFIX="$CONTAINER_PROJECT"
-# shellcheck source=../../lib/store.sh
-source "$DOCKER_DIR/../lib/store.sh"
+magasin_present() { # magasin_present → les volumes du magasin de ce banc que docker porte ; 1 si docker ne répond pas
+  local volumes
+  volumes="$("$DOCKER_BIN" volume ls --format '{{.Name}}')" || return 1
+  grep -xF -f <(store_volume_names) <<<"$volumes" || true
+}
 
-FORGE_PROJECT="${PROJECT}-forge"
-RUNNER_PROJECT="${PROJECT}-runner"
-CONTAINER="${CONTAINER_PROJECT}-lcars-1"
-RUNNER="${RUNNER_PROJECT}-act-1"
-FORGE="${FORGE_PROJECT}-gitea-1"
+OBJETS="$(bench_objets)" \
+  || die "docker ne rend pas les objets des projets $CONTAINER_PROJECT, $FORGE_PROJECT, $RUNNER_PROJECT — rien n'est détruit sur un état non lu" 1
+MAGASIN="$(magasin_present)" \
+  || die "docker ne rend pas la liste des volumes — rien n'est détruit sur un état non lu" 1
 
-# les volumes comptent seuls : ils portent l'état, et down -v les emporte même sans conteneur
-RESIDU_C="$("$DOCKER_BIN" ps -a --format '{{.Names}}' | grep -cxE "$CONTAINER|$RUNNER|$FORGE" || true)"
-RESIDU_V="$("$DOCKER_BIN" volume ls --format '{{.Name}}' \
-  | grep -cE "^(${CONTAINER_PROJECT}|${FORGE_PROJECT}|${RUNNER_PROJECT})_" || true)"
+[[ -n "$OBJETS" || -n "$MAGASIN" ]] \
+  || die "aucun conteneur ni volume du banc « $PROJECT » ($CONTAINER_PROJECT, $FORGE_PROJECT, $RUNNER_PROJECT, magasin) — rien à détruire" 2
+ETRANGERS="$(bench_etrangers "$OBJETS")"
+[[ -z "$ETRANGERS" ]] \
+  || bench_refus_etrangers "$ETRANGERS" "Rien n'est détruit."
+if [[ -z "$OBJETS" ]]; then
+  {
+    say "refus : le magasin de « $CONTAINER_PROJECT » est là sans aucun objet du banc « $PROJECT » — ce n'est pas un banc."
+    say "  Le retirer : docker volume rm ${MAGASIN//$'\n'/ }"
+  } >&2
+  exit 1
+fi
 
-[[ "$RESIDU_C" -gt 0 || "$RESIDU_V" -gt 0 ]] \
-  || { echo "bench-down : aucun conteneur ni volume de « $PROJECT » (ni $CONTAINER, $RUNNER, $FORGE) — rien à détruire" >&2; exit 2; }
+# le runner d'abord : il tient le réseau de la forge ; ses fichiers sont ceux que forge-runner.sh --bench empile,
+# pour que compose relise le modèle du runner posé (réseau externe de la forge, volumes marqués)
+say "destruction du runner ($RUNNER_PROJECT)"
+LCARS_RUNNER_NETWORK="$FORGE_NET" "$DOCKER_BIN" compose --env-file "$PROV_CONSTANTS_FILE" \
+  -f "$DOCKER_DIR/runner-compose.yml" -f "$DOCKER_DIR/runner-network.yml" -f "$DOCKER_DIR/runner-compose.bench.yml" \
+  -p "$RUNNER_PROJECT" down -v --remove-orphans || true
 
-# le runner d'abord : il tient le réseau de la forge. Les valeurs voyagent par un env-file parce que
-# runner-compose.yml exige LCARS_FORGE_URL même pour un down, et qu'un shim sudo remet l'environnement à zéro
-echo "[bench-down] destruction du runner ($RUNNER_PROJECT)"
-RUNNER_ENV_DOWN="$(mktemp "${TMPDIR:-/tmp}/bench-down-runner.XXXXXX")"
-chmod 0600 "$RUNNER_ENV_DOWN"
-printf 'LCARS_FORGE_URL=%s\nLCARS_RUNNER_TOKEN=%s\n' "http://gitea:3000" " " > "$RUNNER_ENV_DOWN"
-"$DOCKER_BIN" compose --env-file "$RUNNER_ENV_DOWN" -f "$DOCKER_DIR/runner-compose.yml" -p "$RUNNER_PROJECT" \
-  down -v --remove-orphans || true
-rm -f "$RUNNER_ENV_DOWN"
+say "destruction du conteneur ($CONTAINER_PROJECT) — volumes compris"
+"$DOCKER_BIN" compose --env-file "$PROV_CONSTANTS_FILE" -f "$DOCKER_DIR/docker-compose.yml" -p "$CONTAINER_PROJECT" down -v --remove-orphans || true
 
-echo "[bench-down] destruction du conteneur ($CONTAINER_PROJECT) — volumes compris"
-"$DOCKER_BIN" compose -f "$DOCKER_DIR/docker-compose.yml" -p "$CONTAINER_PROJECT" down -v --remove-orphans || true
+say "destruction de la forge ($FORGE_PROJECT) — volumes compris"
+"$DOCKER_BIN" compose --env-file "$PROV_CONSTANTS_FILE" -f "$DOCKER_DIR/forge-compose.yml" -p "$FORGE_PROJECT" down -v --remove-orphans || true
 
-echo "[bench-down] destruction de la forge ($FORGE_PROJECT) — volumes compris"
-"$DOCKER_BIN" compose -f "$DOCKER_DIR/forge-compose.yml" -p "$FORGE_PROJECT" down -v --remove-orphans || true
+say "destruction du magasin de « $PROJECT » ($(store_volume_names | tr '\n' ' ' | sed 's/ $//'))"
+store_destroy_volumes "$DOCKER_BIN" || true
 
-echo "[bench-down] destruction du magasin de « $PROJECT » ($(store_volume_names | tr '\n' ' ' | sed 's/ $//'))"
-store_destroy_volumes "$DOCKER_BIN" || echo "[bench-down] au moins un volume du magasin n'a pas pu être détruit" >&2
-
-echo "[bench-down] banc « $PROJECT » détruit"
+# un retrait refusé (volume encore monté, daemon qui échoue) ne se lit pas dans les codes de compose : le banc se relit
+RESTES="$(bench_objets)" \
+  || die "docker ne rend plus les objets du banc — la destruction n'est pas vérifiée : docker compose ls, docker volume ls" 3
+RESTES_MAGASIN="$(magasin_present)" \
+  || die "docker ne rend plus la liste des volumes — la destruction du magasin n'est pas vérifiée : docker volume ls" 3
+if [[ -n "$RESTES$RESTES_MAGASIN" ]]; then
+  {
+    say "banc « $PROJECT » NON détruit — ces objets restent après les retraits :"
+    [[ -z "$RESTES" ]] || awk -v n="$BENCH_NOM" '{ printf "[%s]   %s %s (projet %s)\n", n, $2, $3, $1 }' <<<"$RESTES"
+    [[ -z "$RESTES_MAGASIN" ]] || sed "s/^/[$BENCH_NOM]   volume /; s/$/ (magasin)/" <<<"$RESTES_MAGASIN"
+    say "  Un volume encore monté se libère en retirant son conteneur : docker ps -a --filter volume=<volume>, puis"
+    say "  bench-down.sh --project $PROJECT --yes à nouveau."
+  } >&2
+  exit 3
+fi
+say "banc « $PROJECT » détruit"

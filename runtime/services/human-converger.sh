@@ -21,13 +21,22 @@ ONCE=0
 [[ "${1:-}" == "--once" ]] && ONCE=1
 
 FORGE="${FORGE_BASE_URL:-}"
-# Litteraux DUPLIQUES de `provision-lib.sh`, que ce script ne source pas : il tourne en boucle, hors
-# d'un cycle de provisionnement. C'est un temoin qui epingle leur egalite, faute de pouvoir la deriver.
-ORG="${LCARS_FORGE_ORG:-fleet}"
-TEAM="${LCARS_HUMANS_TEAM:-humans}"
-SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-system_starfleet}"
-TOKEN_FILE="${FORGE_TOKEN_FILE:-/opt/lcars/var/tokens/$SYSTEM_ACCOUNT.gitea_token}"
-ROLES="${LCARS_ROLES:-system_architect system_chief system_gatekeeper fleet_engineer fleet_scribe fleet_qualifier fleet_reviewer fleet_scoper fleet_vulcan}"
+# ⚖ Decision 3 : CES LITTERAUX NE SONT PLUS ICI. Ils l'etaient, dupliques de `provision-lib.sh`, et
+# le commentaire d'alors disait « faute de pouvoir la deriver » — c'est ce « faute de » qui est
+# tombe. Ce daemon tourne hors d'un cycle de provisionnement et ne peut pas sourcer le protocole des
+# modules avant sa garde de siege ; il lit les FAITS, qui ne dependent d'aucun cycle.
+FACTS_SH="${LCARS_FACTS_SH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/facts.sh}"
+[[ -r "$FACTS_SH" ]] || FACTS_SH=/opt/lcars/services/lib/facts.sh
+# shellcheck source=lib/facts.sh
+. "$FACTS_SH"
+ORG="$LCARS_FORGE_ORG"
+TEAM="$LCARS_HUMANS_TEAM"
+SYSTEM_ACCOUNT="$LCARS_SYSTEM_ACCOUNT"
+TOKEN_FILE="${FORGE_TOKEN_FILE:-$LCARS_PRIVATE_DIR/$SYSTEM_ACCOUNT.gitea_token}"
+# ROLES se lit APRES le protocole (`lcars_roles`, plus bas) : c'est un fait du produit, pas une
+# liste ecrite ici. Une copie de plus derivait sans que rien ne la tienne — le mur
+# `roles.provisioning_locked` en epingle quatre et ne voyait pas celle-ci.
+ROLES=""
 INTERVAL="${LCARS_CONVERGER_INTERVAL:-30}"
 RECONCILE_EVERY="${LCARS_CONVERGER_RECONCILE:-3600}"
 CONSOLE="${LCARS_CONSOLE_SH:-/opt/lcars/console.sh}"
@@ -35,15 +44,17 @@ SHELL_="${LCARS_HUMAN_SHELL:-/bin/bash}"
 # Le shell d'un revoque. `console-humans.sh` ecarte `*/nologin` et `*/false` : poser celui-la ferme
 # la console a la source, pour ses deux consommateurs a la fois.
 NOLOGIN="${LCARS_NOLOGIN_SHELL:-/usr/sbin/nologin}"
-GROUP="${LCARS_FLEET_GROUP:-fleet}"
+GROUP="$LCARS_FLEET_GROUP"
 HOME_ROOT="${LCARS_HOME_ROOT:-/home}"
 # GUARD A — L'UID DU SIEGE N'EST JAMAIS CONVERGE NI REVOQUE. Garde keye sur l'UID, PAS sur un login :
 # le login du siege est celui de l'installeur, donc variable, et keyer sur l'uid survit a un rename.
 # Le revoquer poserait `nologin` sur le sysadmin et fermerait la machine sur lui — l'enfermement
 # dehors.
-SEAT_UID_FILE="${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid}"
-SYSADMIN_UID="$(head -n1 -- "$SEAT_UID_FILE" 2>/dev/null | tr -d '[:space:]' || true)"
-[[ "$SYSADMIN_UID" =~ ^[0-9]+$ ]] || SYSADMIN_UID="${LCARS_SYSADMIN_UID:-}"
+# NI L'UID NI SON CHEMIN NE SE RECOPIENT ICI : `seat_uid` et `seat_uid_file` vivent dans le
+# protocole, source plus bas. Ce daemon n'en tenait qu'une moitie — le chemin, gardé pour le nommer
+# dans son refus — et une moitie de copie derive comme une copie entiere.
+SEAT_UID_FILE=""
+SYSADMIN_UID=""
 # Un refus se dit UNE FOIS. Sans cette trace, un login invalide reproche la meme chose toutes les
 # 30 s et noie le journal, ce qui revient a ne rien dire du tout.
 REFUSED_FILE="${LCARS_CONVERGER_REFUSED:-/run/lcars-converger.refused}"
@@ -78,6 +89,17 @@ LCARS_MODULE_TAG="lcars-converger"
 # shellcheck source=lib/human-protocol.sh
 . "$HUMAN_PROTOCOL"
 unset LCARS_HUMAN_PROTOCOL_HOST
+# GUARD A lit le siege par la politique du protocole (fichier, puis LCARS_SYSADMIN_UID), et le
+# CHEMIN vient du meme endroit : un refus qui nommerait un autre fichier que celui qu'on a lu
+# enverrait l'operateur regarder a cote.
+SYSADMIN_UID="$(seat_uid)"
+SEAT_UID_FILE="$(seat_uid_file)"
+
+# LES COMPTES DE ROLE, DEMANDES AU PRODUIT. Vide = la release n'a pas repondu, et `reserved` le lit
+# comme « je ne sais pas » : elle reserve alors TOUT nom. Meme doctrine que les bornes d'uid juste
+# en dessous — on ne cree personne sur une frontiere devinee.
+ROLES="$(lcars_roles || true)"
+[[ -n "$ROLES" ]] || p_warn "roster de roles ILLISIBLE (la release ne repond pas a « lcars tool roles ») — aucun humain ne sera cree ce tour : un compte de role adopte comme humain recevrait un home et une console"
 
 # ─── L'ADMISSION ────────────────────────────────────────────────────────────────────────────────
 # Ces trois predicats decident si un login de la forge devient un user Linux. C'est la seule partie
@@ -91,6 +113,10 @@ reserved() { # reserved <login> -> 0 si le nom est interdit
   local login=$1 lo
   lo="${login,,}"
   [[ "$lo" == "${SYSTEM_ACCOUNT,,}" ]] && return 0
+  # ⚠ ROSTER ILLISIBLE : TOUT NOM EST RESERVE. Une liste vide ne veut pas dire « cette machine n'a
+  # aucun compte de role », elle veut dire qu'on n'a pas pu lire — et adopter un compte de role
+  # comme humain lui donnerait un home, un shell fleet et une console.
+  [[ -n "$ROLES" ]] || return 0
   local r
   for r in $ROLES; do [[ "$lo" == "${r,,}" ]] && return 0; done
   # Un nom deja porte par un compte HORS de la plage des humains — sous UID_MIN (`sshd`), au-dessus
@@ -120,7 +146,8 @@ uid_of_home() { # uid_of_home <login> -> uid proprietaire du home existant, ou v
   stat -c %u "$h" 2>/dev/null || true
 }
 
-UID_MAP_FILE="${LCARS_UID_MAP_FILE:-/opt/lcars/var/tokens/forge-uid.map}"
+# le repertoire est un fait, le nom du fichier une regle : la carte se DERIVE, elle ne se recopie pas
+UID_MAP_FILE="$LCARS_UID_MAP_FILE"
 
 uid_from_map() { # uid_from_map <forge_id> -> l'uid enregistre pour cet id, ou vide
   [[ -r "$UID_MAP_FILE" ]] || return 0
@@ -199,15 +226,52 @@ mark_refused() { # mark_refused <login> <raison lisible>
 # Meme idiome de sonde que `PASSWD_FILE` plus haut : un fichier injectable pour les tests, la base
 # reelle sinon. Sans ca, la selection des revoques ne serait epinglee par rien — et c'est la partie
 # qui, en se trompant, ferme la porte a quelqu'un qui travaille.
-group_members() { # group_members -> un login par ligne
+members_of() { # members_of <groupe> -> un login par ligne
   if [[ -n "${GROUP_FILE:-}" ]]; then
-    awk -F: -v g="$GROUP" '$1==g {print $4}' "$GROUP_FILE"
+    awk -F: -v g="$1" '$1==g {print $4}' "$GROUP_FILE"
   else
-    getent group "$GROUP" 2>/dev/null | cut -d: -f4
+    getent group "$1" 2>/dev/null | cut -d: -f4
   fi | tr ',' '\n' | grep -v '^$' || true
 }
 
-in_group() { group_members | grep -qxF -- "$1"; }
+group_members() { members_of "$GROUP"; } # group_members -> les membres du groupe fleet, un par ligne
+
+# ─── UN COMPTE D'ADMINISTRATION DE LA MACHINE NE SE REVOQUE PAS ────────────────────────────────
+# L'adminite de la MACHINE, pas celle de la forge : ce convergeur ne lit rien de la seconde.
+#
+# La revocation vise tout membre de fleet, dans la plage des humains, absent de la team. GUARD A
+# n'en retire que le siege DECLARE AUJOURD'HUI. Restent atteignables : le siege d'hier (un autre
+# sudoer a rejoue l'installation, `seat.uid` a change), le compte qui a lance une installation, un
+# sudoer mis dans fleet a la main. Sur eux, `nologin` et le kill fermeraient la machine sur son
+# administrateur. Le convergeur refuse, le dit une fois par processus, et nomme le geste manuel.
+#
+# UNE QUESTION, UNE SEULE : ce compte peut-il ouvrir un shell root ? Root la pose a sudo sous la
+# forme `sudo -n -l -U <login> /bin/sh`, et c'est le CODE qui porte le verdict (0 : permis). Elle
+# couvre `%sudo`, `%admin`, `%wheel` et toute regle au nom du compte. Ni le nom d'un groupe (`wheel`
+# ne donne rien sur Debian ni Ubuntu), ni `sudo -l -U <login>` sans commande, qui repond « may run »
+# pour toute regle, meme etroite (`systemctl restart …`) ou vers un autre compte que root : une
+# delegation etroite n'administre pas la machine, et ce compte se revoque comme les autres.
+# Sans sudo sur la machine, aucun compte de la plage des humains n'ouvre de shell root par lui.
+SUDO_BIN="${LCARS_SUDO_BIN:-sudo}"
+declare -A MACHINE_ADMINS_SPARED=()
+
+machine_admin_why() { # machine_admin_why <login> -> la raison s'il administre la machine, rien sinon
+  command -v "$SUDO_BIN" >/dev/null 2>&1 || return 0
+  if LC_ALL=C "$SUDO_BIN" -n -l -U "$1" /bin/sh >/dev/null 2>&1; then
+    printf 'sudo lui ouvre un shell root\n'
+  fi
+  return 0
+}
+
+spare_machine_admin() { # spare_machine_admin <login> <raison> — le refus, dit une fois par processus
+  [[ -z "${MACHINE_ADMINS_SPARED[$1]:-}" ]] || return 0
+  MACHINE_ADMINS_SPARED[$1]=1
+  err "REFUS de révoquer $1 — compte d'administration de la machine ($2) : absent de $ORG/$TEAM, il garde son groupe $GROUP, son shell et ses processus. Le retirer de $GROUP est un geste d'administrateur : « sudo gpasswd -d $1 $GROUP » (sur un poste ; dans un conteneur, depuis « deploy/container shell »)"
+}
+
+# `<<<` et non un tuyau : `grep -q` sort au premier match et fermerait le tuyau sur un producteur
+# qui ecrit encore — sous `pipefail`, 141, c'est-a-dire « pas membre » sur un membre.
+in_group() { grep -qxF -- "$1" <<<"$(group_members)"; }
 
 uid_of() { awk -F: -v n="$1" '$1==n {print $3; exit}' "${PASSWD_FILE:-/etc/passwd}"; }
 
@@ -242,7 +306,7 @@ absent_humans() { # absent_humans <membres…> -> les logins a revoquer, un par 
   [[ "$#" -gt 0 ]] || return 0
   local login
   while IFS= read -r login; do
-    printf '%s\n' "$@" | grep -qxF -- "$login" && continue
+    grep -qxF -- "$login" <<<"$(printf '%s\n' "$@")" && continue
     printf '%s\n' "$login"
   done < <(converged_humans)
   return 0
@@ -291,8 +355,8 @@ team_id() {
 # fois installe, si on supprime deploy/, il doit rien se passer ». Un convergeur qui crierait
 # toutes les trente secondes apres `deploy/provision`, c'est le contraire de rien.
 #
-# ⚠ UN SEUL CHEMIN VERS L'ETAT PER-HUMAIN : celui-ci. L'installeur ne joue AUCUN module
-# `NEEDS: human` — deux chemins vers un etat (le premier humain a l'apply, les suivants ici), c'est
+# ⚠ UN SEUL CHEMIN VERS L'ETAT PER-HUMAIN : celui-ci. L'installeur ne joue AUCUN module de
+# `human.d` — deux chemins vers un etat (le premier humain a l'apply, les suivants ici), c'est
 # celui qu'on ne relit pas qui derive. ⚖ user : « pas besoin d'avoir du code en + pour faire ce que
 # le service qu'on pose fait a son premier tour ».
 #
@@ -324,7 +388,7 @@ converge_human() { # converge_human <login>
   out="$(mktemp "${TMPDIR:-/tmp}/lcars-converge.XXXXXX")" || out=""
 
   # ⚠ LES MODULES SE JOUENT SOUS L'IDENTITE DE L'HUMAIN, PAS SOUS CELLE DE CE SERVICE. Ils
-  # portent `NEEDS: human` et l'installeur les jouait par `as_human` : `runuser -u <login>`, cwd
+  # agissent sur une PERSONNE, et l'installeur les jouait par `as_human` : `runuser -u <login>`, cwd
   # dans son home, HOME/USER/LOGNAME poses. Ce service les sourcait en ROOT — mesure du 2026-09-04,
   # banc bob_1, la premiere fois qu'ils ont tourne ici : `~/.lcars` de l'humain cree root:root,
   # son `fleet.env` illisible par lui, `git config` mort sur « $HOME not set », `lcars` sur
@@ -348,17 +412,20 @@ converge_human() { # converge_human <login>
     # forme que ses temoins. Ce service ne definit plus rien : il nomme l'humain, le module, et
     # le fichier. Vide si l'hote n'en a pas (un decor qui ne joue que cette fonction) : c'est
     # alors la garde du module qui parle, et elle nomme sa cause.
+    # LCARS_MODULE_RUN arme la garde du protocole : un module qui meurt sous `set -e` sortait du
+    # code de la commande qui a echoue, et un 2 passait ici pour un drift acceptable — toutes les
+    # 30 s, en silence. Une mort rend 3, et 3 n'est le drift de personne.
     if [[ -n "$home" ]]; then
       ( cd "$home" && runuser -u "$login" -- \
           env HOME="$home" USER="$login" LOGNAME="$login" \
-              LCARS_LOGIN="$login" LCARS_MODULE_TAG="$tag" \
+              LCARS_LOGIN="$login" LCARS_MODULE_TAG="$tag" LCARS_MODULE_RUN=1 \
               LCARS_HUMAN_PROTOCOL="${HUMAN_PROTOCOL:-${LCARS_HUMAN_PROTOCOL:-}}" \
               bash -c 'set -euo pipefail; . "$1" apply' _ "$m"
       ) >"${out:-/dev/null}" 2>&1 || rc=$?
     else
       (
         set -euo pipefail
-        export LCARS_LOGIN="$login" LCARS_MODULE_TAG="$tag"
+        export LCARS_LOGIN="$login" LCARS_MODULE_TAG="$tag" LCARS_MODULE_RUN=1
         export LCARS_HUMAN_PROTOCOL="${HUMAN_PROTOCOL:-${LCARS_HUMAN_PROTOCOL:-}}"
         # shellcheck source=/dev/null  # le module est choisi a l execution — chemin non constant par nature
         . "$m" apply
@@ -366,7 +433,11 @@ converge_human() { # converge_human <login>
     fi
     if [[ "$rc" -ne 0 && "$rc" -ne 2 ]]; then
       rc_all=1
-      err "$login : $(basename "$m" .sh) rc=$rc — les 15 dernieres lignes :"
+      if [[ "$rc" -eq 3 ]]; then
+        err "$login : $(basename "$m" .sh) MORT avant de rendre son verdict — rien n'a ete conclu ; les 15 dernieres lignes :"
+      else
+        err "$login : $(basename "$m" .sh) rc=$rc — les 15 dernieres lignes :"
+      fi
       [[ -n "$out" ]] && tail -n 15 "$out" | while IFS= read -r l; do err "  | $l"; done
     fi
   done
@@ -407,9 +478,14 @@ restore_human() { # restore_human <login>
 # vide — le garde est chez l'appelant, et il y est parce qu'ici on ne saurait pas distinguer « la
 # team est vide » de « la forge n'a pas repondu ».
 revoke_absent() { # revoke_absent <membres…>
-  local login
+  local login why
   while IFS= read -r login; do
     [[ -n "$login" ]] || continue
+    why="$(machine_admin_why "$login")"
+    if [[ -n "$why" ]]; then
+      spare_machine_admin "$login" "$why"
+      continue
+    fi
     revoke_human "$login"
   done < <(absent_humans "$@")
   return 0

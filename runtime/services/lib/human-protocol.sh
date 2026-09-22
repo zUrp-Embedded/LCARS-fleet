@@ -42,53 +42,25 @@ fi
 # ─── Les lectures de la personne ───────────────────────────────────────────────────────────────
 human_home() { [[ -n "${LCARS_LOGIN:-}" ]] || return 0; getent passwd "$LCARS_LOGIN" | cut -d: -f6 || true; }
 
-# Le siege se lit dans son fichier (`LCARS_SEAT_UID_FILE`), sinon dans `LCARS_SYSADMIN_UID` — la
-# meme lecture, dans le meme ordre, que l'installeur : un seul siege sur la machine, quel que soit
-# celui qui le lit.
-seat_uid() { # rend l'uid du siege, ou rien
-  local f v
-  f="${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid}"
-  if [[ -r "$f" ]]; then
-    v="$(head -n1 -- "$f" 2>/dev/null | tr -d '[:space:]' || true)"
-    [[ "$v" =~ ^[0-9]+$ ]] && { printf '%s' "$v"; return 0; }
-  fi
-  v="${LCARS_SYSADMIN_UID:-}"
-  [[ "$v" =~ ^[0-9]+$ ]] && { printf '%s' "$v"; return 0; }
-  return 0
-}
+# `seat_uid` vient du protocole des modules, source ci-dessus : un seul siege sur la machine, une
+# seule lecture, quel que soit celui qui la fait.
 
 # ─── La frontiere systeme/humain ───────────────────────────────────────────────────────────────
-# Les bornes se LISENT dans `login.defs` (`PASSWD_DEFS`, le meme nom que `console-humans.sh`,
-# `bin/fleet` et le BEAM) ; elles ne s'ecrivent pas ici, et elles n'ont PAS de defaut.
+# ⚖ Phase 5 : LA LECTURE N'EST PLUS ECRITE ICI. Elle vit dans `lib/uid-bounds.sh`, avec toute la
+# doctrine qui la tient (aucun repli, deux bornes, rien depuis l'environnement du garde). Ce
+# fichier en etait « la seule ecriture cote shell » et trois autres en portaient une copie, parce
+# que leurs hotes « ne peuvent pas sourcer un protocole de module » — vrai, il exige un sujet.
+# Mais ils peuvent sourcer une LECTURE, qui n'impose rien et n'imprime rien.
 #
-# ⚠ AUCUN REPLI SUR 1000, et c'est delibere — la politique que le BEAM applique a son boot
-# (`config/runtime.exs`, R-no-uid-min) et que `console-humans.sh` applique a sa liste. Un
-# `login.defs` illisible n'est pas « la frontiere est a 1000 », c'est « la frontiere n'est pas
-# etablie » : un UID_MIN reel a 2000 devine a 1000 ferait humain tout ce qui vit entre les deux, et
-# un UID_MAX devine ferait humain `nobody` (65534, sur toute machine). Une garde qui ne peut pas
-# mesurer refuse — et dit UNE FOIS le remede, qui n'est pas dans ce processus : c'est le fichier.
-# CE FICHIER EST LA SEULE ECRITURE DE LA REGLE COTE SHELL (2026-09-05) : le convergeur, `boot.sh`
-# et `75-projects` l'appellent ; `bin/fleet` et la lib de l'installeur en portent une copie de
-# trois lignes, sous un temoin d'egalite (leur hote ne peut pas sourcer un protocole de module).
-#
-# La borne ne se lit PAS dans l'environnement du processus garde (`UID_MIN=0 …`) : « la frontiere
-# obeirait a qui la franchit » (runtime.exs). `UID_MIN`/`UID_MAX` sont RE-ECRITS a chaque lecture
-# depuis le fichier — une valeur heritee de l'environnement n'y survit pas.
-#
-# `uid_bounds` est un PREDICAT (`uid_bounds || …`) : le remede se dit une fois par processus
-# (`_UID_BOUNDS_SAID`), et un `$( )` — un sous-shell — perd cette trace. Qui enumere lit les deux
-# variables apres l'appel ; qui refuse trouve la raison dans `UID_BOUNDS_WHY`.
-UID_MIN="" UID_MAX="" UID_BOUNDS_WHY=""
+# Ce qui reste ici est ce qui n'a de sens que pour un MODULE : le DIRE, une fois par processus.
+# `uid_bounds` est un PREDICAT (`uid_bounds || …`) : la trace du « dit une fois » (`_UID_BOUNDS_SAID`)
+# ne survivrait pas a un `$( )`, qui est un sous-shell. Qui enumere lit les deux variables apres
+# l'appel ; qui refuse trouve la raison dans `UID_BOUNDS_WHY`.
+# shellcheck source=uid-bounds.sh
+. "${LCARS_UID_BOUNDS_SH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/uid-bounds.sh}"
 _UID_BOUNDS_SAID=""
-uid_bounds() { # pose UID_MIN et UID_MAX depuis login.defs — 0 si les deux se lisent ; 1 sinon, remede dans UID_BOUNDS_WHY, dit une fois
-  local defs="${PASSWD_DEFS:-/etc/login.defs}" missing=""
-  UID_MIN="$(awk '$1 == "UID_MIN" {print $2; exit}' "$defs" 2>/dev/null || true)"
-  UID_MAX="$(awk '$1 == "UID_MAX" {print $2; exit}' "$defs" 2>/dev/null || true)"
-  [[ "$UID_MIN" =~ ^[0-9]+$ ]] || missing=UID_MIN
-  [[ -n "$missing" || "$UID_MAX" =~ ^[0-9]+$ ]] || missing=UID_MAX
-  if [[ -z "$missing" ]]; then UID_BOUNDS_WHY=""; return 0; fi
-  UID_MIN="" UID_MAX=""
-  UID_BOUNDS_WHY="la frontiere systeme/humain n'est pas etablie ($missing illisible dans $defs) — la borne est declaree par le systeme, pas par ce processus : repare $defs"
+uid_bounds() { # pose UID_MIN et UID_MAX — 0 si les deux se lisent ; 1 sinon, remede dans UID_BOUNDS_WHY, dit une fois
+  uid_bounds_read && return 0
   if [[ -z "$_UID_BOUNDS_SAID" ]]; then
     _UID_BOUNDS_SAID=1
     p_warn "$UID_BOUNDS_WHY"
@@ -109,7 +81,7 @@ seat_established() { # pose SEAT_UID — 0 si le siege se lit ; 1 sinon, dit une
   [[ -n "$SEAT_UID" ]] && return 0
   if [[ -z "$_SEAT_SAID" ]]; then
     _SEAT_SAID=1
-    p_warn "le siege n'est pas declare (${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid} illisible, LCARS_SYSADMIN_UID non pose) — sans lui la frontiere n'est pas etablie : cette machine n'est pas provisionnee, joue « deploy/provision apply »"
+    p_warn "le siège n'est pas déclaré (${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid} illisible, LCARS_SYSADMIN_UID non posé) — sans lui la frontière n'est pas établie : cette machine n'est pas installée. Sur un poste, « deploy/workstation up » le pose ; dans un conteneur, l'init du démarrage le pose, et s'il ne peut pas le déterminer : « deploy/container config » depuis l'hôte, puis « deploy/container up »"
   fi
   return 1
 }

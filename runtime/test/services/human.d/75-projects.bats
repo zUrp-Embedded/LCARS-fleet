@@ -2,7 +2,7 @@
 # SOURCE: runtime/test/services/human.d/75-projects.bats
 # AUTHOR: DrDree
 # STARDATE: (posee par /push-github)
-# STATUS: bats tests for modules.d/75-projects.sh — la forge dit quels projets existent, le disque suit
+# STATUS: bats tests for human.d/75-projects.sh — la forge dit quels projets existent, le disque suit
 #
 # CE QUE CES TEMOINS TIENNENT. Ce module n'a AUCUNE logique de projet : il relaie une porte du
 # release qui parle en mots, et traduit ces mots en verdicts de provisioning. Tout ce qu'il apporte
@@ -200,7 +200,7 @@ EOF
   [[ "$output" != *"FAIL"* ]]
 }
 
-# ─── la garde qui manquait : tous les `# NEEDS: human` ne parlent pas du meme humain ─────────────
+# ─── la garde qui manquait : tous les modules per-humain ne parlent pas du meme humain ───────────
 
 @test "le sysadmin n'est pas un humain de fleet : le module passe son tour, conforme" {
   # LE PIEGE MESURE. L'entrypoint conteneur joue le cycle de boot avec `--human <sysadmin>` (uid

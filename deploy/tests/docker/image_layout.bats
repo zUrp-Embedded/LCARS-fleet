@@ -83,16 +83,17 @@ setup() {
 @test "LA REVISION a UNE origine, l'ARG GIT_SHA, et elle arrive au rail (PROV_SOURCE_REV), a l'ENV et au LABEL" {
   grep -qE '^ENV PROV_SOURCE_REV=\$\{GIT_SHA\} LCARS_IMAGE_REVISION=\$\{GIT_SHA\}' <<<"$CODE"
   grep -qE 'org.opencontainers.image.revision="\$\{GIT_SHA\}"' <<<"$CODE"
-  # verify la redonne au doctor, sinon 62 compare la copie posee a « inconnue »
-  local v; v="$(sed -n '/^FROM runtime AS verify$/,/^FROM /p' "$DF" | grep -vE '^\s*#')"
-  grep -qE 'PROV_SOURCE_REV="\$\{GIT_SHA\}"' <<<"$v"
+  # verify hérite de l'ENV de runtime : une seconde affectation serait une seconde origine
+  [ "$(grep -c 'PROV_SOURCE_REV=' <<<"$CODE")" -eq 1 ]
 }
 
 @test "CE QUE SEULE L'IMAGE PORTE, et rien de plus : volumes, port, healthcheck, entrypoint du produit" {
-  grep -qE '^VOLUME \["/home", "/opt/lcars/var"\]$' <<<"$CODE"
+  local racine; racine="$(sed -n 's/^PROV_ROOT=//p' "$BATS_TEST_DIRNAME/../../installer-constants.env")"
+  [ -n "$racine" ]
+  grep -qxF "VOLUME [\"/home\", \"$racine/var\"]" <<<"$CODE"
   grep -qE '^EXPOSE 22$' <<<"$CODE"
   grep -qE '^HEALTHCHECK ' <<<"$CODE"
-  grep -qE '^ENTRYPOINT \["/usr/bin/tini", "--", "bash", "/opt/lcars/services/container/boot.sh"\]$' <<<"$CODE"
+  grep -qxF "ENTRYPOINT [\"/usr/bin/tini\", \"--\", \"bash\", \"$racine/services/container/boot.sh\"]" <<<"$CODE"
   # tini et sshd viennent du socle, pas d'un module : ils n'ont pas de sens sur un poste
   grep -qE '^\s+ca-certificates curl git sudo tini openssh-server \\$' <<<"$RUNTIME"
 }

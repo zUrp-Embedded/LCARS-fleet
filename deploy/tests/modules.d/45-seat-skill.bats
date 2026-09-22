@@ -5,9 +5,10 @@
 # STARDATE: 2026-09-12
 # STATUS: témoins du skill system-issues posé chez le siège
 #
-# Le siège des témoins est l'utilisateur qui les joue : la clé est l'uid, le home est un décor.
+# Le siège des témoins est l'utilisateur qui les joue : la clé est l'uid, le home vient d'un getent de décor.
 
 load ../refute
+load ../support/decor
 
 setup() {
   local _v
@@ -17,30 +18,48 @@ setup() {
   export PROVISION_LIB="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
   export PROVISION_MODULE=45-seat-skill PROV_SUBSTRATE=linux
   export PROV_HUMAN; PROV_HUMAN="$(id -un)"
-  export PROV_FLEET_GROUP; PROV_FLEET_GROUP="$(id -gn)"
   export LCARS_SYSADMIN_UID; LCARS_SYSADMIN_UID="$(id -u)"
-  export LCARS_SIEGE_HOME="$BATS_TEST_TMPDIR/home"; mkdir -p "$LCARS_SIEGE_HOME"
+  decor_pose
+  BIN="$DECOR_BIN"
+  export SIEGE_HOME="$BATS_TEST_TMPDIR/home"; mkdir -p "$SIEGE_HOME"
+  # le home du siège est celui que getent rend : la doublure le lit dans SIEGE_HOME, vide = compte inconnu
+  cat > "$DECOR_BIN/getent" <<'EOF'
+#!/usr/bin/env bash
+[[ "$1" == passwd && -n "${SIEGE_HOME:-}" ]] || exit 2
+printf '%s:x:%s:%s::%s:/bin/bash\n' "${@: -1}" "$(id -u)" "$(id -g)" "$SIEGE_HOME"
+EOF
+  chmod 0755 "$DECOR_BIN/getent"
   export LCARS_ADMIRAL_SKILLS_SRC="$BATS_TEST_TMPDIR/skills"
   mkdir -p "$LCARS_ADMIRAL_SKILLS_SRC/system-issues"
   printf '# skill\n' > "$LCARS_ADMIRAL_SKILLS_SRC/system-issues/SKILL.md"
   printf '#!/usr/bin/env bash\necho liste\n' > "$LCARS_ADMIRAL_SKILLS_SRC/system-issues/list.sh"
-  BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN"; export PATH="$BIN:$PATH"
 }
 
 mod() { run bash "$MOD" "$@"; }
-skill() { echo "$LCARS_SIEGE_HOME/.claude/skills/system-issues"; }
+skill() { echo "$SIEGE_HOME/.claude/skills/system-issues"; }
 
 @test "check : skill absent chez le siège — drift qui dit la conséquence" {
   mod check
   [ "$status" -eq 1 ]
-  [[ "$output" == *"DRIFT 45-seat-skill: skill system-issues absent ou incomplet chez $PROV_HUMAN — la boîte de réception"* ]]
+  [[ "$output" == *"DRIFT 45-seat-skill: skill system-issues absent, incomplet ou différent de sa source ($LCARS_ADMIRAL_SKILLS_SRC/system-issues) chez $PROV_HUMAN — la boîte de réception"* ]]
 }
 
 @test "check : un skill sans son SKILL.md est incomplet, pas posé" {
-  mkdir -p "$(skill)"; printf '#!/usr/bin/env bash\n' > "$(skill)/list.sh"; chmod 0755 "$(skill)/list.sh"
+  mkdir -p "$(skill)"; cp "$LCARS_ADMIRAL_SKILLS_SRC/system-issues/list.sh" "$(skill)/list.sh"; chmod 0755 "$(skill)/list.sh"
   mod check
   [ "$status" -eq 1 ]
-  [[ "$output" == *"absent ou incomplet chez $PROV_HUMAN"* ]]
+  [[ "$output" == *"absent, incomplet ou différent de sa source"* ]]
+}
+
+@test "check : un skill posé mais périmé — différent de sa source — est un drift, que l'apply résout" {
+  mod apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  printf '# skill de la version précédente\n' > "$(skill)/SKILL.md"
+  mod check
+  [ "$status" -eq 1 ]
+  mod apply
+  mod check
+  [ "$status" -eq 0 ]
 }
 
 @test "apply : SKILL.md et list.sh exécutable posés dans le ~/.claude du siège, le check passe au vert, le second apply ne repose rien" {
@@ -70,7 +89,7 @@ skill() { echo "$LCARS_SIEGE_HOME/.claude/skills/system-issues"; }
   mod apply
   [ "$status" -eq 2 ]
   [ -x "$(skill)/list.sh" ]
-  [[ "$output" == *"DRIFT 45-seat-skill: skill system-issues posé chez $PROV_HUMAN, mais $LCARS_SIEGE_HOME/.claude et"*"n'ont pas pu lui être rendus"* ]]
+  [[ "$output" == *"DRIFT 45-seat-skill: skill system-issues posé chez $PROV_HUMAN, mais $SIEGE_HOME/.claude et"*"n'ont pas pu lui être rendus"* ]]
 }
 
 @test "l'humain n'est pas le siège : rien n'est posé, check et apply verts, les deux uid dits" {
@@ -80,12 +99,12 @@ skill() { echo "$LCARS_SIEGE_HOME/.claude/skills/system-issues"; }
   [[ "$output" == *"OK    45-seat-skill: $PROV_HUMAN (uid $(id -u)) n'est pas le siège (uid 99999) — rien à poser"* ]]
   mod apply
   [ "$status" -eq 0 ]
-  [ ! -e "$LCARS_SIEGE_HOME/.claude" ]
+  [ ! -e "$SIEGE_HOME/.claude" ]
 }
 
 @test "apply : un lien à la place de ~/.claude est refusé, sa cible reste intacte" {
   mkdir -p "$BATS_TEST_TMPDIR/ailleurs"
-  ln -s "$BATS_TEST_TMPDIR/ailleurs" "$LCARS_SIEGE_HOME/.claude"
+  ln -s "$BATS_TEST_TMPDIR/ailleurs" "$SIEGE_HOME/.claude"
   mod apply
   [ "$status" -eq 1 ]
   [ -z "$(ls -A "$BATS_TEST_TMPDIR/ailleurs")" ]
@@ -96,12 +115,20 @@ skill() { echo "$LCARS_SIEGE_HOME/.claude/skills/system-issues"; }
   mod apply
   [ "$status" -eq 1 ]
   [[ "$output" == *"FAIL  45-seat-skill: source du skill absente ($LCARS_ADMIRAL_SKILLS_SRC/system-issues)"* ]]
-  [ ! -e "$LCARS_SIEGE_HOME/.claude" ]
+  [ ! -e "$SIEGE_HOME/.claude" ]
 }
 
-@test "apply : home du siège introuvable — échec nommé" {
-  export LCARS_SIEGE_HOME="$BATS_TEST_TMPDIR/nulle-part"
+@test "apply : home du siège absent du disque — échec nommé" {
+  export SIEGE_HOME="$BATS_TEST_TMPDIR/nulle-part"
   mod apply
   [ "$status" -eq 1 ]
   [[ "$output" == *"FAIL  45-seat-skill: home de $PROV_HUMAN introuvable"* ]]
+}
+
+@test "apply : un siège que getent ne connaît pas — échec nommé, rien de posé" {
+  export SIEGE_HOME=""
+  mod apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL  45-seat-skill: home de $PROV_HUMAN introuvable"* ]]
+  [ ! -e "$BATS_TEST_TMPDIR/home/.claude" ]
 }

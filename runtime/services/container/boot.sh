@@ -14,9 +14,9 @@
 # Sans porte : le boot du conteneur (PID 1 sous tini).
 #
 # Modèle (etc/README.md du runtime) : l'humain SSH dans le conteneur EN TANT QUE LUI (sshd = le
-# login-manager : auth + drop d'UID, zéro privilège custom) puis lance `fleet start`. Ce
-# script est la transposition Docker du « re-run convergent » : l'image est immutable (build),
-# le VOLUME /home converge ICI à chaque boot via LE MÊME `provision` que le chemin WSL.
+# login-manager : auth + drop d'UID, zéro privilège custom) puis lance `fleet start`. L'image est
+# posée au build par les modules de l'installeur ; au boot, aucun module ne tourne : le VOLUME
+# converge ICI, par `container/init.sh apply` puis les gestes de `forge.d/`.
 #
 # Un échec de convergence NE TUE PAS le conteneur : le conteneur doit rester joignable pour être
 # réparée (fail-loud dans les logs, pas fail-dead) — sshd démarre quoi qu'il arrive.
@@ -51,41 +51,64 @@ esac
 
 # admiral = le master/sysadmin (uid 1000 reserve, sudo root). Bench: `admiral`. Prod: le login que
 # l'installeur a cree sur SA forge. Ce n'est PAS un worker de la fleet — Guard B refuse de lancer une
-# fleet sous cet uid, et les workers viennent du convergeur (forge fleet:humans, uid >= 1001).
+# fleet sous cet uid, et les workers viennent du convergeur (forge lcars:humans, uid >= 1001).
 # ─── 1. L'INIT DE L'INSTANCE — COTE PRODUIT ─────────────────────────────────────────────────────
 #
-# ⚖ user 2026-09-04 (Q1 du chantier deploy-independance) : le modele est celui de Docker — l'image
-# est le produit, le conteneur une instance, l'etat dans le volume. Ce bloc rejouait ici, en shell
-# d'entrypoint, le siege, les zones, les clones et les cles ; puis `provision apply` rejouait
-# l'installeur entier a chaque boot. Tout cela est `runtime/services/container/init.sh`, un geste du
-# PRODUIT, idempotent, sur le protocole des modules : il resout le siege, le cree, pose les zones,
-# la source, les cles d'hote et le layout du volume — ce que `25`, `26` et `45-sudoers` posaient en
-# substrat docker. Il rend 3 quand le conteneur n'a rien pour determiner son siege : c'est l'etat « en
-# attente de configuration », et le conteneur reste debout pour que « container config » soit jouable.
+# `container/init.sh` rend 4 quand le conteneur n'a rien pour determiner son siege : c'est l'etat
+# « en attente de configuration », et le conteneur reste debout pour que « container config » soit jouable.
+# 3 reste ce qu'il est partout ailleurs : la mort avant verdict, que la garde du protocole rend.
 LCARS_UID="${LCARS_UID:-1000}"
 export LCARS_SYSADMIN_UID="$LCARS_UID"
 CONTAINER_INIT="${LCARS_CONTAINER_INIT:-/opt/lcars/services/container/init.sh}"
 MODULE_PROTOCOL="${LCARS_MODULE_PROTOCOL:-/opt/lcars/services/lib/module-protocol.sh}"
+# ⚖ Decision 3 : ce boot LANCE des modules (qui sourcent le protocole) mais n'en est pas un — il
+# lit donc les faits lui-meme, par le meme unique lecteur, au lieu de recopier leurs valeurs.
+FACTS_SH="${LCARS_FACTS_SH:-${MODULE_PROTOCOL%/*}/facts.sh}"
+# Un chemin en dur rend le bloc des gestes intestable, et un temoin qui ne peut pas le jouer ne dit
+# rien de ce qu'il fait quand un geste meurt.
+GESTES_DIR="${LCARS_FORGE_GESTURES_DIR:-/opt/lcars/services/forge.d}"
 SEAT_LOGIN_FILE="${LCARS_SEAT_LOGIN_FILE:-/run/lcars-seat.login}"
-# ⚠ /run N'EST PAS UN TMPFS DANS UN CONTENEUR : un `docker restart` garde les fichiers du boot
-# precedent, et « container status » lirait un `awaiting-config` ou un `provision.rc` d'hier comme
-# l'etat de maintenant (relecture hostile 2026-09-04). Chaque boot part d'un /run vide de ses verdicts.
-rm -f "${LCARS_BOOT_STATE_FILE:-/run/lcars-boot.state}" "${LCARS_PROV_RC_FILE:-/run/lcars-provision.rc}" "${LCARS_HUMANS_RC_FILE:-/run/lcars-humans.rc}" 2>/dev/null || true
+# /run n'est pas un tmpfs dans un conteneur : un `docker restart` garde les verdicts du boot précédent,
+# que « container status » lirait comme l'état présent. Chaque boot part d'un /run vide de ses verdicts.
 say() { echo "[container-boot] $*"; }
-[[ -r "$CONTAINER_INIT" && -r "$MODULE_PROTOCOL" ]] || {
-  echo "[container-boot] init de l'instance introuvable ($CONTAINER_INIT, $MODULE_PROTOCOL) — cette image n'est pas complete, rien ne demarre" >&2
+# Un etat de boot qu'on ne peut ni retirer ni ecrire se DIT : son lecteur (« container status »)
+# prendrait celui du boot precedent pour l'etat present, et personne ne saurait que le fichier ment.
+etat_ecrit() { # etat_ecrit <fichier> <contenu> — 0 ecrit · 1 dit pourquoi il ne l'est pas
+  if ! printf '%s\n' "$2" > "$1" 2>/dev/null; then
+    say "verdict NON publie dans $1 — « container status » lira l'etat du boot precedent, ou rien"
+    return 1
+  fi
+  # Le contenu est publie : un mode qui ne se pose pas se dit pour ce qu'il est, pas pour une
+  # non-publication — le lecteur non privilegie pourrait ne pas l'ouvrir, le fichier est juste.
+  chmod 0644 "$1" 2>/dev/null \
+    || say "$1 publie, mais son mode n'a pas ete pose — un lecteur non privilegie pourrait ne pas l'ouvrir"
+  return 0
+}
+for _f in "${LCARS_BOOT_STATE_FILE:-/run/lcars-boot.state}" "${LCARS_FORGE_RC_FILE:-/run/lcars-forge.rc}" "${LCARS_HUMANS_RC_FILE:-/run/lcars-humans.rc}"; do
+  rm -f "$_f" 2>/dev/null \
+    || say "verdict du boot precedent NON retire ($_f) — « container status » pourrait le lire comme l'etat present"
+done
+unset _f
+[[ -r "$CONTAINER_INIT" && -r "$MODULE_PROTOCOL" && -r "$FACTS_SH" ]] || {
+  echo "[container-boot] init de l'instance introuvable ($CONTAINER_INIT, $MODULE_PROTOCOL, $FACTS_SH) — cette image n'est pas complete, rien ne demarre" >&2
   exit 1
 }
+# shellcheck source=../lib/facts.sh
+. "$FACTS_SH"
 init_rc=0
-LCARS_MODULE_PROTOCOL="$MODULE_PROTOCOL" bash "$CONTAINER_INIT" apply 2>&1 | sed 's/^/[container-init] /' || init_rc=${PIPESTATUS[0]}
+LCARS_MODULE_PROTOCOL="$MODULE_PROTOCOL" LCARS_MODULE_RUN=1 \
+  bash "$CONTAINER_INIT" apply 2>&1 | sed 's/^/[container-init] /' || init_rc=${PIPESTATUS[0]}
 case "$init_rc" in
   0) say "init de l'instance : converge" ;;
   2) say "init de l'instance : APPLIQUE, DRIFT RESIDUEL — un geste manque, rien n'est casse" ;;
-  3) say "conteneur EN ATTENTE DE CONFIGURATION — il reste debout pour que « container config » soit jouable. Aucun service n'est demarre, et le healthcheck le dira."
-     printf 'awaiting-config\n' > "${LCARS_BOOT_STATE_FILE:-/run/lcars-boot.state}" 2>/dev/null || true
+  3) say "init de l'instance : MORT avant de rendre son verdict — rien n'a ete conclu, les lignes [container-init] ci-dessus disent ou ; le conteneur reste debout pour etre lu, aucun service n'est demarre"
+     etat_ecrit "${LCARS_BOOT_STATE_FILE:-/run/lcars-boot.state}" init-failed || true
+     exec sleep infinity ;;
+  4) say "conteneur EN ATTENTE DE CONFIGURATION — il reste debout pour que « container config » soit jouable. Aucun service n'est demarre, et le healthcheck le dira."
+     etat_ecrit "${LCARS_BOOT_STATE_FILE:-/run/lcars-boot.state}" awaiting-config || true
      exec sleep infinity ;;
   *) say "init de l'instance : ECHEC (rc=$init_rc) — le conteneur reste debout pour etre lu, aucun service n'est demarre"
-     printf 'init-failed\n' > "${LCARS_BOOT_STATE_FILE:-/run/lcars-boot.state}" 2>/dev/null || true
+     etat_ecrit "${LCARS_BOOT_STATE_FILE:-/run/lcars-boot.state}" init-failed || true
      exec sleep infinity ;;
 esac
 LCARS_ADMIRAL="$(tr -d '[:space:]' < "$SEAT_LOGIN_FILE" 2>/dev/null || true)"
@@ -93,25 +116,63 @@ LCARS_ADMIRAL="$(tr -d '[:space:]' < "$SEAT_LOGIN_FILE" 2>/dev/null || true)"
 
 # ─── 2. LES GESTES DE FORGE ──────────────────────────────────────────────────────────────────────
 #
-# Les quatre gestes du produit (`forge.d/`) : jetons de role, cache des catalogues, branche ops,
+# Les quatre gestes du produit (`forge.d/`) : cache des catalogues, jetons de role, depot du systeme,
 # client OAuth2 du deck. Chacun rend le code du protocole ; on n'invente rien, on relaie.
 
-RC_FILE="${LCARS_PROV_RC_FILE:-/run/lcars-provision.rc}"
+RC_FILE="${LCARS_FORGE_RC_FILE:-/run/lcars-forge.rc}"
+# le verdict publié : le PREMIER état non conclusif rencontré tient — un échec ou une mort (3)
+# l'emportent sur un drift, un drift (init compris) sur 0, et aucun des deux ne s'efface l'un l'autre
 prov_rc=0
-# Les jetons de role d'abord (le geste `tokens` lit le siege pour sonder son onboardabilite), puis
-# les trois autres. Plus AUCUN module de l'installeur au boot : `deploy/` n'y est plus pour rien.
-for gesture in tokens catalogues ops-branch deck-oidc; do
+[[ "$init_rc" -ne 2 ]] || prov_rc=2
+# L'ORDRE EST CELUI DU POSTE (modules 50, 63, 65, 66), et il porte une dependance : les roles a
+# minter viennent des catalogues installes, donc `catalogues` precede `tokens`. Le geste `tokens`
+# sonde aussi le compte forge du siege, que ce boot nomme par LCARS_LOGIN.
+# LCARS_MODULE_RUN arme la garde du protocole : une mort avant verdict rend 3, jamais 1 ou 2, qui se
+# lisent comme des verdicts.
+for gesture in catalogues tokens ops-repo deck-oidc; do
   g_rc=0
   LCARS_MODULE_PROTOCOL="$MODULE_PROTOCOL" LCARS_MODULE_TAG="$gesture" LCARS_LOGIN="$LCARS_ADMIRAL" \
-    bash "/opt/lcars/services/forge.d/$gesture.sh" apply 2>&1 | sed "s/^/[forge.d] /" || g_rc=${PIPESTATUS[0]}
+    LCARS_MODULE_RUN=1 \
+    bash "$GESTES_DIR/$gesture.sh" apply 2>&1 | sed "s/^/[forge.d] /" || g_rc=${PIPESTATUS[0]}
   case "$g_rc" in
     0) : ;;
-    2) say "geste de forge « $gesture » : drift residuel — il se reposera au boot suivant" ;;
-    *) say "geste de forge « $gesture » : ECHEC (rc=$g_rc) — le conteneur demarre quand meme" ; prov_rc=$g_rc ;;
+    2) say "geste de forge « $gesture » : drift residuel — il se reposera au boot suivant"
+       [[ "$prov_rc" -ne 0 ]] || prov_rc=2 ;;
+    # 3 et un echec sont tous deux non nuls, et le PREMIER rencontre reste : une mort n'efface pas
+    # un echec deja rendu, un echec n'efface pas une mort. Seul un drift (2) se laisse remplacer.
+    3) say "geste de forge « $gesture » : MORT avant de rendre son verdict — rien n'a ete conclu, les lignes [forge.d] ci-dessus disent ou ; le conteneur demarre quand meme"
+       [[ "$prov_rc" -ne 0 && "$prov_rc" -ne 2 ]] || prov_rc=3 ;;
+    *) say "geste de forge « $gesture » : ECHEC (rc=$g_rc) — le conteneur demarre quand meme"
+       [[ "$prov_rc" -ne 0 && "$prov_rc" -ne 2 ]] || prov_rc=$g_rc ;;
   esac
 done
 
-# La publication descend donc APRÈS les deux mesures, et `lcars-provision.rc` s'écrit EN DERNIER :
+# ─── LCARS EST UN PROJET DE LA FLEET QU'IL INSTALLE (⚖ user 2026-09-16) ─────────────────────────
+#
+# L'arbre dont ce conteneur a ete installe est la face de code d'un projet ; il se publie sur la
+# forge comme n'importe quel projet. Cela se joue APRES les gestes de forge (il faut l'org du
+# catalogue, les comptes et le jeton) et SOUS LE SIEGE, pas sous root : les faces appartiennent au
+# groupe `fleet`, et un git joue en root les poserait root:root.
+#
+# NON FATAL, meme regle que tout ce fichier : un conteneur sans son projet publie reste un conteneur
+# qui demarre, et la passe suivante le reposera. La porte est idempotente — « deja la » rend 0.
+PROJET_CLI="${LCARS_CLI:-/usr/local/bin/lcars}"
+PROJET_RC=0
+if [[ -x "$PROJET_CLI" && -n "$LCARS_ADMIRAL" ]]; then
+  # ⚠ `setpriv --init-groups` ET PAS UN `runuser` NU : la porte ecrit dans `/home/projects*`, dont
+  # le groupe est `fleet` — sans les groupes secondaires du siege, elle n'y entre pas.
+  adopt_out="$(setpriv --reuid "$LCARS_ADMIRAL" --regid "$LCARS_ADMIRAL" --init-groups \
+      env HOME="/home/$LCARS_ADMIRAL" "$PROJET_CLI" project adopt-system 2>&1)" || PROJET_RC=$?
+  printf '%s\n' "$adopt_out" | sed 's/^/[projet-systeme] /'
+  if [[ "$PROJET_RC" -ne 0 ]]; then
+    say "projet du systeme NON publie (rc=$PROJET_RC) — le conteneur demarre quand meme, la passe suivante reprendra"
+    [[ "$prov_rc" -ne 0 ]] || prov_rc=2
+  fi
+else
+  say "projet du systeme : rien a jouer (CLI $PROJET_CLI absente, ou siege non nomme)"
+fi
+
+# La publication descend donc APRÈS les deux mesures, et `lcars-forge.rc` s'écrit EN DERNIER :
 # sa présence devient la garantie que l'autre fichier est là. Un lecteur qui attend un seul des deux
 # n'a plus à connaître l'ordre — c'est le producteur qui le tient.
 #
@@ -119,12 +180,8 @@ done
 # forcerait son lecteur à distinguer « pas encore écrit » de « tout va bien », c'est-à-dire à deviner
 # exactement ce que ce fichier existe pour dire.
 publier_verdicts() {
-  [[ -n "${humans_rc:-}" ]] && {
-    printf '%s\n' "$humans_rc" > "$HUMANS_RC_FILE" 2>/dev/null || true
-    chmod 0644 "$HUMANS_RC_FILE" 2>/dev/null || true
-  }
-  printf '%s\n' "$prov_rc" > "$RC_FILE" 2>/dev/null || true
-  chmod 0644 "$RC_FILE" 2>/dev/null || true
+  [[ -z "${humans_rc:-}" ]] || etat_ecrit "$HUMANS_RC_FILE" "$humans_rc" || true
+  etat_ecrit "$RC_FILE" "$prov_rc" || true
 }
 
 # ─── LANCER UN SERVICE PERSISTANT — CE QUE `Restart=` FAIT SUR L'AUTRE RAIL ─────────────────────
@@ -201,32 +258,21 @@ if [[ "${LCARS_CONVERGE_HUMANS:-1}" == "1" && -x "$CONVERGER_BIN" ]]; then
   # team vide EST un résultat valide, et sur un conteneur de production c'est même le cas nominal tant
   # que personne ne s'est enrôlé). Ce qui se publie est ce que la SONDE constate.
   HUMANS_RC_FILE="${LCARS_HUMANS_RC_FILE:-/run/lcars-humans.rc}"
-  # ⚠ LE FAIT, PAS LE CODE DE RETOUR DU DOCTOR. `64-services` rendait 0 sur un conteneur conforme SANS
-  # humain — l'absence y est un WARN, par doctrine (un deploiement neuf attend son premier inscrit).
-  # Ce bloc lisait ce 0 comme « quelqu'un peut lancer une fleet » : toujours vrai, donc jamais une
-  # information. Mesure du 2026-09-04, banc bob_2 : seul le siege existait, et le conteneur l'annoncait.
-  # LE FAIT SE LIT SUR LA MACHINE, PAR LE PREDICAT DU PROTOCOLE : un humain de fleet est un membre
-  # du groupe `fleet` que `is_fleet_human` reconnait — uid au-dessus du plancher de la machine
-  # (`UID_MIN` de login.defs, la meme lecture que le convergeur et `console-humans.sh`), et pas le
-  # siege. Le protocole est source dans un SOUS-SHELL : il pose des defauts et un vocabulaire faits
-  # pour un module, pas pour le PID 1 — rien n'en fuit ici. Sans protocole, la population n'est
-  # PAS mesuree, et ca se dit : un 1 invente serait aussi faux que le 0 d'avant.
+  # Un humain de fleet est un membre du groupe `fleet` que `is_fleet_human` reconnait (uid au-dessus
+  # de UID_MIN, pas le siege). Le protocole est source dans un sous-shell : ses defauts sont faits
+  # pour un module, pas pour le PID 1.
   HUMAN_PROTOCOL="${LCARS_HUMAN_PROTOCOL:-/opt/lcars/services/lib/human-protocol.sh}"
-  # TROIS REPONSES, PAS DEUX : 0 quelqu'un, 1 personne, 2 la population n'est PAS mesuree — la
-  # frontiere systeme/humain n'est pas etablie (login.defs illisible ; le protocole dit le remede,
-  # une fois, sur cette sortie). Un 1 la-dessus enverrait l'operateur enroler quelqu'un sur la
-  # forge alors que c'est le fichier qu'il faut reparer ; un 0 dirait « present » sans mesure —
-  # c'est ce que 1000 devine faisait (fail-closed partout, ⚖ user 2026-09-05).
+  # Trois reponses : 0 quelqu'un, 1 personne, 2 population non mesuree (protocole absent, bornes
+  # d'uid illisibles). Un 1 sur une mesure impossible enverrait inscrire quelqu'un sur la forge
+  # alors que c'est la machine qu'il faut reparer.
   humans_rc=1 pop_rc=1
   if [[ ! -r "$HUMAN_PROTOCOL" ]]; then
+    pop_rc=2
     say "protocole des humains introuvable ($HUMAN_PROTOCOL) — la population n'est PAS mesuree, cette image n'est pas complete"
   else
     pop_rc=0
-    # L'HOTE, PAS UN MODULE (lot 15) : ce bloc n'a pas UN sujet, il en nomme un a chaque appel
-    # (`is_fleet_human "$_m"`). Il se declare comme le convergeur — `LCARS_HUMAN_PROTOCOL_HOST=1`,
-    # jamais exporte, retire des le protocole charge — au lieu d'emprunter le login du siege comme
-    # sujet : le siege n'est pas ce que cette mesure regarde, et un sujet d'emprunt ferait de toute
-    # lecture « de la personne » (`human_home`) celle d'admiral.
+    # hote du protocole, comme le convergeur : ce bloc nomme un sujet a chaque appel au lieu
+    # d'emprunter le siege, sinon toute lecture « de la personne » serait celle d'admiral
     ( export LCARS_MODULE_PROTOCOL="$MODULE_PROTOCOL"
       LCARS_HUMAN_PROTOCOL_HOST=1
       # shellcheck source=../lib/human-protocol.sh
@@ -236,14 +282,14 @@ if [[ "${LCARS_CONVERGE_HUMANS:-1}" == "1" && -x "$CONVERGER_BIN" ]]; then
       while IFS= read -r _m; do
         [[ -n "$_m" ]] || continue
         is_fleet_human "$_m" && exit 0
-      done < <(getent group "${LCARS_FLEET_GROUP:-fleet}" | cut -d: -f4 | tr ',' '\n')
+       done < <(getent group "$LCARS_FLEET_GROUP" | cut -d: -f4 | tr ',' '\n')
       exit 1 ) || pop_rc=$?
-    if [[ "$pop_rc" -eq 0 ]]; then humans_rc=0; fi
   fi
+  case "$pop_rc" in 0) humans_rc=0 ;; 2) humans_rc=2 ;; esac
   if [[ "$humans_rc" -eq 0 ]]; then
     say "humain(s) de fleet : présent(s) — « fleet start » a quelqu'un pour le lancer"
   elif [[ "$pop_rc" -eq 2 ]]; then
-    say "population des humains NON mesuree — la frontiere systeme/humain n'est pas etablie (bornes d'uid illisibles dans ${PASSWD_DEFS:-/etc/login.defs}, le remede est ci-dessus) : GUARD B refusera tout « fleet start » tant qu'elle ne l'est pas"
+    say "population des humains NON mesurée — la frontière système/humain n'est pas établie, la cause est dite ci-dessus : GUARD B refusera tout « fleet start » tant qu'elle ne l'est pas"
   else
     say "AUCUN humain de fleet dans ce conteneur — GUARD B refusera tout « fleet start ». Enrôle quelqu'un sur la forge et ajoute-le à la team « humans » : la boucle le matérialise au tour suivant"
   fi
@@ -256,8 +302,8 @@ else
 fi
 
 # LES DEUX VERDICTS, ENSEMBLE ET DANS CET ORDRE. `humans_rc` n'existe que si la convergence a
-# tourné ; sans elle, seul `provision.rc` est publié et `container up` dit « NON MESURÉE » — ce qui est
-# exactement vrai. La présence de `provision.rc` garantit que l'autre est là quand il doit l'être.
+# tourné ; sans elle, seul `forge.rc` est publié et `container up` dit « NON MESURÉE » — ce qui est
+# exactement vrai. La présence de `forge.rc` garantit que l'autre est là quand il doit l'être.
 publier_verdicts
 
 # ─── 3bis. La console web (ttyd sous l'humain, sur SA socket AF_UNIX) ───────────────────────────
@@ -288,7 +334,7 @@ if [[ "${LCARS_CONSOLE:-1}" == "1" ]]; then
     # `redirect_uris` OAuth2) et le deck lisent la même valeur dans ce conteneur. L'ENTRÉE publiée
     # sur l'hôte (`LCARS_LANDING_PORT_BIND`) est un autre fait : « container up » la traduit en
     # `LCARS_DECK_ORIGINS` (B1). Le nom est unique depuis le lot 8 — plus de pont entre deux noms.
-    export LCARS_LANDING_PORT="${LCARS_LANDING_PORT:-20999}"
+    export LCARS_LANDING_PORT
     launch "home du conteneur (deck)" /var/log/lcars-landing.log -- \
       /opt/lcars/console-landing.sh --foreground \
       || say "home NON lancée (rc=$?) — AUCUNE console n'est joignable (elles n'ont plus de port, le landing est le seul chemin) ; ssh reste la porte"
@@ -302,12 +348,11 @@ fi
 # lit l'uid du pair que le noyau pose sur la socket, demande à la forge si ce login y porte
 # `is_admin`, et joue le geste. Séparer « prouver qui tu es » de « exécuter » est ce qui supprime le
 # groupe unix, sa projection, son cache et son rattrapage de dérive.
-LCARS_AUTHORITY_USER="${LCARS_AUTHORITY_USER:-lcars-authority}"
 if [[ "${LCARS_CATALOGUE_EXECUTOR:-1}" == "1" && -r /opt/lcars/catalogue-executor.py ]] \
    && id -u "$LCARS_AUTHORITY_USER" >/dev/null 2>&1; then
   # ⚠ `setpriv` PARCE QUE CE RAIL N'A PAS SYSTEMD. Sur le poste, `User=` de l'unite fait ce drop ;
-  # ici l'entrypoint est PID 1 et personne ne le fait a sa place. Le service ne doit pas heriter du
-  # root de l'entrypoint — il detient les secrets de la forge et n'a aucun privilege a exercer.
+  # ici ce boot est PID 1 et personne ne le fait a sa place. Le service ne doit pas heriter de son
+  # root — il detient les secrets de la forge et n'a aucun privilege a exercer.
   # Le `setpriv` est DANS la commande supervisée, pas autour du superviseur : celui-ci doit rester
   # root pour pouvoir relancer, et c'est l'ENFANT qui descend — exactement ce que `User=` fait dans
   # l'unité systemd du rail poste, où systemd reste root et le service non.
@@ -315,7 +360,7 @@ if [[ "${LCARS_CATALOGUE_EXECUTOR:-1}" == "1" && -r /opt/lcars/catalogue-executo
   # `User=`, et elle manquait. `lcars_socket.py` cree le dossier de socket AVEC L'UID DU SERVICE :
   # un service qui vient de DROPPER ne peut rien creer sous `/run/lcars` (root:root 0755). Sur le
   # poste, `25-directories` pose ce dossier et l'unite porte `User=` — deux moities d'un seul geste,
-  # tenues par deux acteurs. Ici l'entrypoint est le seul acteur, et il n'en tenait qu'une.
+  # tenues par deux acteurs. Ici ce boot est le seul acteur, et il n'en tenait qu'une.
   #
   # Les services qui restent root creent le leur tout seuls : ils masquaient le trou. Celui-ci, non.
   # Mesure .63 du 2026-08-30 : « PermissionError: [Errno 13] … '/run/lcars/authority' », cinq
@@ -325,7 +370,7 @@ if [[ "${LCARS_CATALOGUE_EXECUTOR:-1}" == "1" && -r /opt/lcars/catalogue-executo
   # ⚠ ICI ET NULLE PART AILLEURS : sur docker, `prov_runtime_dirs` ne declare AUCUN dossier de
   # `/run/lcars`, precisement pour qu'il n'y ait jamais deux createurs. `install -d` ne repose pas
   # le mode d'un dossier existant, donc un desaccord entre deux poseurs serait SILENCIEUX.
-  install -d -m 0750 -o "$LCARS_AUTHORITY_USER" -g "${LCARS_FLEET_GROUP:-fleet}" /run/lcars/authority \
+  install -d -m 0750 -o "$LCARS_AUTHORITY_USER" -g "$LCARS_FLEET_GROUP" /run/lcars/authority \
     || say "ATTENTION : /run/lcars/authority non pose — l'executeur de catalogue ne pourra pas ouvrir sa socket"
   launch "executeur de catalogue" /var/log/lcars-catalogue.log -- \
     setpriv --reuid "$LCARS_AUTHORITY_USER" --regid "$LCARS_AUTHORITY_USER" --init-groups \

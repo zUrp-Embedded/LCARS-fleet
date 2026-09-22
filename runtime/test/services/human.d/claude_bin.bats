@@ -34,12 +34,16 @@ setup() {
 
   # The real lib, plus the single override. Appended rather than edited: what the module calls is
   # the shipped code, and the diff between it and what runs here is these three lines.
-  # ⚠ `provision-lib.sh` SOURCE `docker-endpoint.sh` : le decor doit porter les DEUX, sinon
-  # toute la suite tombe sur un « No such file » dont la cause est cette ligne de setup.
-  # Le protocole cote PRODUIT (Q3, 2026-09-04), plus la lib de l'installeur : le module la sourcait
-  # et son hote reel ne la posait pas. Le decor recopie le protocole pour y surcharger `human_home`.
+  # Le decor recopie le protocole pour y surcharger `human_home`.
   cp "$BATS_TEST_DIRNAME/../../../services/lib/human-protocol.sh" "$SANDBOX/lib/human-protocol.sh"
   cp "$BATS_TEST_DIRNAME/../../../services/lib/module-protocol.sh" "$SANDBOX/lib/module-protocol.sh"
+  # ⚖ phase 5 : le protocole des humains SOURCE la lecture de la frontiere, posee a cote de lui
+  cp "$BATS_TEST_DIRNAME/../../../services/lib/uid-bounds.sh" "$SANDBOX/lib/uid-bounds.sh"
+  # ⚖ phase 6 : le protocole des modules SOURCE les primitives convergentes, posees a cote de lui
+  cp "$BATS_TEST_DIRNAME/../../../services/lib/primitives.sh" "$SANDBOX/lib/primitives.sh"
+  # ⚖ decision 3 : le protocole SOURCE le lecteur des faits. Le decor n'emporte pas l'arbre du
+  # produit : on lui NOMME le vrai lecteur, qui resout les vrais faits depuis son propre chemin.
+  export LCARS_FACTS_SH="$BATS_TEST_DIRNAME/../../../services/lib/facts.sh"
   cat >> "$SANDBOX/lib/human-protocol.sh" <<EOF
 
 human_home() { echo "$HOMEDIR"; }
@@ -142,6 +146,63 @@ EOF
   [[ "$output" == *"download"* && "$output" == *"échec"* ]]
   # La v1 faisait `rm` AVANT le download : un echec reseau coutait l'outil. Le fichier est toujours la.
   [ -f "$HOMEDIR/.local/bin/claude" ]
+}
+
+# ⚠ LA CAUSE LA PLUS FREQUENTE DE CET ECHEC NE SE VOIT PAS DANS SA PLAINTE. L'installeur officiel
+# prend l'artefact COMPRESSE quand `zstd` est la, et le binaire NU sinon — 230 Mo. Sur un lien
+# ordinaire il n'aboutit pas, et il le dit en « somme de controle » sur un fichier qui n'existe meme
+# pas. Mesure du 2026-09-17 sur LCARS-beta : aucun humain n'avait `claude`, et rien ne le disait.
+@test "installeur en echec avec zstd ABSENT : le refus NOMME zstd, sa consequence et le geste" {
+  # ⚠ L'ABSENCE SE CONSTRUIT, ELLE NE SE SUPPOSE PAS. Compter sur le fait que la machine du testeur
+  # n'a pas zstd, c'est mesurer cette machine : le jour ou elle l'aura, ce temoin tombera en
+  # accusant le module. Un PATH de liens vers TOUT sauf zstd rend l'absence deterministe.
+  local sans="$BATS_TEST_TMPDIR/sans-zstd" d f n; mkdir -p "$sans"
+  for d in /usr/bin /bin /usr/sbin /sbin; do
+    [ -d "$d" ] || continue
+    for f in "$d"/*; do
+      n="${f##*/}"
+      [[ -x "$f" && "$n" != zstd && ! -e "$sans/$n" ]] || continue
+      ln -s "$f" "$sans/$n"
+    done
+  done
+  # l'installeur telecharge, puis echoue
+  # ⚠ LA CIBLE EST CELLE DE `-o`, PAS `$3`. Le geste appelle `curl -fsSL --proto '=https' -m N -o
+  # <fichier> <url>` : prendre `$3` ecrivait un fichier nomme « =https » dans le repertoire courant —
+  # et deux d'entre eux ont fini commites (2026-09-18).
+  cat > "$BINDIR/curl" <<'EOF'
+#!/usr/bin/env bash
+out=""
+while [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift 2 ;; *) shift ;; esac; done
+[ -n "$out" ] || exit 1
+printf '#!/usr/bin/env bash\nexit 1\n' > "$out"
+exit 0
+EOF
+  chmod 0755 "$BINDIR/curl"
+  run env PATH="$BINDIR:$sans" bash "$MOD" apply
+
+  [[ "$output" == *"zstd"* ]] || { echo "$output"; return 1; }
+  [[ "$output" == *"230 Mo"* ]] || { echo "$output"; return 1; }
+  [[ "$output" == *"10-packages"* ]] || { echo "$output"; return 1; }
+}
+
+@test "installeur en echec avec zstd PRESENT : le refus reste court — on n'accuse pas un innocent" {
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$BINDIR/zstd"; chmod 0755 "$BINDIR/zstd"
+  # ⚠ LA CIBLE EST CELLE DE `-o`, PAS `$3`. Le geste appelle `curl -fsSL --proto '=https' -m N -o
+  # <fichier> <url>` : prendre `$3` ecrivait un fichier nomme « =https » dans le repertoire courant —
+  # et deux d'entre eux ont fini commites (2026-09-18).
+  cat > "$BINDIR/curl" <<'EOF'
+#!/usr/bin/env bash
+out=""
+while [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift 2 ;; *) shift ;; esac; done
+[ -n "$out" ] || exit 1
+printf '#!/usr/bin/env bash\nexit 1\n' > "$out"
+exit 0
+EOF
+  chmod 0755 "$BINDIR/curl"
+  run_apply
+
+  [[ "$output" == *"installeur officiel en échec"* ]] || { echo "$output"; return 1; }
+  [[ "$output" != *"zstd"* ]] || { echo "$output"; return 1; }
 }
 
 @test "aucune SOURCE alternative ne subsiste dans le module" {

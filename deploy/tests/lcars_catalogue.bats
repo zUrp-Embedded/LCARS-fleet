@@ -2,7 +2,7 @@
 # bats file_tags=integration
 # SOURCE: deploy/tests/lcars_catalogue.bats
 # AUTHOR: DrDree
-# STARDATE: (posee par /push-github)
+# STARDATE: 2026-08-12
 # STATUS: bats tests for bin/lcars — l'etat d'un catalogue vient de la FORGE, et de nulle part ailleurs
 
 # shellcheck disable=SC2016
@@ -72,7 +72,7 @@ FAKE
   [[ "$output" == *"Aucun des deux n'est choisi"* ]]
 }
 
-@test "list: la porte CHARGE fleet.env — l'adresse forge ne vit que la (D3)" {
+@test "list: la porte CHARGE fleet.env — l'adresse forge ne vit que là" {
   bin="$BATS_TEST_TMPDIR/fake_env_release"
   cat > "$bin" <<'FAKE'
 #!/usr/bin/env bash

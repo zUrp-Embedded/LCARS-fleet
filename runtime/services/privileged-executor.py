@@ -40,19 +40,24 @@ import urllib.request
 # rails, et c'est ce qui rend l'import valide sans installation.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import lcars_socket  # noqa: E402 -- apres le sys.path, c'est la condition de l'import
+import lcars_facts  # noqa: E402 -- meme raison : le lecteur des faits est pose a cote
 
 SOCKET_PATH = os.environ.get(
     "LCARS_TOOLCHAIN_SOCKET", "/run/lcars/privileged/toolchain.sock"
 )
 # ⚠ CETTE ACL BORNE QUI PEUT FRAPPER, ELLE N'AUTORISE RIEN : un membre du groupe ne gagne pas a
 # frapper ce qu'il n'obtiendrait en attendant le tick suivant du reconciliateur.
-SOCKET_GROUP = os.environ.get("LCARS_FLEET_GROUP", "fleet")
+SOCKET_GROUP = lcars_facts.get("LCARS_FLEET_GROUP")
 SOCKET_MODE = 0o660
 
 CONVERGE_BIN = os.environ.get(
     "LCARS_TOOLCHAIN_CONVERGE_BIN", "/usr/local/bin/lcars-toolchain-converge"
 )
-OPS_REPO = os.environ.get("LCARS_OPS_REPO", "fleet/lcars")
+# Le depot du systeme vit dans l'org systeme : une DERIVATION du fait, la meme des deux cotes du
+# rail — une org que l'installeur a renommee emmene son depot, sans qu'on la reecrive ici.
+OPS_REPO = os.environ.get(
+    "LCARS_OPS_REPO", "%s/_ops" % lcars_facts.get("LCARS_FORGE_ORG")
+)
 # ⚠ Nom GELE, autorite `Fleet.Toolchain.branch/0`, recopie tenue par le contrat
 # `toolchain.branch_single_source` : reglable ici seulement, il ferait converger le conteneur sur une
 # branche pendant que les demandes atterrissent dans une autre.
@@ -117,7 +122,13 @@ def serve_converge(conn):
 
         -> (la connexion suffit ; rien n'est lu sur le fil)
         <- "OK:<sha applique>"
-        <- "FAIL:<cause>"
+        <- "FAIL:<cause>"                    (refus du service : no_forge, forge_unreachable, busy,
+                                              converger_absent)
+        <- "FAIL:converger_failed:<code>"   (code de sortie du convergeur ; 2 = manifeste refuse,
+                                              que le reconciliateur gele jusqu'au merge suivant)
+
+    ⚠ LA FORME DE LA LIGNE EST UN CONTRAT : `Fleet.Admiral.ToolchainReconciler` lit le code apres
+    `converger_failed:`, et son temoin rejoue la ligne ecrite ici.
 
     ⚠ RIEN N'EST LU SUR LE FIL, ET C'EST DELIBERE. La socket dit le verbe, la forge dit le contenu.
     Un `readline` ici rouvrirait la seule surface par laquelle un appelant pourrait influer sur ce

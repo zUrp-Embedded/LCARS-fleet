@@ -6,17 +6,28 @@ metadata:
   name: engineer
   # vitrine: Il produit le code | Reçoit un brief, implémente, livre. Un pod par ticket : son contexte suit la mission du début à la fin.
   containment: bwrap
-  # LE PREMIER PRODUCTEUR QUI LE DIT, et `architect.yaml` avait ecrit d'avance la regle :
-  # « tous les autres roles restent au defaut vendor-only [...] c'est une DECLARATION, pas une
-  # derivation : le jour ou un producteur en a besoin, il le dit ». Ce jour est arrive, et le
-  # besoin est mecanique : ce role construit (`Bash` generique = mix/npm/cargo/pytest, cf. le
-  # commentaire de scope.allowedTools). Un build qui doit resoudre ses dependances et qui ne
-  # joint aucun registre echoue a la premiere dep externe.
+  # LE BESOIN EST MECANIQUE ICI : ce role construit (`Bash` generique = mix/npm/cargo/pytest, cf. le
+  # commentaire de scope.allowedTools), et un build qui resout ses dependances sans joindre aucun
+  # registre echoue a la premiere dep externe. `egress` ne lui donnait que les hotes de son vendor :
+  # mesure sur le banc beta, il butait sur `pypi.org` et `raw.githubusercontent.com`.
   #
-  # DEUX CLEFS, ET AUCUNE NE SUFFIT : `network` dit QUI a le droit de sortir, `scope.egress_hosts`
-  # dit OU. Le fail-closed est preserve a chaque couche — un role sans cette ligne ne recoit
-  # RIEN de plus que les hotes de son vendor, meme si un fichier d'hotes existe pour lui.
-  network: egress
+  # ⚠ RESEAU OUVERT, PAR DECISION (⚖ user 2026-09-17) — et la mecanique d'egress reste ENTIERE.
+  # Mesure sur le banc beta : quatre roles butaient sur le proxy (`pypi.org`,
+  # `raw.githubusercontent.com`, `github.com`), et une liste d'hotes deplace la friction sur
+  # l'humain au lieu de la supprimer : un role qui cherche, construit ou verifie ne peut pas
+  # declarer d'avance ce qu'il lira.
+  #
+  # CE QUE CA NE RETIRE PAS : le pod garde SON namespace reseau, sans aucune route vers l'exterieur ;
+  # il sort par son proxy CONNECT, ne resout aucun nom lui-meme, et une requete hors tunnel reste
+  # refusee. Le mur, le proxy, les hotes du vendor, les hotes converges : tout est en place.
+  #
+  # CE QUE CA RETIRE, ET IL FAUT LE SAVOIR : le mur d'hotes tenait aussi ce pod a l'ecart du
+  # loopback de la MACHINE (la forge, l'API du BEAM, le deck) et du LAN — le proxy compose depuis le
+  # reseau de l'hote, et `open` accepte n'importe quel hote et n'importe quel port.
+  #
+  # REFERMER EST UNE LIGNE : `network: egress` ici, et `scope.egress_hosts` nomme les hotes. Le
+  # defaut du code reste `vendor-only`, ferme — c'est ce fichier qui ouvre, pas le moteur.
+  network: open
   # Role identity coordinates, read by the session_id builder (single source of the WHAT):
   # role_index = role slot in the hexspeak UUID.
   role_index: 3

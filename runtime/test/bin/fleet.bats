@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # SOURCE: runtime/test/bin/fleet.bats
 # AUTHOR: consultant (remediation agent, off-fleet session)
-# STARDATE: 2026.248
+# STARDATE: 2026.262
 # STATUS: bats tests for bin/fleet env semantics (maintenance override)
 #
 # The launcher used to clobber LCARS_BOOT_PERMANENT_AT_START with an unconditional
@@ -129,6 +129,18 @@ teardown() {
   [[ "$output" == *"flag=false"* ]]
 }
 
+@test "la racine des sockets tmux : fleet l'exporte à la valeur que lcars résout, sous la racine d'état (RT-C-15)" {
+  # Une seule valeur côté hôte : `fleet start` l'exporte au BEAM et aux lanceurs, `lcars` (et `fleet
+  # status`, qui lui délègue) la résout seul. Les lanceurs n'en portent plus : host_launch.bats et
+  # bwrap_launch.bats tiennent leur refus.
+  run bash -c "unset LCARS_TMUX_SOCK_BASE; source '$SCRIPT'; setup_env; echo \"base=\$LCARS_TMUX_SOCK_BASE\""
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"base=$HOME/.lcars/run/tmux-sock"* ]]
+  [ -d "$HOME/.lcars/run/tmux-sock" ]
+  run env -u LCARS_TMUX_SOCK_BASE HOME="$HOME" "$BATS_TEST_DIRNAME/../../bin/lcars" help
+  [[ "$output" == *"LCARS_TMUX_SOCK_BASE=$HOME/.lcars/run/tmux-sock"* ]]
+}
+
 @test "sourcing the launcher never runs the dispatcher (source guard)" {
   run bash -c "source '$SCRIPT'; echo sourced-ok"
   [ "$status" -eq 0 ]
@@ -211,7 +223,7 @@ NEUTRALISED_START='export LCARS_SYSADMIN_UID=$(( $(id -u) + 1 )); dtmux() { [[ "
   # peut pas y suppleer, sinon le garde lit sa politique dans l'environnement du processus qu'il garde.
   rm -f "$LCARS_SEAT_UID_FILE"
   run bash -c "export LCARS_SYSADMIN_UID=99999; source '$SCRIPT'; cmd_start"
-  [[ "$output" == *"siege non declare"* ]]
+  [[ "$output" == *"siège non déclaré"* ]]
   [ "$status" -ne 0 ]
 }
 
@@ -277,11 +289,13 @@ NEUTRALISED_START='export LCARS_SYSADMIN_UID=$(( $(id -u) + 1 )); dtmux() { [[ "
   [[ "$output" != *"credentials claude absentes"* ]]   # la porte suivante n'est PAS atteinte
 }
 
-@test "GUARD B: la phrase du refus est CELLE du protocole des humains — un temoin tient l'egalite, pas un commentaire" {
-  # `bin/fleet` ne source pas `lib/human-protocol.sh` (un vocabulaire de module, pas de lanceur) :
-  # il en porte cinq lignes. Ce qui garantit que les deux disent la MEME chose au meme moment est
-  # ce temoin : le remede du protocole (`UID_BOUNDS_WHY`), sur le meme fichier — absent, puis
-  # sans UID_MAX — doit se lire tel quel dans le refus du lanceur, borne manquante comprise.
+@test "GUARD B: la phrase du refus est CELLE du protocole des humains — meme LECTURE, pas deux copies" {
+  # ⚖ Phase 5 : ce temoin tenait l'EGALITE de deux ecritures — `bin/fleet` portait cinq lignes de
+  # lecture parce qu'il « ne peut pas sourcer le protocole » (vrai : un vocabulaire de module).
+  # Les deux sourcent maintenant la meme LECTURE (`lib/uid-bounds.sh`), qui n'impose rien et
+  # n'imprime rien. Le temoin reste, et mesure autre chose : que le lanceur RELAIE bien la cause
+  # au lieu d'en reformuler une — un refus qui nommerait la mauvaise borne enverrait l'operateur
+  # reparer le mauvais objet.
   local lib="$BATS_TEST_DIRNAME/../../services/lib"
   local variant defs expected
   for variant in absent sans-max; do
@@ -658,4 +672,30 @@ make_fake_beam_bin() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"d4d23d792"* ]]
   [[ "$output" != *"9ee4a4bcd"* ]]
+}
+
+# ⚠ DEUX FICHIERS, ET L'ORDRE EST LE SUJET. Ce que l'installation décide pour la machine
+# (`/etc/lcars/services.env` : la forge, l'org, la racine du magasin) n'était lu que par les
+# daemons : une fleet lancée à la main par un humain n'avait pas `LCARS_STORE_ROOT`, et perdait en
+# silence les montages du magasin, les hôtes convergés de son egress et l'assignataire du pilote
+# (A-201). Elle le lit désormais AVANT le fichier de l'humain, qui garde le dernier mot.
+@test "l'environnement de la MACHINE est chargé, et celui de l'humain gagne dessus" {
+  local machine="$BATS_TEST_TMPDIR/services.env" humain="$BATS_TEST_TMPDIR/fleet.env"
+  printf 'LCARS_STORE_ROOT=/magasin/de/la/machine\nFORGE_BASE_URL=http://machine:3000\n' > "$machine"
+  printf 'FORGE_BASE_URL=http://choix-humain:3000\n' > "$humain"
+
+  run env LCARS_SERVICES_ENV="$machine" LCARS_FLEET_ENV="$humain" bash -c \
+    "source '$SCRIPT'; load_env; printf '%s|%s' \"\$LCARS_STORE_ROOT\" \"\$FORGE_BASE_URL\""
+  [ "$status" -eq 0 ]
+  [ "$output" = "/magasin/de/la/machine|http://choix-humain:3000" ]
+}
+
+@test "sans fichier de machine (le conteneur : l'image porte ses valeurs), rien ne casse" {
+  local humain="$BATS_TEST_TMPDIR/fleet.env"
+  printf 'FORGE_BASE_URL=http://image:3000\n' > "$humain"
+
+  run env LCARS_SERVICES_ENV="$BATS_TEST_TMPDIR/absent.env" LCARS_FLEET_ENV="$humain" bash -c \
+    "source '$SCRIPT'; load_env; printf '%s|%s' \"\${LCARS_STORE_ROOT:-<vide>}\" \"\$FORGE_BASE_URL\""
+  [ "$status" -eq 0 ]
+  [ "$output" = "<vide>|http://image:3000" ]
 }

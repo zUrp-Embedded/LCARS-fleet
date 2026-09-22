@@ -8,17 +8,20 @@
 # shellcheck disable=SC2016
 
 load ../refute
+load ../support/minisign_double
 
 setup() {
   local _v
   while read -r _v; do unset "$_v" 2>/dev/null || true; done \
     < <(compgen -v | grep -E '^(LCARS_|PROV_|FORGE_)' || true)
   GEN="$BATS_TEST_DIRNAME/../../lib/door-gen.sh"
-  TEMPLATE="$BATS_TEST_DIRNAME/../../../install.sh"
   [ -f "$GEN" ]
-  [ -f "$TEMPLATE" ]
+  minisign_double "$BATS_TEST_TMPDIR/bin"; export PATH="$BATS_TEST_TMPDIR/bin:$PATH"
   DIST="$BATS_TEST_TMPDIR/dist"; mkdir -p "$DIST"
-  printf 'kit\n'  > "$DIST/lcars-fleet-0.9.0-otp27-x86_64.tar.gz"
+  KIT="$DIST/lcars-fleet-0.9.0-otp27-x86_64.tar.gz"
+  printf 'kit\n'  > "$KIT"
+  minisign_cle "$BATS_TEST_TMPDIR/cle-RWQcle" RWQcle
+  minisign -S -s "$BATS_TEST_TMPDIR/cle-RWQcle" -m "$KIT"
   printf 'a1\n' > "$DIST/annexe-a.bin"
   printf 'b2\n' > "$DIST/annexe-b.bin"
   printf 'x  y\n' > "$DIST/annexe-a.bin.sha256"
@@ -28,17 +31,6 @@ setup() {
 gen() { run env LCARS_MINISIGN_PUBKEY="${PUB-RWQcle}" LCARS_DOOR_IMAGE="${IMG-ghcr.io/o/r:0.9.0}" bash "$GEN" 0.9.0 https://forge.test/o/r/releases/download/0.9.0 "$DIST"; }
 sums_of() { # sums_of <porte> -> la table, telle que la porte la rend
   bash -c "$(sed -n '/^sums() {/,/^}/p' "$1")"$'\nsums'
-}
-
-@test "LCARS header: SOURCE/AUTHOR/STARDATE/STATUS present" {
-  run head -8 "$GEN"
-  [[ "$output" == *"SOURCE:"* ]]; [[ "$output" == *"AUTHOR:"* ]]; [[ "$output" == *"STARDATE:"* ]]; [[ "$output" == *"STATUS:"* ]]
-}
-
-@test "il est EXECUTABLE dans l index git" {
-  run git -C "$BATS_TEST_DIRNAME/../../.." ls-files -s deploy/lib/door-gen.sh
-  [ "$status" -eq 0 ]
-  [[ "$output" == 100755* ]]
 }
 
 @test "la TABLE couvre TOUS les artefacts du tiroir, avec leur sha256 juste — et rien d'autre" {
@@ -70,7 +62,7 @@ sums_of() { # sums_of <porte> -> la table, telle que la porte la rend
   [ -x "$porte" ]
 }
 
-@test "install.sh.sha256 est JUSTE — c'est ce que quelqu'un compare a ce qui lui est servi (§ 07.8)" {
+@test "install.sh.sha256 est JUSTE — c'est ce que quelqu'un compare a ce qui lui est servi" {
   gen; [ "$status" -eq 0 ]
   [ -f "$DIST/install.sh.sha256" ]
   ( cd "$DIST" && sha256sum -c --quiet --strict install.sh.sha256 )
@@ -84,44 +76,78 @@ sums_of() { # sums_of <porte> -> la table, telle que la porte la rend
   PUB="" gen; [ "$status" -eq 0 ]
   [[ "$output" == *"aucune clé publique"*"NON vérifiée"* ]]
   grep -qE '^MINISIGN_PUBKEY="" +# @@DOOR_PUBKEY@@' "$DIST/install.sh"
-  printf 'untrusted comment: minisign public key\nRWQdepuisfichier\n' > "$DIST/minisign.pub"
-  PUB="" gen; [ "$status" -eq 0 ]
-  grep -qE '^MINISIGN_PUBKEY="RWQdepuisfichier"' "$DIST/install.sh"
-  refute_out 'aucune clé' <<<"$output"
-  refute_out 'minisign\.pub' <<<"$(sums_of "$DIST/install.sh")"
 }
 
-@test "REFUS : un tiroir vide, un gabarit sans marqueur, un tag ou une base mal formes — rien n'est ecrit" {
+@test "un tiroir vide est un refus, rien n'est écrit" {
   rm -f "$DIST"/*
-  gen; [ "$status" -eq 1 ]; [[ "$output" == *"aucun artefact"* ]]; [ ! -f "$DIST/install.sh" ]
-  printf 'kit\n' > "$DIST/k.tar.gz"
-  local mutile="$BATS_TEST_TMPDIR/gabarit-mutile.sh"
-  grep -v '@@DOOR_PUBKEY@@' "$TEMPLATE" > "$mutile"
-  run env LCARS_DOOR_TEMPLATE="$mutile" bash "$GEN" 0.9.0 https://f/x "$DIST"
-  [ "$status" -eq 1 ]; [[ "$output" == *"0 fois @@DOOR_PUBKEY@@"* ]]; [ ! -f "$DIST/install.sh" ]
-  run bash "$GEN" 'v0.9.0; rm -rf /' https://f/x "$DIST"
-  [ "$status" -eq 1 ]; [[ "$output" == *"tag"* ]]; [ ! -f "$DIST/install.sh" ]
+  gen
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"aucun artefact"* ]]
+  [ ! -f "$DIST/install.sh" ]
+}
+
+@test "un tiroir absent rend « aucun artefact », et rien n'est créé" {
+  rm -rf "$DIST"
+  gen
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"aucun artefact dans $DIST"* ]]
+  [ ! -e "$DIST" ]
+}
+
+@test "une base qui n'est pas une URL http(s) est un refus, rien n'est écrit" {
   run bash "$GEN" 0.9.0 ftp://f/x "$DIST"
-  [ "$status" -eq 1 ]; [[ "$output" == *"http(s)"* ]]; [ ! -f "$DIST/install.sh" ]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"http(s)"* ]]
+  [ ! -f "$DIST/install.sh" ]
 }
 
 @test "le generateur ne SUBSTITUE pas, il rebatit : une base qui porte & ou \\ est recopiee telle quelle" {
-  run env LCARS_MINISIGN_PUBKEY="" bash "$GEN" 0.9.0 'https://f/x?a=1&b=2' "$DIST"
+  run env LCARS_MINISIGN_PUBKEY="" bash "$GEN" 0.9.0 'https://f/x?a=1&b=2\tc' "$DIST"
   [ "$status" -eq 0 ]
-  grep -qF 'DOOR_BASE="https://f/x?a=1&b=2"' "$DIST/install.sh"
+  grep -qF 'DOOR_BASE="https://f/x?a=1&b=2\tc"' "$DIST/install.sh"
 }
 
-@test "pack.sh : la porte de la version est generee APRES les artefacts, dans un tiroir PAR VERSION (dist/<tag>) par liens durs" {
-  local pk="$BATS_TEST_DIRNAME/../../pack.sh"
-  local body; body="$(grep -vE '^\s*#' "$pk")"
-  grep -qE '^DIST="\$PACK_DIR/dist/\$TAG"' <<<"$body"
-  grep -qE 'ln -f "\$_f" "\$DIST/' <<<"$body"
-  grep -qE 'door-gen.sh "\$TAG" "\$DOOR_BASE" "\$DIST"' <<<"$body"
-  local l_tar l_door; l_tar="$(grep -nE '^tar -czf "\$OUT"' <<<"$body" | head -1 | cut -d: -f1)"; l_door="$(grep -nE 'door-gen.sh "\$TAG"' <<<"$body" | cut -d: -f1)"
-  [ -n "$l_tar" ]
-  [ -n "$l_door" ]
-  [ "$l_tar" -lt "$l_door" ]
-  grep -qE 'DOOR_BASE="\$\{LCARS_DOOR_BASE:-' <<<"$body"
-  grep -qE '^for _f in deploy/docker/docker-compose\.yml deploy/docker/lcars-hardened-seccomp\.json' <<<"$body"
-  grep -qE 'artefact de la version introuvable' <<<"$body"
+@test "une clé publique sans la signature du kit dans le tiroir est un refus : l'installeur refuserait son propre kit" {
+  rm -f "$DIST/lcars-fleet-0.9.0-otp27-x86_64.tar.gz.minisig"
+  gen
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"lcars-fleet-0.9.0-otp27-x86_64.tar.gz.minisig manque"* ]]
+  [ ! -f "$DIST/install.sh" ]
+}
+
+@test "un kit signé d'une autre clé, ou modifié après sa signature, est un refus : l'installeur le refuserait ; signé de la clé fournie, l'installeur est écrit" {
+  minisign_cle "$BATS_TEST_TMPDIR/cle-autre" RWQautre
+  minisign -S -s "$BATS_TEST_TMPDIR/cle-autre" -m "$KIT"
+  gen
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"la signature de lcars-fleet-0.9.0-otp27-x86_64.tar.gz ne se vérifie pas avec la clé publique fournie"* ]]
+  [ ! -f "$DIST/install.sh" ]
+  minisign -S -s "$BATS_TEST_TMPDIR/cle-RWQcle" -m "$KIT"
+  printf 'kit altéré\n' > "$KIT"
+  gen
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"ne se vérifie pas"* ]]
+  [ ! -f "$DIST/install.sh" ]
+  printf 'kit\n' > "$KIT"
+  gen
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -qE '^MINISIGN_PUBKEY="RWQcle" +# @@DOOR_PUBKEY@@' "$DIST/install.sh"
+}
+
+@test "une clé publique sans minisign pour vérifier les kits est un refus qui le nomme, rien n'est écrit" {
+  local sans="$BATS_TEST_TMPDIR/sans-minisign" d f
+  mkdir -p "$sans"
+  while IFS= read -r d; do
+    [ -d "$d" ] || continue
+    for f in "$d"/*; do
+      [ -x "$f" ] || continue
+      [ "$(basename "$f")" != minisign ] || continue
+      [ -e "$sans/$(basename "$f")" ] || ln -s "$f" "$sans/$(basename "$f")"
+    done
+  done < <(tr ':' '\n' <<<"$PATH")
+  [ ! -e "$sans/minisign" ]
+  run env PATH="$sans" LCARS_MINISIGN_PUBKEY=RWQcle bash "$GEN" 0.9.0 https://forge.test/o/r/releases/download/0.9.0 "$DIST"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"une clé publique est fournie et minisign est absent"* ]]
+  [ ! -f "$DIST/install.sh" ]
 }

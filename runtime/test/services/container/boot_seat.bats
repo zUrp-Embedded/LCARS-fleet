@@ -2,7 +2,7 @@
 # SOURCE: runtime/test/services/container/boot_seat.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-23
-# STATUS: bats tests for entrypoint.sh — le SIEGE du conteneur est le #1 de la forge, et il le DERIVE
+# STATUS: bats tests for container/boot.sh — le SIEGE du conteneur est le #1 de la forge, et il le DERIVE
 #
 # ─── LA REGLE QUE CES TEMOINS GARDENT ───────────────────────────────────────────────────────────
 #
@@ -12,7 +12,7 @@
 #
 # ⚠ AUCUN RAIL NE PART DE RIEN, et c'est ce qui interdit d'inventer un nom. Le poste a son systeme
 # avant LCARS, le conteneur vise une forge qui tourne deja. Le seul cas from-scratch est `--bench`, qui
-# cree tout — et il PASSE le nom lui-meme (`bench-up.sh:353`). Un defaut `admiral` ne sert donc aucun
+# cree tout — et il PASSE le nom lui-meme (`LCARS_ADMIRAL`, dans `bench-up.sh`). Un defaut `admiral` ne sert donc aucun
 # appelant, et il nuit : c'est exactement la coincidence que ce code retire. D'ou le REFUS en
 # derniere branche, la ou l'ancienne ecriture nommait.
 #
@@ -118,9 +118,9 @@ seat_sh() { # seat_sh <corps> — joue la tete puis le corps, decor complet
   # « elle tourne et reste joignable POUR ETRE REPAREE ».
   local src="$BATS_TEST_DIRNAME/../../../services/container/boot.sh"
   local code; code="$(grep -vE '^\s*#' "$src")"
-  # Lot 6 : la derivation est dans `container/init.sh seat` (rc 3 = indeterminable) ; l'entrypoint lit ce
-  # code et reste debout.
-  grep -qE '^\s*3\) say "conteneur EN ATTENTE DE CONFIGURATION' <<<"$code"
+  # La derivation est dans `container/init.sh seat` (rc 4 = indeterminable : 3 appartient a la garde
+  # du protocole, la mort avant verdict) ; l'entrypoint lit ce code et reste debout.
+  grep -qE '^\s*4\) say "conteneur EN ATTENTE DE CONFIGURATION' <<<"$code"
   grep -q 'exec sleep infinity' <<<"$code"
   # ⚠ CE COMMENTAIRE DISAIT « la negation s'ecrit `!`, terminale sous `set -e` », ET IL ETAIT FAUX
   # DEUX FOIS : cette ligne n'est pas terminale (une assertion la suit), et `!` est de toute facon

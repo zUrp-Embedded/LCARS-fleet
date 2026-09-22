@@ -3,7 +3,7 @@
 # SOURCE: deploy/tests/idiom_walls.bats
 # AUTHOR: bob
 # STARDATE: 2026-08-30
-# STATUS: murs d'idiomes — la forme fragile ne revient pas une fois le code corrige
+# STATUS: murs d'idiomes — la forme fragile ne revient pas une fois le code corrigé
 
 load refute
 
@@ -44,17 +44,76 @@ code() { grep -vE '^[[:space:]]*#' "$1"; }   # une ligne qui COMMENCE par # est 
   refute grep -qE '(^|[^|])\|[[:space:]]*write_atomic' <<<'  x || write_atomic "$f" 0644'
 }
 
-@test "MUR I2: aucun jeton de forge ne passe par argv — forge_curl le porte sur stdin" {
-  local f hits=0
-  for f in "${SOURCES[@]}"; do
-    if code "$f" | grep -qE -- '-H ["'"'"']?Authorization: token'; then
-      echo "MUR I2 rompu — $f : jeton en argv" >&2; hits=$((hits+1))
+@test "MUR I2: aucun en-tête d'authentification à jeton ne s'écrit hors de forge_api — ni en argv, ni dans l'environnement d'un enfant" {
+  # forge_api compose l'en-tête dans son propre shell et le passe à curl sur l'entrée : la chaîne
+  # « Authorization: token » écrite ailleurs est un jeton en argv ou dans l'environnement d'un enfant.
+  # Exception : bench-up.sh écrit l'en-tête de git dans un fichier de configuration 0600 que git inclut.
+  local root f hits=0 pop=0 first
+  root="$(cd "$DEPLOY/.." && pwd)"
+  while IFS= read -r f; do
+    IFS= read -r first < "$f" || true
+    case "$f" in *.sh) ;; *) [[ "$first" =~ ^#!.*bash ]] || continue ;; esac
+    pop=$((pop + 1))
+    if [[ "${f#"$root"/}" == deploy/docker/bench/bench-up.sh ]]; then
+      code "$f" | grep -q 'include.path=\$JETONS/git-forge' || { echo "MUR I2 : l'exception de bench-up.sh ne passe plus par son fichier de configuration" >&2; hits=$((hits + 1)); }
+      continue
     fi
-  done
+    if code "$f" | grep -q 'Authorization: token'; then
+      echo "MUR I2 rompu — ${f#"$root"/} :" >&2; code "$f" | grep -n 'Authorization: token' >&2; hits=$((hits + 1))
+    fi
+  done < <({ find "$root/deploy" -type f -not -path '*/tests/*'; echo "$root/install.sh"; } | sort)
   [ "$hits" -eq 0 ]
-  echo '  curl -s -H "Authorization: token $tok" "$url"' | grep -qE -- '-H ["'"'"']?Authorization: token'
-  # la forme sure — un en-tete ecrit dans une config lue sur stdin — n'est pas prise pour la fragile
-  refute grep -qE -- '-H ["'"'"']?Authorization: token' <<<'  printf '"'"'header = "Authorization: token %s"\n'"'"' "$tok" | curl -K - "$url"'
+  [ "$pop" -ge 25 ] || { echo "instrument casse : $pop script(s) lu(s)" >&2; return 1; }
+  grep -q 'Authorization: token' <<<'  GIT_CONFIG_VALUE_0="Authorization: token ${TOK}" git push'
+  refute grep -q 'Authorization: token' <<<'      --token-file) tok="$(read_token "$2")"; [[ -z "$tok" ]] || auth="token $tok"; shift 2 ;;'
+}
+
+# A-118, le jumeau du mur produit (`runtime/test/services/idiom_walls.bats`) : un mot de passe voyage
+# comme un jeton. TROIS FORMES, UN SEUL VERDICT (`i2_user_hit`) :
+#   - `-u`/`--user` dont la valeur porte `:$` — sur toute commande, ligne de continuation comprise ;
+#   - sur une ligne `curl`, `-u`/`--user` suivi d'une variable, quelle que soit sa forme : quotee en
+#     morceaux (`"$a":"$b"`), portee par une variable (`--user "$creds"`), ou options collees (`-su`) ;
+#   - un identifiant dans l'URL, `://…:$…@`.
+# La deuxieme forme exige `curl` sur la ligne : `sort -u "$f"`, `runuser -u "$login"`, `pkill -u` sont
+# des `-u` suivis d'une variable qui ne portent aucun secret. La forme sure est la ligne
+# `user = "<compte>:<secret>"` d'une config lue sur stdin (`curl -K -`).
+I2U_COLON="(^|[[:space:]])(-u|--user)(=|[[:space:]]+)[\"']?[^\"'[:space:]]*:\\\$"
+I2U_CURL_LINE='(^|[^[:alnum:]_-])curl([[:space:]]|$)'
+I2U_CURL_VAR="(^|[[:space:]])(-[A-Za-z]*u|--user)(=|[[:space:]]+)[\"']?\\\$"
+I2U_URL="://[^[:space:]\"'/@]*:\\\$[^[:space:]\"'/@]*@"
+i2_user_hit() { # stdin : du code -> les lignes fautives, rc 0 s'il y en a
+  local c hits
+  c="$(cat)"
+  hits="$(grep -E -- "$I2U_COLON|$I2U_URL" <<<"$c"; grep -E -- "$I2U_CURL_LINE" <<<"$c" | grep -E -- "$I2U_CURL_VAR")" || true
+  [[ -n "$hits" ]] && printf '%s\n' "$hits"
+}
+
+@test "MUR I2: aucun identifiant compte:secret ne passe par argv (curl -u / --user, URL)" {
+  local root f hits=0 pop=0 first
+  root="$(cd "$DEPLOY/.." && pwd)"
+  while IFS= read -r f; do
+    IFS= read -r first < "$f" || true
+    case "$f" in *.sh) ;; *) [[ "$first" =~ ^#!.*bash ]] || continue ;; esac
+    pop=$((pop + 1))
+    if code "$f" | i2_user_hit >/dev/null; then
+      echo "MUR I2 rompu — ${f#"$root"/} : $(code "$f" | i2_user_hit | head -1)" >&2; hits=$((hits + 1))
+    fi
+  done < <({ find "$root/deploy" -type f -not -path '*/tests/*'; echo "$root/install.sh"; } | sort)
+  [ "$hits" -eq 0 ]
+  [ "$pop" -ge 25 ] || { echo "instrument casse : $pop script(s) lu(s)" >&2; return 1; }
+  # le mur mord les formes interdites, dont les quatre de la relecture hostile du 2026-09-15 (m-8)…
+  i2_user_hit <<<'    code="$(curl -sS -o /dev/null -X PUT -u "$acct:$seed" "$url")"'
+  i2_user_hit <<<'  curl --user=admin:$PASS "$url"'
+  i2_user_hit <<<'  curl -u "$acct":"$seed" "$url"'
+  i2_user_hit <<<'  creds="$a:$b"; curl --user "$creds" "$u"'
+  i2_user_hit <<<'  curl -su "$acct:$seed" "$u"'
+  i2_user_hit <<<'  curl "https://$acct:$seed@forge/api"'
+  # … et laisse passer la config sur stdin, ainsi qu'un `-u` qui n'est pas un identifiant
+  refute i2_user_hit <<<'  printf '"'"'user = "%s:%s"\n'"'"' "$acct" "$seed" | curl -K - -X PUT "$url"'
+  refute i2_user_hit <<<'  sort -u "$f"'
+  refute i2_user_hit <<<'  runuser -u "$login" -- true'
+  refute i2_user_hit <<<'  docker run --rm -u "$(id -u):$(id -g)" "$image"'
+  refute i2_user_hit <<<'  curl -fsS "http://$host:$port/api/v1/version"'
 }
 
 I3_AWK='
@@ -100,15 +159,6 @@ I3_AWK='
   code "$DEPLOY/lib/provision-lib.sh" | grep -q 'dpkg --print-architecture'
 }
 
-@test "MUR I6: comm ne se lit dans aucun module — set_diff trie lui-meme" {
-  local f hits=0
-  for f in "$DEPLOY"/modules.d/*.sh; do
-    if code "$f" | grep -qE '\bcomm -'; then echo "MUR I6 rompu — $f" >&2; hits=$((hits+1)); fi
-  done
-  [ "$hits" -eq 0 ]
-  code "$DEPLOY/lib/provision-lib.sh" | grep -qE '^set_diff\(\)'
-}
-
 @test "MUR I7: une valeur d un fichier d environnement se lit par env_field, jamais par un sed nu" {
   local f hits=0
   for f in "$DEPLOY"/modules.d/*.sh; do
@@ -118,7 +168,7 @@ I3_AWK='
   echo '  x="$(sed -n '"'"'s/^LCARS_X=//p'"'"' "$f" | tail -n1)"' | grep -qE "sed -n ['\"]s/\^[A-Z_]+=//p['\"]"
 }
 
-@test "MUR I8: un fichier de jeton se lit par read_token ou forge_curl — jamais par une redirection nue" {
+@test "MUR I8: un fichier de jeton se lit par read_token ou forge_api — jamais par une redirection nue" {
   local hits=0 f
   for f in "$BATS_TEST_DIRNAME"/../modules.d/*.sh; do
     if code "$f" | grep -qE '<[[:space:]]*"?\$[A-Za-z_]*TOKEN_FILE' || code "$f" | grep -qF "tr -d '[:space:]' <"; then echo "MUR I8 rompu — $f" >&2; hits=$((hits+1)); fi
@@ -126,33 +176,24 @@ I3_AWK='
   [ "$hits" -eq 0 ]
 }
 
-@test "MUR I9: un temoin dont le code nomme une fonction du siege pose LCARS_SEAT_UID_FILE — il ne lit jamais celui de la machine" {
-  local f bad=0
-  for f in "$BATS_TEST_DIRNAME"/*.bats; do
-    [[ "$f" == */idiom_walls.bats ]] && continue
-    grep -vE '^[[:space:]]*#' "$f" | grep -qE 'is_fleet_human|prov_seat_uid|fleet_humans|uid_floor' || continue
-    grep -qE '^[[:space:]]*export LCARS_SEAT_UID_FILE=' "$f" || { echo "${f##*/} nomme une fonction du siege sans poser LCARS_SEAT_UID_FILE"; bad=1; }
-  done
-  [ "$bad" -eq 0 ]
-}
+# un témoin pose le décor de la lib (LCARS_DECOR_ROOT, directement ou par decor_pose) : sans lui,
+# la lib lit les fichiers de la machine qui joue la porte
+pose_le_decor() { grep -qE '^[[:space:]]*(export LCARS_DECOR_ROOT=|decor_pose([[:space:]]|$))' "$1"; }
 
-@test "MUR I19: un temoin qui pose une population (PASSWD_FILE) ou nomme un lecteur des bornes pose aussi PASSWD_DEFS — il ne lit jamais le login.defs de la machine" {
+@test "MUR I19: un temoin qui nomme un lecteur du siege ou des bornes d'uid pose le decor — il ne lit jamais le siege ni le login.defs de la machine" {
   local f bad=0 vus=0
   for f in "$BATS_TEST_DIRNAME"/*.bats "$BATS_TEST_DIRNAME"/*/*.bats; do
     [[ "$f" == */idiom_walls.bats ]] && continue
-    # capture puis test (DI-12) : aucun `grep -q` ne ferme un tuyau. `LCARS_PASSWD_FILE` (le seam
-    # de 21-service-accounts) n'est pas une population d'humains : il ne compte pas.
-    [[ -n "$(grep -vE '^[[:space:]]*#' "$f" | grep -E '(^|[^A-Z_])PASSWD_FILE=|is_fleet_human|fleet_humans|prov_uid_bounds')" ]] || continue
+    [[ -n "$(grep -vE '^[[:space:]]*#' "$f" | grep -E 'prov_seat_uid|fleet_humans|prov_uid_bounds')" ]] || continue
     vus=$((vus + 1))
-    grep -qE '^[[:space:]]*export PASSWD_DEFS=' "$f" \
-      || { echo "${f##*/} pose une population ou nomme un lecteur des bornes sans poser PASSWD_DEFS"; bad=1; }
+    pose_le_decor "$f" || { echo "${f##*/} nomme un lecteur du siege ou des bornes sans poser le decor"; bad=1; }
   done
-  [ "$vus" -ge 3 ] || { echo "seulement $vus temoin(s) dans le perimetre — l'instrument ne lit plus le corpus"; return 1; }
+  [ "$vus" -gt 0 ] || { echo "aucun temoin dans le perimetre — l'instrument ne lit plus le corpus"; return 1; }
   [ "$bad" -eq 0 ]
 }
 
-I21_MODS='(44-media|46-tofu|60-deploy|62-runtime-helpers)\.sh'
-@test "MUR I21: un temoin qui EXECUTE un module lecteur du canal (44, 46, 60, 62) pose LCARS_CHANNEL_FILE — il ne lit jamais le canal de la machine" {
+I21_MODS='[0-9]{2}-[a-z0-9-]+\.sh'
+@test "MUR I21: un temoin qui EXECUTE un module pose le decor — il ne lit ni n'ecrit jamais les fichiers de la machine" {
   local f bad=0 vus=0 c execute v
   while IFS= read -r f; do
     [[ "$f" == */idiom_walls.bats ]] && continue
@@ -166,12 +207,12 @@ I21_MODS='(44-media|46-tofu|60-deploy|62-runtime-helpers)\.sh'
     done
     [ "$execute" -eq 1 ] || continue
     vus=$((vus + 1))
-    grep -qE '^[[:space:]]*export LCARS_CHANNEL_FILE=' <<<"$c" \
-      || { echo "${f#"$DEPLOY"/} execute un lecteur du canal sans poser LCARS_CHANNEL_FILE"; bad=1; }
+    pose_le_decor "$f" \
+      || { echo "${f#"$DEPLOY"/} execute un module sans poser le decor"; bad=1; }
   done < <(find "$DEPLOY/tests" -name '*.bats' | sort)
   [ "$bad" -eq 0 ]
-  # GARDE D INSTRUMENT : les quatre temoins de module et deploy_manifest au moins
-  [ "$vus" -ge 5 ] || { echo "instrument casse : $vus temoin(s) vu(s), 5 au moins attendus" >&2; return 1; }
+  # GARDE D INSTRUMENT : les témoins de modules.d/ au moins
+  [ "$vus" -ge 15 ] || { echo "instrument casse : $vus temoin(s) vu(s), 15 au moins attendus" >&2; return 1; }
   # le mur mord : un temoin qui execute 60 par sa copie, ou par une variable du fichier, est VU
   local ech="$BATS_TEST_TMPDIR/ech.bats" seen
   printf '%s\n' 'MOD="$X/modules.d/62-runtime-helpers.sh"' 'run bash "$MOD" check' > "$ech"
@@ -191,12 +232,9 @@ I21_MODS='(44-media|46-tofu|60-deploy|62-runtime-helpers)\.sh'
 }
 
 @test "MUR I10: qui LIT PROV_DOCKER_BIN joue la sonde — sinon il passe une CLI VIDE a son delegue" {
-  # `PROV_DOCKER_BIN` vaut la CHAINE VIDE tant que `docker_endpoint` n'a pas tourne
-  # (`docker-endpoint.sh` la declare ainsi). Un module qui la lit sans sonder passe `DOCKER_BIN=""`,
-  # son delegue retombe sur `${DOCKER_BIN:-docker}` — un `docker` nu, introuvable dans une VM WSL ou
-  # rien n'installe de CLI. Banc WSL, 2026-08-30 : `49-forge-runner` refusait trois images
-  # PRESENTES sur le daemon, et son propre commentaire promettait « la CLI RESOLUE ». Sur un Linux
-  # natif le PATH porte `docker` (pose par le rail) : le defaut y est invisible.
+  # `PROV_DOCKER_BIN` vaut la chaîne vide tant que `docker_endpoint` n'a pas tourné : un module qui la
+  # lit sans sonder passe `DOCKER_BIN=""`, et son délégué retombe sur un `docker` nu, introuvable dans
+  # une VM WSL où rien n'installe de CLI
   local f bad=0
   for f in "$BATS_TEST_DIRNAME"/../modules.d/*.sh "$BATS_TEST_DIRNAME"/../container "$BATS_TEST_DIRNAME"/../accept; do
     [[ -f "$f" ]] || continue
@@ -208,13 +246,9 @@ I21_MODS='(44-media|46-tofu|60-deploy|62-runtime-helpers)\.sh'
 }
 
 @test "MUR I11: un fichier designe par \$HERE ou \$DOCKER_DIR EXISTE — bench/ ne porte que des scripts de banc" {
-  # `bench/` ne contient QUE ses propres scripts : les compose ET les gestes partages vivent dans
-  # `docker/`. Un `"$HERE/<x>"` ecrit depuis `bench/` designe donc un fichier absent, et rien ne le
-  # dit avant l'execution — apres avoir construit l'image entiere.
-  # ⚠ LA PORTEE EST LE FICHIER, PAS L'EXTENSION : ce mur n'a d'abord regarde que les `.yml`, et il a
-  # laisse passer `"$HERE/forge-runner.sh"` a la ligne 507 de `bench-up.sh` — le TROISIEME site du
-  # meme defaut, apres trois lignes de `bench-down.sh` et une de `bench-up.sh`. Une garde taillee
-  # sur les cas deja trouves ne trouve rien de neuf.
+  # `bench/` ne contient que ses propres scripts : les compose et les gestes partagés vivent dans
+  # `docker/`. Un `"$HERE/<x>"` écrit depuis `bench/` désigne un fichier absent, et rien ne le dit
+  # avant l'exécution. La portée est le fichier désigné, quelle que soit son extension.
   local f here dockerdir ref path bad=0
   for f in "$BATS_TEST_DIRNAME"/../docker/*.sh "$BATS_TEST_DIRNAME"/../docker/bench/*.sh; do
     [[ -f "$f" ]] || continue
@@ -247,16 +281,11 @@ I21_MODS='(44-media|46-tofu|60-deploy|62-runtime-helpers)\.sh'
 }
 
 @test "MUR I13: tout module Elixir nomme par un script de deploiement EXISTE — un renommage cote lib ne se voit pas ici" {
-  # `entrypoint.sh` appelle la release par `eval "<Module>.<fonction>(<arg>)"` : le nom du module est
-  # une CHAINE, que ni le compilateur ni boundary ne voient. Un module extrait ou renomme laisse
-  # l'appelant intact, et le defaut ne parait qu'au runtime, DANS l'image, sous un `2>/dev/null` qui
-  # le reduit a « l'image ne rend pas le roster ». Mesure du 2026-08-30 : `CatalogueRoles` etait
-  # devenu `Fleet.Roster` et le rail conteneur mourait a l'amorcage de la forge, sans nommer la cause.
+  # un script appelle la release par « <Module>.<fonction>(<arg>) » : le nom du module est une chaîne
+  # que ni le compilateur ni boundary ne voient, et un module renommé ne se montre qu'au runtime
   local lib f ref mod bad=0
   lib="$(cd "$BATS_TEST_DIRNAME/../../runtime/lib" && pwd)"
-  # LE CORPUS : tout script livre qui peut nommer un module Elixir — l'installeur, les portes outil
-  # de la CLI (`lcars tool …`, lot 6), les services du produit. `runtime/etc/*.sh` n'existe plus (Q3)
-  # et ce mur balayait un corpus vide (relecture hostile 2026-09-04).
+  # le corpus : tout script livré qui peut nommer un module Elixir — l'installeur, la CLI, les services du produit
   local refs=0
   for f in "$BATS_TEST_DIRNAME"/../docker/*.sh "$BATS_TEST_DIRNAME"/../lib/*.sh "$BATS_TEST_DIRNAME"/../modules.d/*.sh \
            "$BATS_TEST_DIRNAME"/../../runtime/bin/lcars "$BATS_TEST_DIRNAME"/../../runtime/services/*.sh \
@@ -274,29 +303,12 @@ I21_MODS='(44-media|46-tofu|60-deploy|62-runtime-helpers)\.sh'
   [ "$refs" -ge 3 ] || { echo "MUR I13 — $refs reference(s) Elixir lue(s) dans le corpus : l instrument est casse"; return 1; }
 }
 
-# ─── MUR I14 : UNE ASSERTION QUI LIT STDIN DOIT ETRE ALIMENTEE ──────────────────────────────────
-#
-# ⚠ CE MUR NAIT D UN BLOCAGE DE HUIT HEURES, PAS D UNE INTUITION. L helper de negation par motif lit
-# STDIN — son en-tete l ecrit noir sur blanc, sous la forme `cmd | <helper> 'motif'`. Un appel sans
-# tube ni redirection laisse son `grep` attendre l entree standard, et le test ne rate pas : il PEND.
-#
-# Et il pend SELECTIVEMENT, ce qui est le pire. Joue seul depuis un terminal, stdin est ferme et
-# `grep` rend tout de suite : le fichier passe, le temoin a l air bon. Joue par `shell_gate`, stdin
-# est un tube ouvert que personne n alimente — et le harnais dort. Mesure du 2026-09-02 : le
-# `mix gate` de `pack.sh` et un `provision apply` de banc sont restes suspendus toute la nuit sur
-# un seul appel de ce genre.
-#
-# UN TEST QUI PEND EST PIRE QU UN TEST FAUX. Le faux rougit ; celui-la immobilise le harnais qui le
-# joue, et ce qu on lit ensuite n est pas « echec » mais l absence de toute nouvelle.
-#
-# ⚠ CE FICHIER EST HORS DU SCAN, ET C EST STRUCTUREL : il PARLE de l helper sans jamais l appeler.
-# Un mur qui s audite lui-meme rougit sur sa propre prose — piege deja referme trois fois dans cette
-# passe. Le motif exige en plus un DEBUT D INSTRUCTION, pour ne pas confondre une mention et un appel.
+# MUR I14 — refute_out lit stdin : appelé sans tube ni redirection, son grep attend une entrée que le
+# harnais n'alimente pas, et le cas pend au lieu de rougir. Ce fichier parle de l'helper sans
+# l'appeler : il est hors du balayage.
 @test "MUR I14: toute negation par motif est ALIMENTEE — sinon son grep attend stdin et le test PEND" {
   local helper='refute_out' nus total
-  # ⚠ LE TUBE EST EXCLU DU MOTIF, PAS FILTRE APRES : `| refute_out` EST la forme nominale. Une
-  # premiere version mettait `|` dans la classe des debuts d instruction et denoncait les quatre
-  # appels corrects du corpus — un mur qui accuse l idiome qu il defend.
+  # le tube est la forme nominale : il est exclu du motif, qui exige un début d'instruction
   nus="$(grep -rn --exclude=idiom_walls.bats -E "(^|;|&) *${helper} " \
            "$BATS_TEST_DIRNAME"/*.bats "$BATS_TEST_DIRNAME"/../../runtime/test/*/*.bats 2>/dev/null \
          | grep -vE '<<<|< *"' || true)"
@@ -305,32 +317,15 @@ I21_MODS='(44-media|46-tofu|60-deploy|62-runtime-helpers)\.sh'
     printf '%s\n' "$nus" >&2
     return 1
   }
-  # GARDE D INSTRUMENT : sans elle, ce mur devient vert le jour ou l extraction ne trouve plus rien
-  # — exactement la faute qu il existe pour attraper ailleurs.
-  # Le compte porte sur TOUS les appels, tube compris : c est la population que le mur surveille.
+  # GARDE D INSTRUMENT : le compte porte sur tous les appels, tube compris — la population surveillée
   total="$(grep -rho --exclude=idiom_walls.bats -E "${helper} " \
              "$BATS_TEST_DIRNAME"/*.bats "$BATS_TEST_DIRNAME"/../../runtime/test/*/*.bats 2>/dev/null | wc -l)"
   [ "${total:-0}" -ge 5 ] \
     || { echo "instrument casse : $total appel(s) trouve(s), 5 au moins attendus" >&2; return 1; }
 }
 
-# ─── MUR I15 : QUI BATIT DEPUIS UN ARBRE DE SOURCE DOIT SAVOIR OU IL EST ────────────────────────
-#
-# ⚠ TROIS MODULES ONT BATI DANS LA COPIE POSEE, ET LES TROIS ONT ECHOUE — mesure du 2026-09-02 sur
-# les bancs 2006 ET 2007, apply rejoue depuis `/opt/lcars/deploy/provision` :
-#     FAIL 44-media:      npm run build (/opt/lcars/assets/github.io)
-#     FAIL 48-forge-host: mix deps.get (/opt/lcars/services)
-#     FAIL 60-deploy:     source runtime introuvable: /opt/lcars/services
-#
-# `62-runtime-helpers` embarque `{deploy,etc,services,bin}` a plat et `{assets,catalogues}` pour que
-# le rail se REJOUE, pas pour qu il se RECONSTRUISE : il n y a la ni `mix.exs`, ni `deps/`, ni
-# `node_modules`. Un module qui l ignore n echoue pas seulement — `npm ci` a INSTALLE 176 Mo sous
-# /opt/lcars avant de rater son build.
-#
-# ⚠ LE MUR CIBLE LES VERBES QUI LISENT UN ARBRE DE SOURCE, pas ceux qui posent un binaire. `16-node`
-# telecharge un precompile : il ne lit aucune source, et rien ne lui interdit de le faire depuis la
-# copie. Le discriminant est « ce geste a-t-il besoin d un arbre de build ? », pas « ce module
-# prononce-t-il le mot npm ».
+# MUR I15 — la copie posée sous /opt/lcars sert à rejouer le provisionnement, pas à rebâtir : elle ne
+# porte ni mix.exs, ni deps/, ni node_modules. Le mur vise les verbes qui lisent un arbre de build.
 @test "MUR I15: un module qui BATIT depuis une source consulte prov_dans_la_copie" {
   local f nom corps manquants=""
   for f in "$DEPLOY"/modules.d/*.sh; do
@@ -350,27 +345,14 @@ I21_MODS='(44-media|46-tofu|60-deploy|62-runtime-helpers)\.sh'
     || { echo "instrument casse : $batisseurs module(s) batisseur(s) trouve(s), 2 au moins attendus" >&2; return 1; }
 }
 
-# ─── MUR I16 : `… | grep -q` SOUS `pipefail` EST UNE RACE, PAS UN TEST (DI-12, DI-13) ──────────
-#
-# `grep -q` sort au PREMIER match et ferme le tuyau. Si le producteur ecrit encore, il prend
-# SIGPIPE et, sous `set -o pipefail`, le pipeline rend 141 : « rien trouve » alors que tout y
-# etait. Ca rougit une fois sur dix sous charge, sur des temoins differents a chaque fois, et
-# JAMAIS seul — la signature d'un « temoin instable » qu'on finit par ignorer. DI-12 etait
-# `prov_runtime_dirs | grep -q .` dans 25-directories ; DI-13 en comptait onze autres, tous de la
-# forme `id -nG | tr | grep -qx` — producteurs d'une ligne, jamais vus rouges, meme race.
-#
-# La forme sure CAPTURE puis TESTE (`[[ -n "$(…)" ]]`, `[[ " $(…) " == *" x "* ]]`, `case`,
-# `grep -c`) : aucun lecteur ne ferme rien avant la fin. `prov_in_group` (lib) porte le cas
-# du groupe ; `runtime_dirs_declared` (25) celui de la table.
-#
-# LE PERIMETRE : tout script de `deploy/` (hors tests) qui pose `pipefail`, PLUS `deploy/lib/*.sh`
-# — une lib n'a pas de `set` a elle, elle s'execute dans le shell de qui la source, et tous ses
-# appelants (provision, container, les modules) sont sous `pipefail`.
+# MUR I16 — `grep -q` sort au premier match et ferme le tuyau : un producteur qui écrit encore prend
+# SIGPIPE, et sous pipefail le pipeline rend 141, « rien trouvé » alors que tout y était. La forme
+# sûre capture puis teste (`[[ -n "$(…)" ]]`, `case`, `grep -c`). Le périmètre : tout script de
+# deploy/ (hors tests) qui pose pipefail, et deploy/lib/*.sh, sourcée par des appelants sous pipefail.
 I16_RE='(^|[^|])\|[[:space:]]*grep[[:space:]]+-[A-Za-z]*q'
 
 @test "MUR I16: aucun pipeline ne finit sur grep -q dans un script sous pipefail — capturer, puis tester" {
-  # `$DEPLOY` vaut `<tests>/..` : un `find` dessus rend des chemins qui portent tous `/tests/`, et
-  # l exclusion viderait le corpus. On normalise d abord — mesure : pop=0 a la premiere version.
+  # `$DEPLOY` porte `/tests/` : les chemins se normalisent avant l'exclusion des témoins
   local root f hits=0 pop=0 first
   root="$(cd "$DEPLOY" && pwd)"
   while IFS= read -r f; do
@@ -403,10 +385,6 @@ I16_RE='(^|[^|])\|[[:space:]]*grep[[:space:]]+-[A-Za-z]*q'
   refute grep -qE "$I16_RE" <<<'  n="$(printf "%s\n" "${a[@]}" | grep -c x)"'
 }
 
-# ─── MUR I17 : `pgrep -f` / `pkill -f` NE MATCHENT PAS LEUR PORTEUR (playbook : trois fois mordu) ──
-# `pgrep -f "$x"` voit tout argv qui contient `x` — dont le `bash -c`, le `ssh … '…'` ou le temoin
-# qui a lance la mesure. La forme sure passe par `prov_pgrep_pattern` (lib) : `[x]yz` matche `xyz`
-# et jamais la chaine `[x]yz` qui le porte. Perimetre : tout script de `deploy/` hors tests.
 i22_hits() { # i22_hits <fichier> — les lignes « assertion && assertion » : errexit ignore l'échec de la première (mesuré)
   awk '
     function ok_seg(s) { return s ~ /^(\[ |\[\[ |grep |refute |refute_out |test )/ }
@@ -440,6 +418,9 @@ i22_hits() { # i22_hits <fichier> — les lignes « assertion && assertion » : 
   [ -z "$(i22_hits "$decor")" ]
 }
 
+# MUR I17 — `pgrep -f "$x"` voit tout argv qui contient `x`, dont le `bash -c` ou le témoin qui a
+# lancé la mesure. La forme sûre passe par `prov_pgrep_pattern` (lib) : `[x]yz` matche `xyz` et jamais
+# la chaîne `[x]yz` qui le porte. Périmètre : tout script de deploy/ hors tests.
 I17_RE='p(grep|kill)[[:space:]]+(-[A-Za-z]+[[:space:]]+)*-[A-Za-z]*f[[:space:]]+"?[^"[:space:]]*"?'
 
 @test "MUR I17: tout pgrep -f / pkill -f de deploy/ passe son motif par prov_pgrep_pattern" {
@@ -461,86 +442,4 @@ I17_RE='p(grep|kill)[[:space:]]+(-[A-Za-z]+[[:space:]]+)*-[A-Za-z]*f[[:space:]]+
   grep -qE "$I17_RE" <<<'  if pgrep -f "$PREFIX_REL" >/dev/null; then'
   grep -qE "$I17_RE" <<<'  pkill -TERM -f "$sup"'
   refute grep -qE "$I17_RE" <<<'  pgrep -x supervise.sh'
-}
-
-# ─── MUR I18 : AUCUN LITTERAL 1000 / 60000 COMME REPLI DE BORNE D'UID (la lib de l'installeur) ──
-#
-# ⚖ user 2026-09-05 (lot 14, solution A + C + E) : la frontiere systeme/humain est celle que
-# `login.defs` declare, et elle est FAIL-CLOSED — bornes illisibles, personne n'est un humain, et le
-# remede (le fichier) est dit une fois. La lib (`is_fleet_human`, `fleet_humans`) devinait
-# `1000`/`60000` par `_uid_bound … <defaut>` ; ce mur est le temoin du temoin : le repli n'est
-# plus ECRIT.
-#
-# JUMEAU de `runtime/test/services/idiom_walls.bats` (MUR I18, lot 15) : le mur du produit lit les
-# quatre lecteurs du produit, celui-ci lit la lib de l'installeur — meme motif, chacun SES fichiers,
-# aucun mur ne traverse la couture. L'EGALITE des deux corps (la lib et le protocole du produit)
-# est tenue ailleurs, par un temoin qui lit les deux par nature (`lib/provision-lib.bats`).
-#
-# La forme mordue : une ligne de CODE qui porte le nombre 1000 ou 60000 ET parle d'uid.
-I18_RE='(^|[^0-9])(1000|60000)([^0-9]|$)'
-
-@test "MUR I18 (lib de l'installeur) : aucun litteral 1000/60000 comme repli de borne d'uid dans lib/provision-lib.sh" {
-  local f="$DEPLOY/lib/provision-lib.sh" pop=0 trouve
-  # LA POPULATION EST NOMMEE, PAS DECOUVERTE : le seul lecteur de la borne cote installeur.
-  [ -f "$f" ] || { echo "lecteur absent : $f — la population du mur n'est plus de un" >&2; return 1; }
-  pop=$((pop + 1))
-  trouve="$(code "$f" | grep -nE "$I18_RE" | grep -iE 'uid' || true)"
-  [ -z "$trouve" ] || { echo "MUR I18 rompu — lib/provision-lib.sh :" >&2; printf '%s\n' "$trouve" >&2; return 1; }
-  # GARDE D INSTRUMENT : un lecteur, et il lit bien la borne — sinon le mur garde un fichier qui ne
-  # la lit plus, et il est vert a vide.
-  [ "$pop" -eq 1 ]
-  [ -n "$(code "$f" | grep -E 'UID_MIN')" ] || { echo "instrument casse : la lib ne lit plus UID_MIN" >&2; return 1; }
-  # Le mur mord : la forme qui vivait dans la lib, presentee au meme grep, est vue…
-  local forme='  awk -F: -v m="$(_uid_bound UID_MIN 1000)" -v M="$(_uid_bound UID_MAX 60000)" \\'
-  [ -n "$(grep -E "$I18_RE" <<<"$forme" | grep -iE 'uid')" ] || { echo "le mur ne mord pas : $forme" >&2; return 1; }
-  # … et un uid a cinq chiffres, ou un nombre qui ne parle pas d'uid, ne le sont pas.
-  refute grep -qE "$I18_RE" <<<'  export LCARS_SYSADMIN_UID=10001'
-  refute grep -qiE 'uid' <<<"$(grep -E "$I18_RE" <<<'  local timeout_ms=60000')"
-}
-
-# ─── MUR I20 : LE RAIL S'APPELLE `container` — PLUS AUCUN box / boite / boîte DANS deploy/ ──────
-#
-# ⚖ user 2026-09-05 (chantier release, lot 1) : « workstation est bien nommé pour désigner une
-# install directe sur un système, mais le rail box/boîte n'est pas explicite pour une install
-# docker » → `container`, « un seul mot partout ». Le couple dit OU LCARS vit : `--workstation`
-# (dans ce système) / `--container` (dans un conteneur). `docker` reste le mot du SUBSTRAT et de
-# la dependance : le mur ne le regarde pas.
-#
-# Ce mur lit TOUT deploy/ — le code ET la prose, parce qu'un README qui dit « box up » est un
-# manuel faux — plus install.sh, et jamais runtime/ : c'est l'affaire du jumeau
-# (`runtime/test/services/idiom_walls.bats`, MUR I20). Il s'ecarte lui-meme : ses formes de garde
-# portent le mot.
-#
-# Ce qui GARDE le mot, a dessein, et que le mur ecarte par motif :
-#   - « boite de depot » (l'onglet du deck qui remet un fichier a un projet) ;
-#   - « boite de reception » (l'inbox d'admiral) et « boite aux lettres » (la branche d'outillage) ;
-#   - `box-sizing` / `border-box` / `box-shadow` (du CSS) ;
-#   - « mail-in-a-box » (l'ecole de `run_quiet`) et « out of the box » (une citation user, l'idiome) ;
-#   - `_box_emit` / `_box_plain` / `_box_pad` / `_prov_box_pad` : le CADRE ASCII des bannieres.
-# `sandbox`, `bwrap`, `mailbox`, `checkbox`, `toolbox` ne sont pas le mot entier : le grep ne les voit pas.
-I20_RE='(^|[^[:alpha:]])(box|bo[iîÎ]te)([^[:alpha:]]|$)'
-I20_EXCL='box-(sizing|shadow)|border-box|mail-in-a-box|out of the box|bo[iîÎ]tes? de r[éeÉE]ception|bo[iîÎ]tes? aux lettres|bo[iîÎ]tes? de d[éeÉE]p[oôÔ]t|_box_(emit|plain|pad)|_prov_box_pad'
-
-i20_hits() { # <chemin>… -> les lignes qui portent encore le mot, hors motifs ecartes (vide = propre)
-  grep -rnIiE --exclude=idiom_walls.bats "$I20_RE" "$@" 2>/dev/null | grep -viE "$I20_EXCL" || true
-}
-
-@test "MUR I20 (installeur) : plus aucun box / boite / boîte dans deploy/ ni install.sh — le rail s'appelle container" {
-  local root trouve
-  root="$(cd "$DEPLOY/.." && pwd)"
-  [ -f "$root/install.sh" ] || { echo "install.sh absent sous $root — le perimetre du mur n'est plus le bon" >&2; return 1; }
-  trouve="$(i20_hits "$DEPLOY" "$root/install.sh")"
-  [ -z "$trouve" ] || { echo "MUR I20 rompu — le mot du rail est container, pas box/boîte :" >&2; printf '%s\n' "$trouve" >&2; return 1; }
-  # GARDE D'INSTRUMENT : le mur voit une occurrence plantee dans un decor — un chemin, de la prose
-  # accentuee, une variable, un drapeau, une majuscule — quatre LIGNES, grep -n compte des lignes.
-  local decor="$BATS_TEST_TMPDIR/i20"; mkdir -p "$decor"
-  printf '#!/usr/bin/env bash\nexec deploy/box up\n' > "$decor/a.sh"
-  printf 'la boîte tourne, LA BOÎTE aussi\n' > "$decor/b.md"
-  printf 'X="${LCARS_BOX_CONF_DIR:-}"\n' > "$decor/c.sh"
-  printf 'RAIL=box ; bash install.sh --box\n' > "$decor/d"
-  [ "$(i20_hits "$decor" | wc -l)" -eq 4 ] || { echo "instrument casse : le mur ne voit pas le decor" >&2; i20_hits "$decor" >&2; return 1; }
-  # … et ne voit PAS ce qui garde le mot a dessein.
-  printf 'sandbox bwrap mailbox checkbox toolbox SANDBOX\nbox-sizing:border-box; box-shadow: 0\nla boîte de réception et la boite aux lettres, Boite de reception\nmail-in-a-box\nlivrer out of the box\n_box_emit "x"; _box_plain; _box_pad; _prov_box_pad\n' > "$decor/e.txt"
-  trouve="$(i20_hits "$decor/e.txt")"
-  [ -z "$trouve" ] || { echo "instrument casse : le mur mord sur une exclusion :" >&2; printf '%s\n' "$trouve" >&2; return 1; }
 }

@@ -35,8 +35,9 @@ set -euo pipefail
 
 TMUX_BIN="${LCARS_TMUX_BIN:-/usr/bin/tmux}"
 
-# MEME chemin que du cote Elixir (`PodTmux.sock_path`) — les deux doivent s'accorder.
-SOCK_PARENT="${LCARS_TMUX_SOCK_BASE:-/run/lcars/tmux-sock}"
+# MEME chemin que du cote Elixir (`PodTmux.sock_path`) — les deux doivent s'accorder. Aucun défaut ici :
+# le spawner exporte la racine à chaque lancement, et un défaut recopié divergerait de la sienne.
+SOCK_PARENT="${LCARS_TMUX_SOCK_BASE:?non posé — la racine des sockets tmux vient du spawner (Fleet.Spawner.PodTmux), qui la pose à chaque lancement ; à la main, « source ~/.lcars/run/fleet.runtime.env » la reprend de la fleet qui tourne}"
 
 if [[ $# -lt 4 ]]; then
   echo "ERR: usage: $0 <role> <pod_id> <pod_dir> <command...>" >&2

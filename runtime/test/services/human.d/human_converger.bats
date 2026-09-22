@@ -25,6 +25,8 @@
 # du texte audite. Les quotes simples sont l'instrument, pas un oubli.
 # shellcheck disable=SC2016
 
+load ../../support/refute
+
 setup() {
   SUT="$BATS_TEST_DIRNAME/../../../services/human-converger.sh"
   export SUT
@@ -62,6 +64,20 @@ EOF
   # malformees pour le garde d'arithmetique). Fermer le canal fichier rend leur declaration
   # effective ; y poser une valeur les ecraserait toutes par une seule.
   export LCARS_SEAT_UID_FILE="$BATS_TEST_TMPDIR/aucun-siege-pose/seat.uid"
+
+  # ⚠ LE QUATRIEME SEAM : LE ROSTER DE ROLES VIENT DU PRODUIT (⚖ decision 2). Le SUT ne porte plus
+  # de liste ecrite a la main — il la demande au release (`lcars tool roles`) — et un roster
+  # ILLISIBLE lui fait reserver TOUT nom, par la meme doctrine que les bornes d'uid. Sans cette
+  # CLI de banc, ce fichier ne mesurerait plus l'admission mais le refus global : tous ses temoins
+  # « passe » rougiraient sur du code juste. La liste est celle que ses propres cas attendent.
+  cat > "$BATS_TEST_TMPDIR/lcars" <<'EOF'
+#!/usr/bin/env bash
+[[ "$1" == tool && "$2" == roles ]] || exit 64
+printf '%s\n' system_architect system_chief system_gatekeeper fleet_engineer fleet_scribe \
+              fleet_qualifier fleet_reviewer fleet_scoper fleet_vulcan
+EOF
+  chmod +x "$BATS_TEST_TMPDIR/lcars"
+  export LCARS_CLI="$BATS_TEST_TMPDIR/lcars"
 }
 
 # Helper: source the SUT in a fresh shell and run a predicate on <login>.
@@ -71,7 +87,7 @@ admits() { # admits <login>  -> exit 0 if the converger would create that user
   # rendaient rien. `|| rc=$?` fait de l'appel une condition, l'exception que `set -e` prevoit.
   run bash -c "
     set -euo pipefail
-    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS'
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_CLI='$LCARS_CLI'
     source '$SUT'
     reserved '$1' && exit 1
     valid_login '$1' || exit 1
@@ -191,7 +207,7 @@ admits() { # admits <login>  -> exit 0 if the converger would create that user
 @test "un home existant IMPOSE son uid — le chemin fait foi, pas l'ordre d'iteration" {
   run bash -c "
     set -euo pipefail
-    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_CLI='$LCARS_CLI' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
     mkdir -p \"\$LCARS_HOME_ROOT/zoe\"
     source '$SUT'
     uid_of_home zoe"
@@ -207,7 +223,7 @@ admits() { # admits <login>  -> exit 0 if the converger would create that user
 @test "sans home, uid_of_home ne rend RIEN — il ne devine pas" {
   run bash -c "
     set -euo pipefail
-    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_CLI='$LCARS_CLI' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
     mkdir -p \"\$LCARS_HOME_ROOT\"
     source '$SUT'
     echo \"[\$(uid_of_home jamaisvue)]\""
@@ -237,7 +253,7 @@ admits() { # admits <login>  -> exit 0 if the converger would create that user
   # epingle donc les deux moities : pas de derivation, et jamais l'uid du siege.
   run bash -c "
     set -euo pipefail
-    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_CLI='$LCARS_CLI' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
     export LCARS_UID_MAP_FILE='$BATS_TEST_TMPDIR/uid.map' LCARS_SYSADMIN_UID=1000
     mkdir -p \"\$LCARS_HOME_ROOT\"
     # \`getent\` double : sans ca ce temoin rend un uid libre de la MACHINE qui le joue.
@@ -258,7 +274,7 @@ admits() { # admits <login>  -> exit 0 if the converger would create that user
   # l'ID de forge, pas sur le nom : Gitea conserve l'id au renommage.
   run bash -c "
     set -euo pipefail
-    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_CLI='$LCARS_CLI' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
     export LCARS_UID_MAP_FILE='$BATS_TEST_TMPDIR/uid.map'
     mkdir -p \"\$LCARS_HOME_ROOT\"
     printf '7\t1042\tancien_nom\n' > \"\$LCARS_UID_MAP_FILE\"
@@ -273,7 +289,7 @@ admits() { # admits <login>  -> exit 0 if the converger would create that user
   # couple qui correspond au home REELLEMENT pose sur le disque.
   run bash -c "
     set -euo pipefail
-    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_CLI='$LCARS_CLI' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
     export LCARS_UID_MAP_FILE='$BATS_TEST_TMPDIR/uid2.map' GROUP='$(id -gn)'
     source '$SUT'
     uid_map_record 12 1012 zoe
@@ -290,7 +306,7 @@ admits() { # admits <login>  -> exit 0 if the converger would create that user
   # remis a l'endroit. La forge fait autorite sur QUI EST LA ; le disque sur ce qui est deja ecrit.
   run bash -c "
     set -euo pipefail
-    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_CLI='$LCARS_CLI' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
     mkdir -p \"\$LCARS_HOME_ROOT/zoe\"
     source '$SUT'
     home_uid=\$(uid_of_home zoe)
@@ -311,7 +327,7 @@ admits() { # admits <login>  -> exit 0 if the converger would create that user
   # un chemin de trop.
   run bash -c "
     set -euo pipefail
-    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_CLI='$LCARS_CLI' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
     export LCARS_SYSADMIN_UID=1000
     mkdir -p \"\$LCARS_HOME_ROOT\"
     mkdir -p \"$BATS_TEST_TMPDIR/b6\"
@@ -380,7 +396,7 @@ once_with() { # once_with <script> — source le convergeur + converge_once extr
   mkdir -p "$BATS_TEST_TMPDIR/homes"
   run bash -c "
     set -uo pipefail
-    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_SYSADMIN_UID=1000
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_CLI='$LCARS_CLI' LCARS_SYSADMIN_UID=1000
     export LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes' LCARS_UID_MAP_FILE='$BATS_TEST_TMPDIR/uid.map'
     export LCARS_CONVERGER_REFUSED='$BATS_TEST_TMPDIR/refused' LCARS_CONSOLE=0
     source '$SUT'
@@ -447,7 +463,7 @@ EOF
 converged() { # converged -> la liste calculee
   run bash -c "
     set -euo pipefail
-    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' GROUP_FILE='$GROUP_FILE'
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_CLI='$LCARS_CLI' GROUP_FILE='$GROUP_FILE'
     # ⚠ 1000 EN DUR, ET C'ETAIT '\${LCARS_SYSADMIN_UID:-1000}'. Le repli lisait l'environnement du
     # LANCEUR : un operateur qui exporte cette variable pour tout autre motif retunait la premisse
     # des deux GUARD A sans le savoir. Mesure : \`LCARS_SYSADMIN_UID=1001\` a l'appel de la suite,
@@ -460,7 +476,7 @@ converged() { # converged -> la liste calculee
 absent() { # absent <membres de la team…>
   run bash -c "
     set -euo pipefail
-    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' GROUP_FILE='$GROUP_FILE'
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_CLI='$LCARS_CLI' GROUP_FILE='$GROUP_FILE'
     source '$SUT'
     absent_humans $*"
 }
@@ -555,7 +571,7 @@ EOF
 @test "6-surface: roster_of ne rend que les logins — la charge de la forge porte l'id devant" {
   run bash -c "
     set -euo pipefail
-    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' GROUP_FILE='$GROUP_FILE'
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_CLI='$LCARS_CLI' GROUP_FILE='$GROUP_FILE'
     source '$SUT'
     printf '15\talice\n3\tbob\n' | roster_of"
   [ "$status" -eq 0 ]
@@ -569,7 +585,7 @@ EOF
   # brute en roster, `absent_humans` ne retrouvait aucun login et les designait TOUS LES DEUX.
   run bash -c "
     set -euo pipefail
-    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' GROUP_FILE='$GROUP_FILE'
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_CLI='$LCARS_CLI' GROUP_FILE='$GROUP_FILE'
     source '$SUT'
     mapfile -t roster < <(printf '1001\talice\n1002\tbob\n' | roster_of)
     absent_humans \"\${roster[@]}\""
@@ -581,7 +597,7 @@ EOF
   passwd_fixture; group_fixture "alice,bob,carol"
   run bash -c "
     set -euo pipefail
-    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' GROUP_FILE='$GROUP_FILE'
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_CLI='$LCARS_CLI' GROUP_FILE='$GROUP_FILE'
     source '$SUT'
     mapfile -t roster < <(printf '1001\talice\n' | roster_of)
     absent_humans \"\${roster[@]}\""
@@ -596,6 +612,148 @@ EOF
   absent alice dave erin
   [ "$status" -eq 0 ]
   [ -z "$output" ]
+}
+
+# ─── LE GESTE REFUSE SUR UN COMPTE D'ADMINISTRATION DE LA MACHINE ───────────────────────────────
+#
+# Mesure sur banc (2026-09-14) : un compte de test membre de `sudo`, absent de la forge, mis dans
+# fleet par une passe de l'installeur, a ete revoque par le convergeur — shell nologin. La selection
+# ci-dessus le designe, et c'est juste : il est dans fleet et pas dans la team. C'est le GESTE qui
+# refuse. `revoke_absent` est extrait (il vit apres le garde de sourcing) et `revoke_human`, qui
+# touche gpasswd/pkill/usermod, est double : ce qui se mesure est QUI serait revoque et ce qui est dit.
+#
+# Le `sudo` du decor n'accepte qu'UNE forme, `-n -l -U <login> /bin/sh` sous `LC_ALL=C` : toute autre
+# est consignee dans SUDO_FORMES et rend 64, et chaque temoin exige ce journal vide. Il repond
+# ensuite selon SUDO_TABLE (`login:rc`, rc du vrai sudo mesure dans l'image, sudo 1.9.17p2 : groupe
+# sudo et `ALL=(ALL) ALL` rendent 0 ; regle etroite, regle vers un autre compte que root, membre de
+# wheel et aucune regle rendent 1). Un login hors de la table rend 1. Il ne lit jamais le seul
+# dernier argument : ce serait `/bin/sh` pour tout le monde.
+sudo_stub() {
+  cat > "$BATS_TEST_TMPDIR/sudo" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$#" -ne 5 || "$1" != -n || "$2" != -l || "$3" != -U || -z "$4" || "$5" != /bin/sh || "${LC_ALL:-}" != C ]]; then
+  printf 'LC_ALL=%s %s\n' "${LC_ALL:-}" "$*" >> "$SUDO_FORMES"
+  exit 64
+fi
+for entree in ${SUDO_TABLE:-}; do
+  if [[ "${entree%%:*}" == "$4" ]]; then
+    [[ "${entree#*:}" == 0 ]] && { echo /bin/sh; exit 0; }
+    exit 1
+  fi
+done
+exit 1
+EOF
+  chmod 0755 "$BATS_TEST_TMPDIR/sudo"
+}
+
+revoke_with() { # revoke_with <script> — source le convergeur + revoke_absent extrait, revoke_human double
+  local fn="$BATS_TEST_TMPDIR/revoke.sh"
+  sed -n '/^revoke_absent() {/,/^}/p' "$SUT" > "$fn"
+  [ -s "$fn" ] || { echo "revoke_absent introuvable dans $SUT" >&2; return 1; }
+  sudo_stub
+  REVOQUES="$BATS_TEST_TMPDIR/revoques.log"; : > "$REVOQUES"
+  SUDO_FORMES="$BATS_TEST_TMPDIR/sudo-formes.log"; : > "$SUDO_FORMES"
+  run bash -c "
+    set -uo pipefail
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_CLI='$LCARS_CLI' GROUP_FILE='$GROUP_FILE'
+    export LCARS_SYSADMIN_UID=1000 LCARS_SUDO_BIN=\"\${LCARS_SUDO_BIN:-$BATS_TEST_TMPDIR/sudo}\"
+    export SUDO_FORMES='$SUDO_FORMES' SUDO_TABLE='${SUDO_TABLE:-}'
+    source '$SUT'
+    revoke_human() { echo \"REVOKE \$1\" >> '$REVOQUES'; }
+    source '$fn'
+    $1"
+}
+
+@test "revocation: la doublure de sudo refuse toute autre forme que -n -l -U <login> /bin/sh, et repond selon sa table" {
+  sudo_stub
+  export SUDO_FORMES="$BATS_TEST_TMPDIR/sudo-formes.log" SUDO_TABLE="bob:0 carol:1"; : > "$SUDO_FORMES"
+  run env LC_ALL=C "$BATS_TEST_TMPDIR/sudo" -n -l -U bob /bin/sh
+  [ "$status" -eq 0 ]
+  run env LC_ALL=C "$BATS_TEST_TMPDIR/sudo" -n -l -U carol /bin/sh
+  [ "$status" -eq 1 ]
+  run env LC_ALL=C "$BATS_TEST_TMPDIR/sudo" -n -l -U dave /bin/sh
+  [ "$status" -eq 1 ]
+  [ ! -s "$SUDO_FORMES" ]
+  run env LC_ALL=C "$BATS_TEST_TMPDIR/sudo" -n -l -U bob
+  [ "$status" -eq 64 ]
+  run env LC_ALL=C "$BATS_TEST_TMPDIR/sudo" -l -U bob /bin/sh
+  [ "$status" -eq 64 ]
+  run env LC_ALL=fr_FR.UTF-8 "$BATS_TEST_TMPDIR/sudo" -n -l -U bob /bin/sh
+  [ "$status" -eq 64 ]
+  [ "$(wc -l < "$SUDO_FORMES")" -eq 3 ]
+}
+
+@test "revocation: un compte a qui sudo ouvre un shell root, absent de la team, n'est PAS revoque — refus nomme, une fois par processus" {
+  # Le siege d'aujourd'hui est 1000 (GUARD A) ; `bob` (1002) administre la machine, par le groupe
+  # sudo ou par une regle a son nom : pour sudo, c'est la meme reponse.
+  passwd_fixture; group_fixture "alice,bob,carol"
+  SUDO_TABLE="bob:0 carol:1" revoke_with 'revoke_absent alice; revoke_absent alice'
+  [ "$status" -eq 0 ]
+  [ ! -s "$SUDO_FORMES" ]
+  refute grep -qx 'REVOKE bob' "$REVOQUES"
+  grep -qx 'REVOKE carol' "$REVOQUES"
+  [ "$(grep -c 'REFUS de révoquer bob' <<<"$output")" -eq 1 ]
+  [[ "$output" == *"REFUS de révoquer bob — compte d'administration de la machine (sudo lui ouvre un shell root) : absent de lcars/humans, il garde son groupe fleet, son shell et ses processus."*"« sudo gpasswd -d bob fleet » (sur un poste ; dans un conteneur, depuis « deploy/container shell »)"* ]]
+}
+
+@test "revocation: une regle sudoers etroite ne sauve pas — le compte est revoque, meme membre de wheel ou d'admin" {
+  # carol : `ALL=(root) NOPASSWD: /usr/bin/systemctl …` et membre de wheel ; dave : une regle vers
+  # `lcars-authority` et membre d'admin. Aucun des deux n'ouvre de shell root.
+  passwd_fixture
+  printf 'dave:x:1004:1004::/home/dave:/bin/bash\n' >> "$PASSWD_FILE"
+  GROUP_FILE="$BATS_TEST_TMPDIR/group"
+  printf 'fleet:x:2000:alice,carol,dave\nwheel:x:10:carol\nadmin:x:11:dave\n' > "$GROUP_FILE"
+  SUDO_TABLE="carol:1 dave:1" revoke_with 'revoke_absent alice'
+  [ "$status" -eq 0 ]
+  [ ! -s "$SUDO_FORMES" ]
+  grep -qx 'REVOKE carol' "$REVOQUES"
+  grep -qx 'REVOKE dave' "$REVOQUES"
+  refute grep -q 'REFUS de' <<<"$output"
+}
+
+@test "revocation: sans sudo sur la machine, aucun compte n'est epargne — un membre du groupe sudo est revoque" {
+  passwd_fixture
+  GROUP_FILE="$BATS_TEST_TMPDIR/group"
+  printf 'fleet:x:2000:alice,bob,carol\nsudo:x:27:bob\n' > "$GROUP_FILE"
+  LCARS_SUDO_BIN="$BATS_TEST_TMPDIR/aucun-sudo" revoke_with 'revoke_absent alice'
+  [ "$status" -eq 0 ]
+  grep -qx 'REVOKE bob' "$REVOQUES"
+  grep -qx 'REVOKE carol' "$REVOQUES"
+  refute grep -q 'REFUS de' <<<"$output"
+}
+
+# ─── LE RATTRAPAGE : LE CONVERGEUR SEUL REMET UN HUMAIN DE LA FORGE DANS FLEET ──────────────────
+#
+# Seul juge de l'appartenance a fleet : il cree, ajoute et revoque d'apres la team. Un humain de la
+# team dont le compte existe mais qui a perdu le groupe (ou porte le shell d'un revoque) y est remis
+# a chaque tour ; un humain en bonne sante n'est pas touche ; le siege ne l'est jamais (GUARD A).
+@test "rattrapage: un humain de la team hors de fleet, ou revoque, est remis dans fleet ; ni un humain sain ni le siege ne sont touches" {
+  passwd_fixture; group_fixture "bob,carol"
+  local fn="$BATS_TEST_TMPDIR/once.sh"
+  sed -n '/^converge_once() {/,/^}/p' "$SUT" > "$fn"
+  GESTES="$BATS_TEST_TMPDIR/gestes.log"; : > "$GESTES"
+  mkdir -p "$BATS_TEST_TMPDIR/homes"
+  run bash -c "
+    set -uo pipefail
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_CLI='$LCARS_CLI' GROUP_FILE='$GROUP_FILE' LCARS_SYSADMIN_UID=1000
+    export LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes' LCARS_UID_MAP_FILE='$BATS_TEST_TMPDIR/uid.map'
+    export LCARS_CONVERGER_REFUSED='$BATS_TEST_TMPDIR/refused' LCARS_CONSOLE=0
+    source '$SUT'
+    team_id() { echo 7; }
+    api() { printf '[{\"id\":1,\"login\":\"lcars\"},{\"id\":2,\"login\":\"alice\"},{\"id\":3,\"login\":\"bob\"},{\"id\":4,\"login\":\"carol\"}]'; }
+    id() { return 0; }
+    useradd() { echo \"USERADD \$*\" >> '$GESTES'; }
+    restore_human() { echo \"RESTORE \$1\" >> '$GESTES'; }
+    ensure_console() { :; }
+    revoke_absent() { :; }; reconcile_humans() { :; }; ensure_all_consoles() { :; }
+    source '$fn'
+    converge_once"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -qx 'RESTORE alice' "$GESTES"
+  grep -qx 'RESTORE carol' "$GESTES"
+  refute grep -qx 'RESTORE bob' "$GESTES"
+  refute grep -qx 'RESTORE lcars' "$GESTES"
+  refute grep -q '^USERADD' "$GESTES"
 }
 
 # ─── L'ADMINITE N'EST PLUS PROJETEE — SEPT TEMOINS SONT PARTIS AVEC LEUR SUJET ─────────────────
@@ -672,7 +830,7 @@ EOF
 # demarraient sa console ; le troisieme faisait `continue`.
 #
 # Mesure du 2026-08-17 sur le banc `lcars-l6` : un compte cree A LA MAIN (uid 1042, groupe `fleet`,
-# shell `/bin/bash`) puis ajoute a `fleet:humans` traverse un tour complet EN SILENCE — pas de ligne
+# shell `/bin/bash`) puis ajoute a `lcars:humans` traverse un tour complet EN SILENCE — pas de ligne
 # dans le log, pas de repertoire dans `/run/lcars/console/`. Le deck lui affiche alors l'adresse d'un
 # terminal qui n'existe pas et le navigateur ecrit « [connexion impossible] ».
 #
@@ -832,7 +990,7 @@ exit 2'
 # bornes lisibles, RIEN (2026-09-05), jamais un defaut.
 floor() { # floor <expr>  → source le convergeur avec le decor, evalue <expr>
   run bash -c "set -euo pipefail
-    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS'
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_CLI='$LCARS_CLI'
     source '$SUT' >/dev/null 2>&1
     $1"
 }
@@ -933,7 +1091,7 @@ floor() { # floor <expr>  → source le convergeur avec le decor, evalue <expr>
   mkdir -p "$BATS_TEST_TMPDIR/homes"
   run bash -c "
     set -uo pipefail
-    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_SYSADMIN_UID=1000
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_CLI='$LCARS_CLI' LCARS_SYSADMIN_UID=1000
     export LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes' LCARS_UID_MAP_FILE='$BATS_TEST_TMPDIR/uid.map'
     export LCARS_CONVERGER_REFUSED='$BATS_TEST_TMPDIR/refused' LCARS_CONSOLE=0
     source '$SUT'

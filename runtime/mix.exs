@@ -9,12 +9,11 @@ defmodule LcarsFleet.MixProject do
       version: "0.9.0",
       elixir: "~> 1.18",
       compilers: [:boundary | Mix.compilers()],
-      # ⚠ LA COUVERTURE EST DANS LA CHAINE (decision 2 du lot E6, arbitree le 2026-09-12), et elle
-      # passe par `Fleet.Test.CoverOtp27` tant que le parc est en OTP 27 : `cover` y fait crasher
-      # douze modules (erlang/otp#11524), et l'outil de Mix s'arrete au premier. Les douze sont
-      # DECLARES ici — cliquet, pas exemption : l'outil rougit si la liste bouge dans un sens ou
-      # dans l'autre. Le jour ou le parc passe en OTP >= 28.4, `tool:` et `otp27_refused:` sortent
-      # et l'outil de Mix reprend sans trou.
+      # La couverture est dans la chaîne, et elle passe par `Fleet.Test.CoverOtp27` tant que le parc
+      # est en OTP 27 : `cover` y fait crasher des modules (erlang/otp#11524), et l'outil de Mix
+      # s'arrête au premier. Ils sont déclarés ici — cliquet, pas exemption : l'outil rougit si la
+      # liste bouge dans un sens ou dans l'autre. Le jour où le parc passe en OTP >= 28.4, `tool:` et
+      # `otp27_refused:` sortent et l'outil de Mix reprend sans trou.
       #
       # `Fleet.Pilot` est retire du total : une facade sans une ligne executable, son zero ne mesure
       # rien. Les doublures de `test/support/` sont retirees par l'outil, sur leur SOURCE.
@@ -99,7 +98,7 @@ defmodule LcarsFleet.MixProject do
         # Check the generated Boundary map's freshness; this does not prove all runtime couplings.
         "lcars.topology --check",
         # Run Dialyzer after the faster checks; cold PLT generation is expensive.
-        "dialyzer",
+        &dialyzer_gate/1,
         # High-confidence findings fail the gate. Lower-confidence findings remain outside
         # this threshold and require separate review; a passing gate does not absolve them.
         "sobelow --exit High"
@@ -126,6 +125,27 @@ defmodule LcarsFleet.MixProject do
           "Every step after this one is skipped ON PURPOSE: their output would end with a green " <>
           "line under a red suite, which is how a failed gate gets read as a passing one."
       )
+    end
+  end
+
+  # ⚠ DIALYZER TOURNE EN `test`, ET CE N'EST PAS UN DETAIL DE CONFORT. La chaine s'execute en `dev`,
+  # ou `elixirc_paths` vaut `["lib"]` : `test/support/` n'est PAS compile, donc pas analyse. Deux
+  # consequences, mesurees le 2026-09-20 — l'analyse voyait 1 avertissement la ou l'environnement
+  # complet en voit 6, et le filtre nominatif de `test/support/cover_otp27.ex` ne pouvait JAMAIS
+  # correspondre, ce que `list_unused_filters: true` fait echouer. Le gate etait donc rouge sur ce
+  # pas depuis le 2026-09-14, sous un message qui parlait de filtre et pas de couverture.
+  # Meme forme que `test_gate/1` : un sous-processus, parce que `MIX_ENV` se fixe au demarrage de la
+  # VM et qu'un `System.put_env` ici ne rechargerait ni les chemins compiles ni le PLT.
+  defp dialyzer_gate(args) do
+    {_, status} =
+      System.cmd("mix", ["dialyzer" | args],
+        env: [{"MIX_ENV", "test"}],
+        into: IO.stream(:stdio, :line),
+        stderr_to_stdout: true
+      )
+
+    if status != 0 do
+      Mix.raise("gate: Dialyzer FAILED (exit #{status}) — chain stopped here.")
     end
   end
 

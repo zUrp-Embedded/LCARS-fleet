@@ -3,7 +3,7 @@
 # Contract: this file + Fleet.CapProfile (@moduledoc). Schema: ../../schema/reserved-seat.json
 #
 # A seat claims the PROVISIONING identity — the forge account (forge.tf local.roles) and the
-# role token (provision-role-tokens.sh ROLES + provision-lib.sh PROV_ROLES), both inert until
+# role token (provision-role-tokens.sh ROLES), inert until
 # the box opens — and its role_index slot in the hexspeak UUID. It is NOT spawnable: the kind
 # discriminates at every consumer (Image validates against the seat schema, list() filters it
 # out, an explicit load answers {:error, {:role_reserved, "vulcan"}}). Opening the box =

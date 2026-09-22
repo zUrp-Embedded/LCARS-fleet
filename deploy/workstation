@@ -1,104 +1,142 @@
 #!/usr/bin/env bash
 # SOURCE: deploy/workstation
 # AUTHOR: bob
-# STARDATE: 2026-09-12
-# STATUS: le délégué du poste — escalade, provisionnement, acceptation, depuis ce checkout ou un kit
+# STARDATE: 2026-09-14
+# STATUS: le délégué du poste — mesure sans privilège, root une fois par sudo, provisionnement, acceptation, depuis ce checkout ou un kit
 #
 # USAGE  deploy/workstation <commande> [options]
-#   up      [--from <kit.tar.gz> | --from <kit détaré>] [options de provision] — pose, puis accepte
-#   doctor  [options de provision] — la sonde seule, sans escalade
+#   up      [--from <kit.tar.gz> | --from <kit détaré>] [options] — pose, puis accepte. Exige root :
+#           sans root, il mesure sans privilège, arrête un terrain que le préflight refuse, dit ce que
+#           root va poser, puis se relance une fois par sudo sur ce fichier ; en root, la mesure root
+#           décide des refus qui protègent la machine, puis « provision apply » joue sur ses faits
+#   doctor  [options de provision] — la sonde complète, en root ; sans root, sudo sur ce fichier
 #
 #   --from     pose depuis un kit : le .sha256 à côté est vérifié quand il existe, le kit se
 #              détare sous l'utilisateur dans ~/.lcars/kits/<nom>/, et tout se joue depuis lui
 #              (canal « kit »). Sans --from : ce checkout (canal « source »).
-#   Un canal ne se pose pas sur un autre : une machine installée par kit refuse un checkout, et
-#   inversement — mise à jour par le même canal, ou le terrain se refait.
+#   Un canal ne se pose pas sur un autre : le préflight refuse une machine installée par kit sous un
+#   checkout, et inversement — mise à jour par le même canal, ou le terrain se refait.
+#   --faits F  (up, en root) la mesure root conforme de cette invocation : l'apply la reçoit à la place
+#              du préflight, et le fichier est retiré à la sortie
+#   --bench    la forge montée par l'installation, son runner et l'humain de démonstration
+#   Options de provision, passées telles quelles : --substrate, --only, --human, --env, --port-forge,
+#   --port-deck, --forge-project, --verbose
 #
-#   EXIT  0 convergé · 2 appliqué, drift résiduel · 1 échec du provisionnement ou de l'acceptation
+#   sudo ne transmet aucune variable : la relance les reçoit en options, que ce script écrit lui-même.
+#   root exécute tel quel l'arbre d'où ce script est lancé, checkout ou kit détaré : il fait confiance à cet arbre.
+#   --docker-host URL    DOCKER_HOST, le daemon que la mesure sans privilège a vu répondre
+#   --linux-dedie        LCARS_ALLOW_ANY_HOST=1
+#   --forge URL          FORGE_BASE_URL        --forge-publique URL   FORGE_PUBLIC_URL
+#   --humain-demo NOM    LCARS_BUILTIN_HUMAN (défaut captain sous --bench) ; refusé sans --bench, comme une passe sans
+#                        --bench sur une machine dont le journal retient l'humain d'un banc : la structure de la
+#                        forge rend cet humain site-admin
+#   --forge-admin-reset  PROV_FORGE_ADMIN_RESET=1
+#
+#   EXIT  up      0 convergé · 2 appliqué, drift résiduel · 1 terrain refusé, sudo impossible, échec
+#                 du provisionnement ou de l'acceptation
+#         doctor  les codes de « provision doctor » : 0 conforme · 1 drift · 2 erreur (deploy/provision --help)
+#         un verbe inconnu sort en 1
 
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SELF="$HERE/workstation"
 PROVISION="$HERE/provision"
-PROVISION_LIB="$HERE/lib/provision-lib.sh"
 
-usage() { sed -n '/^# USAGE/,/^#   EXIT/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '/^# USAGE/,/^$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 case "${1:-help}" in
   -h|--help|help) usage; exit 0 ;;
 esac
 
 # shellcheck source=lib/provision-lib.sh
-. "$PROVISION_LIB"
+. "$HERE/lib/provision-lib.sh"
 # shellcheck source=lib/forge-bootstrap.sh
 . "$HERE/lib/forge-bootstrap.sh"
 
 fail() { printf 'workstation: %s\n' "$1" >&2; [[ -n "${2:-}" ]] && printf '   %s\n' "$2" >&2; exit 1; }
 
-# sudo remet l'environnement à zéro : seule cette liste traverse, nommée variable par variable.
-# Aucun secret ici — « sudo VAR=valeur » met la valeur dans l'argv d'un processus root.
-ESCALADE_ENV=(PROV_COLOR NO_COLOR PROV_VERBOSE PROV_DUMP_LINES LCARS_ALLOW_ANY_HOST PROV_FORGE_ADMIN_RESET PROV_FORGE_MONTEE LCARS_BENCH LCARS_BUILTIN_HUMAN FORGE_BASE_URL FORGE_PUBLIC_URL)
+FACTS_FILE="" MESURE_OUT="" MESURE_RC=0
+declare -a ARGS=() MESURE=()   # à provision ; --only et --human choisissent ce que l'apply joue et sert, la mesure ne les reçoit pas
+fait() { sed -n "s/^$1=//p" "$FACTS_FILE" | tail -1; }
 
-escalade_si_besoin() {
-  [[ "$EUID" -ne 0 ]] || return 0
-  command -v sudo >/dev/null 2>&1 \
-    || fail "root requis et sudo absent" "lancer ce script en root, ou installer sudo"
-  echo ""
-  echo "  [sudo] Privilèges root requis — le mot de passe de l'utilisateur peut être demandé."
-  local env_args=() v
-  for v in "${ESCALADE_ENV[@]}"; do
-    [[ -n "${!v:-}" ]] && env_args+=("$v=${!v}")
-  done
-  # exec ne rejoue pas le trap EXIT : ce qui doit partir part ici
-  [[ -z "${FACTS_FILE:-}" ]] || rm -f "$FACTS_FILE"
-  exec sudo "${env_args[@]}" bash "$(readlink -f "${BASH_SOURCE[0]}")" "$@"
-}
-
-FACTS_FILE=""
-fait() {
-  [[ -n "$FACTS_FILE" ]] || return 0
-  sed -n "s/^$1=//p" "$FACTS_FILE" 2>/dev/null | tail -1
-}
-mesurer() {
-  [[ -n "$FACTS_FILE" ]] || FACTS_FILE="$(mktemp "${TMPDIR:-/tmp}/lcars-facts.XXXXXX")" || FACTS_FILE=""
-  [[ -n "$FACTS_FILE" ]] || return 0
-  : > "$FACTS_FILE"
-  env PROV_FACTS_FILE="$FACTS_FILE" "$PROVISION" doctor --only 00-preflight "$@" >/dev/null 2>&1 || true
-}
-
-canal_voulu() {
-  [[ $# -gt 0 ]] || { prov_channel_here; return 0; }
-  local a c=""
-  for a in "$@"; do
-    case "$a" in
-      *.tar.gz) [[ -z "$c" ]] || fail "--from : un seul kit à la fois ($a)"; c=kit ;;
-      *)        [[ -z "$c" && -x "$a/deploy/provision" ]] \
-                  || fail "--from : « $a » n'est ni un kit.tar.gz, ni un kit détaré (pas de deploy/provision)"; c=kit ;;
+lire_options() { # lire_options <options…> — les choix de l'opérateur deviennent ses variables ; le reste va dans ARGS
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --bench)          export LCARS_BENCH=1 PROV_FORGE_MONTEE=1; shift ;;
+      --linux-dedie)    export LCARS_ALLOW_ANY_HOST=1; shift ;;
+      --forge)          export FORGE_BASE_URL="${2:?--forge attend une URL}"; shift 2 ;;
+      --forge-publique) export FORGE_PUBLIC_URL="${2:?--forge-publique attend une URL}"; shift 2 ;;
+      --humain-demo)    export LCARS_BUILTIN_HUMAN="${2:?--humain-demo attend un nom}"; shift 2 ;;
+      --forge-admin-reset) export PROV_FORGE_ADMIN_RESET=1; shift ;;
+      --docker-host)    export DOCKER_HOST="${2:?--docker-host attend une adresse}"; shift 2 ;;
+      --faits)          FACTS_FILE="${2:?--faits attend un fichier}"; shift 2 ;;
+      --only|--human)   ARGS+=("$1" "${2:?$1 attend une valeur}"); shift 2 ;;
+      --env|--substrate|--port-forge|--port-deck|--port-ssh|--forge-project)
+                        ARGS+=("$1" "${2:?$1 attend une valeur}"); MESURE+=("$1" "$2"); shift 2 ;;
+      *)                ARGS+=("$1"); MESURE+=("$1"); shift ;;
     esac
   done
-  printf '%s\n' "$c"
+  # la structure de la forge rend site-admin l'humain qu'elle nomme, et importe un compte existant de ce nom :
+  # hors banc, elle promouvrait un compte tiers, celui d'une forge fournie compris
+  [[ -z "${LCARS_BUILTIN_HUMAN:-}" || "${LCARS_BENCH:-}" == 1 ]] \
+    || fail "--humain-demo « $LCARS_BUILTIN_HUMAN » (LCARS_BUILTIN_HUMAN) sans --bench : l'humain de démonstration est celui d'un banc, et la structure de la forge le rend site-admin — hors banc, elle promouvrait ce compte, celui d'une forge fournie compris. Rien n'a été fait." \
+            "pour un banc : la même commande avec --bench ; pour un poste : sans --humain-demo"
+  # le nom vient des constantes, comme pour le rail conteneur : il ne peut pas valoir « lcars », qui
+  # nomme l'org systeme (sur Gitea une org et un compte partagent l'espace de noms)
+  [[ "${LCARS_BENCH:-}" != 1 ]] \
+    || export LCARS_BUILTIN_HUMAN="${LCARS_BUILTIN_HUMAN:-$PROV_BENCH_HUMAN_DEFAULT}"
 }
 
-refuser_melange() {
-  local machine; machine="$(fait channel)"
-  # « inconnu » : un produit posé avant le tampon ; un kit comme un checkout le reprend et écrit le tampon
-  case "$machine" in
-    ""|aucun|inconnu|"$1") return 0 ;;
-    invalide) fail "le canal d'installation de cette machine est illisible ($PROV_CHANNEL_FILE) — rien n'a été posé" \
-                   "à corriger, ou à retirer si cette machine n'a jamais été posée ; « workstation doctor » le nomme" ;;
-  esac
-  local geste
-  case "$machine" in
-    kit) geste="deploy/workstation up --from <kit.tar.gz>" ;;
-    *)   geste="deploy/workstation up, depuis un checkout" ;;
-  esac
-  fail "cette machine est installée par « $machine », et ce geste poserait « $1 » — un canal ne se pose pas sur un autre. Rien n'a été posé sur la machine" \
-       "mise à jour par le même canal : $geste — ou refaire le terrain, il est jetable"
+# provision reprend du journal l'humain de démonstration d'une passe --bench : une passe sans --bench le promouvrait encore
+humain_retenu() { # humain_retenu → l'humain de démonstration que le journal de la machine retient, ou rien
+  local ligne kv
+  ligne="$(sed -n 's/^params  *//p' "$PROV_JOURNAL_FILE" 2>/dev/null | head -n1)" || return 0
+  for kv in $ligne; do
+    [[ "$kv" != PROV_BUILTIN_HUMAN=?* ]] || { printf '%s\n' "${kv#PROV_BUILTIN_HUMAN=}"; return 0; }
+  done
+}
+refuser_humain_retenu() {
+  local h
+  [[ "${LCARS_BENCH:-}" != 1 ]] || return 0
+  h="$(humain_retenu)"
+  [[ -z "$h" ]] || fail "le journal de cette machine ($PROV_JOURNAL_FILE) retient l'humain de démonstration « $h » d'une passe --bench : sans --bench, la structure de la forge le promouvrait encore site-admin, hors banc. Rien n'a été fait." \
+                        "une machine de banc se reprend avec --bench ; un poste sans banc se pose sur un terrain refait"
 }
 
-kit_deballer() {
+choix_argv() { # choix_argv → CHOIX, les variables de l'opérateur en options, pour sudo qui ne les transmet pas
+  CHOIX=()
+  [[ "${LCARS_BENCH:-}" != 1 ]] || CHOIX+=(--bench)
+  [[ -z "${LCARS_ALLOW_ANY_HOST:-}" ]] || CHOIX+=(--linux-dedie)
+  [[ -z "${FORGE_BASE_URL:-}" ]] || CHOIX+=(--forge "$FORGE_BASE_URL")
+  [[ -z "${FORGE_PUBLIC_URL:-}" ]] || CHOIX+=(--forge-publique "$FORGE_PUBLIC_URL")
+  [[ -z "${LCARS_BUILTIN_HUMAN:-}" ]] || CHOIX+=(--humain-demo "$LCARS_BUILTIN_HUMAN")
+  [[ -z "${PROV_FORGE_ADMIN_RESET:-}" ]] || CHOIX+=(--forge-admin-reset)
+}
+
+sudo_possible() { # sudo_possible — rien, ou le refus en une phrase
+  command -v sudo >/dev/null 2>&1 || fail "root requis et sudo absent" "lancer ce script en root, ou installer sudo"
+  { exec 3< /dev/tty; } 2>/dev/null && { exec 3<&-; return 0; }
+  sudo -n true 2>/dev/null \
+    || fail "root requis : sans terminal, sudo ne peut pas demander de mot de passe, et « sudo -n » est refusé"
+}
+
+mesurer() { # mesurer <options de provision…> — « provision mesure » : ses faits dans FACTS_FILE, son rapport dans MESURE_OUT, son code dans MESURE_RC
+  FACTS_FILE="$(mktemp "${TMPDIR:-/tmp}/lcars-facts.XXXXXX" 2>/dev/null)" \
+    || fail "aucun fichier temporaire ne se crée dans ${TMPDIR:-/tmp} — la mesure y écrit ses faits" "corriger TMPDIR, puis relancer"
+  MESURE_OUT="$("$PROVISION" mesure --faits "$FACTS_FILE" "$@" 2>&1)" || MESURE_RC=$?
+  [[ -n "$(fait preflight)" ]] || fail "la mesure n'a rendu aucun fait — rien n'a été posé. Ce que provision a dit :" "$MESURE_OUT"
+  [[ "$MESURE_RC" -eq 0 ]] || fail "le préflight refuse ce terrain — rien n'a été posé. Ce qu'il constate :" \
+    "$(grep -E '^(DRIFT|FAIL|ERREUR) ' <<<"$MESURE_OUT" || printf '%s\n' "$MESURE_OUT")"
+}
+
+kit_racine() { # kit_racine <répertoire> → 0 si c'est un kit : son tampon de livraison et son délégué
+  [[ -d "$1" && -f "$1/deploy/workstation" ]] && prov_delivery_is_binary "$1"
+}
+
+kit_deballer() { # kit_deballer <kit.tar.gz> → la racine du kit détaré
   local tar="$1" nom dest
-  [[ "$EUID" -ne 0 ]] || fail "--from <kit.tar.gz> se lance sans sudo : le kit se détare sous l'utilisateur, l'escalade vient après"
+  [[ "$EUID" -ne 0 ]] || fail "--from <kit.tar.gz> se lance sans sudo : le kit se détare sous l'utilisateur, root vient après"
   [[ -f "$tar" ]] || fail "--from : kit introuvable : $tar"
   tar="$(readlink -f "$tar")"
   if [[ -f "$tar.sha256" ]]; then
@@ -110,11 +148,19 @@ kit_deballer() {
     echo "  kit : aucun $tar.sha256 à côté — le kit n'est pas vérifié, l'installation continue" >&2
   fi
   nom="$(basename "$tar" .tar.gz)"; dest="$HOME/.lcars/kits/$nom"
-  mkdir -p "$dest" && tar -xzf "$tar" -C "$dest" || fail "--from : détarage de $tar dans $dest en échec"
-  local -a racines=("$dest"/*/deploy/provision)
-  [[ "${#racines[@]}" -eq 1 && -x "${racines[0]}" ]] \
-    || fail "--from : $dest ne porte pas un deploy/provision — ce tar n'est pas un kit LCARS (${#racines[@]} trouvé(s))"
-  readlink -f "${racines[0]%/deploy/provision}"
+  # le kit se détare dans un échafaudage : seul un détarage complet qui porte un kit prend la place de dest
+  local echafaudage="$HOME/.lcars/kits/.$nom.partiel"
+  rm -rf "$echafaudage"
+  { mkdir -p "$echafaudage" && tar -xzf "$tar" -C "$echafaudage"; } \
+    || { rm -rf "$echafaudage"; fail "--from : détarage de $tar en échec — $dest n'a pas été touché"; }
+  local -a racines=()
+  mapfile -t racines < <(compgen -G "$echafaudage/*/$PROV_SOURCE_STAMP" || true)
+  [[ "${#racines[@]}" -eq 1 ]] \
+    || { rm -rf "$echafaudage"; fail "--from : $tar ne porte pas un kit LCARS (${#racines[@]} racine(s) marquée(s) $PROV_SOURCE_STAMP, une attendue)"; }
+  rm -rf "$dest"
+  mv "$echafaudage" "$dest" || fail "--from : $echafaudage ne prend pas la place de $dest"
+  racines[0]="${racines[0]#"$echafaudage"}"
+  dirname "$dest${racines[0]}"
 }
 
 # Les identifiants s'impriment avant que leur fichier parte, sur toute sortie, INT et TERM compris :
@@ -128,8 +174,8 @@ print_credentials_once() {
 }
 nettoyer() {
   print_credentials_once
-  [[ -n "${PROV_ANNOUNCE_FILE:-}" ]] && rm -f "$PROV_ANNOUNCE_FILE"
-  [[ -n "${FACTS_FILE:-}" ]] && rm -f "$FACTS_FILE"
+  [[ -z "${PROV_ANNOUNCE_FILE:-}" ]] || rm -f "$PROV_ANNOUNCE_FILE"
+  [[ -z "$FACTS_FILE" ]] || rm -f "$FACTS_FILE"
   return 0
 }
 
@@ -143,7 +189,7 @@ bandeau_final() {
   fi
   corps+=("  2. « claude » puis /login : l'identité, une fois."
           "  3. « sudo -u <humain de fleet> fleet start » — la fleet tourne sous un humain inscrit"
-          "     sur la forge (team « humans »)."
+          "     sur la forge (team « $PROV_HUMANS_TEAM »)."
           "  Sonde : « deploy/workstation doctor »")
   echo ""
   prov_box_emit --rule "       LCARS-FLEET — provisionnement terminé" "${corps[@]}"
@@ -152,7 +198,7 @@ bandeau_final() {
 # le contrat du banc sur le poste : l'humain de démonstration avec ses mots de passe unix et
 # forge, site-admin, son jeton opérateur, et les creds claude du compte qui installe si elles existent
 bench_seed() {
-  local human="$1" seat="${SUDO_USER:-}" src home grp url tok tmp
+  local human="$1" seat="${SUDO_USER:-}" seat_home="" src home grp url tok
   home="$(getent passwd "$human" | cut -d: -f6 || true)"
   [[ -n "$home" ]] || { echo "  banc : « $human » n'existe pas encore sur cette machine — le convergeur ne l'a pas matérialisé, rien n'est posé"; return 0; }
   grp="$(id -gn "$human")"
@@ -161,23 +207,21 @@ bench_seed() {
   else
     echo "  banc : mot de passe unix non posé sur « $human » (chpasswd a refusé)"
   fi
-  url="$(cat "$PROV_TOKENS_DIR/forge.url" 2>/dev/null || true)"
+  url="$(cat "$PROV_FORGE_URL_FILE" 2>/dev/null || true)"
   if [[ -n "$url" && -s "$PROV_MASTER_TOKEN_FILE" ]] \
-     && tok="$(bench_human_seed "$url" "$(read_token "$PROV_MASTER_TOKEN_FILE")" "$human" "$(bench_human_password)")"; then
-    # un fichier temporaire puis install : install ne relit pas un stdin sur une destination déjà là
-    tmp="$(mktemp "${TMPDIR:-/tmp}/lcars-op-token.XXXXXX")"
-    printf '%s\n' "$tok" > "$tmp"
-    if install -m 0600 -o "$human" -g "$grp" "$tmp" "$home/.gitea_token"; then
+     && tok="$(bench_human_seed "$url" "$PROV_MASTER_TOKEN_FILE" "$human" "$(bench_human_password)" "$home/.gitea_token")"; then
+    if write_atomic "$home/.gitea_token" 0600 "$human:$grp" <<<"$tok"; then
       echo "  banc : « $human » sur la forge — mot de passe de banc, site-admin, jeton opérateur (~/.gitea_token)"
     else
       echo "  banc : jeton opérateur de « $human » minté mais non posé ($home/.gitea_token)"
     fi
-    rm -f "$tmp"
   else
     echo "  banc : « $human » non semé sur la forge (adresse ou jeton master illisible, ou refus de la forge — ligne ci-dessus)"
   fi
-  src="${LCARS_CREDS_SRC:-$(getent passwd "$seat" 2>/dev/null | cut -d: -f6)/.claude/.credentials.json}"
-  [[ -r "$src" ]] || { echo "  creds claude non posées chez « $human » : le compte qui a lancé l'installation (« ${seat:-?} ») n'en a pas ($src) — aucun pod ne pourra penser. « claude », /login, /exit sous ce compte, puis relancer l'installation"; return 0; }
+  [[ -z "$seat" ]] || seat_home="$(getent passwd "$seat" | cut -d: -f6 || true)"
+  [[ -n "$seat_home" ]] || { echo "  creds claude non posées chez « $human » : le compte qui a lancé l'installation est inconnu (lancée en root, sans sudo) — aucun pod ne pourra penser. Relancer l'installation par sudo depuis le compte qui porte les creds claude"; return 0; }
+  src="$seat_home/.claude/.credentials.json"
+  [[ -r "$src" ]] || { echo "  creds claude non posées chez « $human » : le compte qui a lancé l'installation (« $seat ») n'en a pas ($src) — aucun pod ne pourra penser. « claude », /login, /exit sous ce compte, puis relancer l'installation"; return 0; }
   if install -d -m 0700 -o "$human" -g "$grp" "$home/.claude" \
      && install -m 0600 -o "$human" -g "$grp" "$src" "$home/.claude/.credentials.json"; then
     echo "  creds claude posées chez « $human » (copie de celles de « $seat », 0600)"
@@ -189,88 +233,98 @@ bench_seed() {
 
 # ─── up ─────────────────────────────────────────────────────────────────────────────────────────
 cmd_up() {
-  local -a from=() args=()
+  local from="" kit_dir="" p v
+  local -a opts=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --from) from+=("${2:?--from attend un artefact : kit.tar.gz, ou un kit détaré}"); shift 2 ;;
-      *)      args+=("$1"); shift ;;
+      --from) [[ -z "$from" ]] || fail "--from : un seul kit à la fois (${2:-})"
+              from="${2:?--from attend un artefact : kit.tar.gz, ou un kit détaré}"; shift 2 ;;
+      *)      opts+=("$1"); shift ;;
     esac
   done
-  [[ -x "$PROVISION" ]] || fail "provision introuvable : $PROVISION" "ce script exige l'arbre complet"
-  local voulu; voulu="$(canal_voulu "${from[@]}")" || exit 1
-  mesurer "${args[@]}"
-  refuser_melange "$voulu"
-
-  # wrapper, lib, provision et accept viennent tous du kit, jamais un mélange avec le checkout
-  local kit_dir=""
-  if [[ "${#from[@]}" -gt 0 ]]; then
-    case "${from[0]}" in
-      *.tar.gz) kit_dir="$(kit_deballer "${from[0]}")" || exit 1 ;;
-      *)        kit_dir="$(readlink -f "${from[0]}")" ;;
-    esac
-    prov_delivery_is_binary "$kit_dir" \
-      || fail "--from : $kit_dir ne se déclare pas paquet (pas de tampon à sa racine) — un kit se déclare ; un checkout se pose sans --from"
-    if [[ "$kit_dir/deploy" != "$HERE" ]]; then
-      [[ -f "$kit_dir/deploy/workstation" ]] || fail "--from : $kit_dir ne porte pas deploy/workstation — ce n'est pas un kit LCARS"
-      echo "  kit : $kit_dir — tout se joue depuis ce kit"
-      [[ -z "$FACTS_FILE" ]] || rm -f "$FACTS_FILE"
-      exec bash "$kit_dir/deploy/workstation" up --from "$kit_dir" "${args[@]}"
-    fi
-  fi
-  escalade_si_besoin up ${kit_dir:+--from "$kit_dir"} "${args[@]}"
-
-  PROV_ANNOUNCE_FILE="$(mktemp "${TMPDIR:-/tmp}/lcars-creds.XXXXXX")" \
-    && chmod 0600 "$PROV_ANNOUNCE_FILE" || PROV_ANNOUNCE_FILE=""
-  export PROV_ANNOUNCE_FILE
+  lire_options ${opts[@]+"${opts[@]}"}
+  refuser_humain_retenu
   trap nettoyer EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
-  [[ -s "${FACTS_FILE:-}" ]] || mesurer "${args[@]}"
 
-  # docker-ce ne se pose qu'où le rail le peut : un linux déclaré par l'environnement, jamais autrement
-  if [[ "$(fait docker)" == "absent" && "$(fait substrat)" == "linux" && "$(fait consent)" == "env" ]]; then
-    echo ""
-    echo "  docker est absent : les paquets et docker-ce sont posés d'abord."
-    "$PROVISION" apply "${args[@]}" --only 00-preflight --only 10-packages --only 12-docker-engine \
-      || echo "  la tranche paquets n'a pas convergé — 48-forge-host dira ce qui manque."
-    mesurer "${args[@]}"
+  # wrapper, lib, provision et accept viennent tous du kit, jamais un mélange avec le checkout
+  if [[ -n "$from" ]]; then
+    case "$from" in
+      *.tar.gz) kit_dir="$(kit_deballer "$from")" || exit 1 ;;
+      *)        kit_dir="$from" ;;
+    esac
+    kit_racine "$kit_dir" \
+      || fail "--from : « $from » n'est pas un kit LCARS — un kit porte son tampon $PROV_SOURCE_STAMP et deploy/workstation ; un checkout se pose sans --from"
+    kit_dir="$(readlink -f "$kit_dir")"
+    if [[ "$kit_dir/deploy" != "$HERE" ]]; then
+      echo "  kit : $kit_dir — tout se joue depuis ce kit"
+      exec bash "$kit_dir/deploy/workstation" up --from "$kit_dir" "${opts[@]}"
+    fi
   fi
 
+  if [[ "$EUID" -ne 0 ]]; then
+    [[ -z "$FACTS_FILE" ]] || fail "--faits appartient à la suite en root : la mesure root de la même invocation l'écrit"
+    mesurer ${MESURE[@]+"${MESURE[@]}"}
+    for p in deck forge; do
+      [[ "$p" == deck || "${LCARS_BENCH:-}" == 1 ]] || continue
+      v="$(fait "port_$p")"
+      [[ "${v#* }" != pris* ]] || fail "le port ${v%% *} ($p) est ${v#* } — rien n'a été posé" "déplacer avec --port-$p, ou libérer le port"
+    done
+    sudo_possible
+    if [[ "$(fait docker)" == "absent" && "$(fait substrat)" == "linux" ]]; then
+      echo "  docker est absent : le provisionnement pose docker-ce (12-docker-engine) avant la forge."
+    fi
+    echo ""
+    echo "  La suite se joue en root, par sudo : provision apply pose /etc, $(fait racine), les comptes et groupes de service, les paquets apt, puis l'acceptation."
+    [[ -z "$(fait docker_host_ecarte)" ]] || echo "  DOCKER_HOST=$(fait docker_host_ecarte) ne répond pas : root ne le reçoit pas."
+    choix_argv
+    [[ "$(fait docker)" != oui ]] || CHOIX+=(--docker-host "$(fait docker_host)")
+    rm -f "$FACTS_FILE"   # exec ne rejoue pas le trap
+    exec sudo bash "$SELF" up ${ARGS[@]+"${ARGS[@]}"} ${CHOIX[@]+"${CHOIX[@]}"}
+  fi
+
+  # en root, sans les faits qu'install.sh vient de mesurer en root : la mesure root, qui ne reprend rien d'avant sudo
+  [[ -n "$FACTS_FILE" ]] || mesurer ${MESURE[@]+"${MESURE[@]}"}
+
+  PROV_ANNOUNCE_FILE="$(mktemp "${TMPDIR:-/tmp}/lcars-creds.XXXXXX")"
+  export PROV_ANNOUNCE_FILE
+
   local rc=0
-  "$PROVISION" apply "${args[@]}" || rc=$?
-  case "$rc" in
-    0) ;;
-    2)
-      echo ""
-      echo "  Provisionnement appliqué, avec drift résiduel : un geste manque. Les lignes DRIFT"
-      echo "  ci-dessus le nomment ; « deploy/workstation doctor » les relit."
-      ;;
-    *)
-      echo ""
-      echo "  Provisionnement en échec (rc=$rc) : l'installation n'est pas complète. Les lignes FAIL"
-      echo "  ci-dessus nomment ce qui a échoué ; « deploy/workstation doctor » les relit."
-      exit 1
-      ;;
-  esac
+  "$PROVISION" apply --faits "$FACTS_FILE" ${ARGS[@]+"${ARGS[@]}"} || rc=$?
+  (( rc == 0 || rc == 2 )) || exit 1
   [[ "${LCARS_BENCH:-}" != 1 || -z "${LCARS_BUILTIN_HUMAN:-}" ]] || bench_seed "$LCARS_BUILTIN_HUMAN"
 
   local accept_rc=0
-  if [[ -x "$HERE/accept" ]]; then
-    bash "$HERE/accept" --announce-file "${PROV_ANNOUNCE_FILE:-/dev/null}" || accept_rc=$?
-  fi
-  bandeau_final "$(fait substrat)"
+  bash "$HERE/accept" --announce-file "$PROV_ANNOUNCE_FILE" || accept_rc=$?
+  bandeau_final "$(detect_substrate)"
   print_credentials_once
   [[ "$accept_rc" -eq 0 ]] || exit 1
   exit "$rc"
 }
 
-# une sonde ne coûte pas un mot de passe : doctor n'escalade pas
+# ─── doctor ─────────────────────────────────────────────────────────────────────────────────────
+# la sonde complète lit ce que root seul lit : sans root, rien ne se mesure à moitié
 cmd_doctor() {
-  [[ -x "$PROVISION" ]] || fail "provision introuvable : $PROVISION" "ce script exige l'arbre complet"
-  exec "$PROVISION" doctor "$@"
+  lire_options "$@"
+  [[ -z "$FACTS_FILE" ]] || fail "--faits appartient à up"
+  if [[ "$EUID" -ne 0 ]]; then
+    sudo_possible
+    echo "  La sonde lit ce que root seul lit : sudo, une fois."
+    choix_argv
+    # root reçoit le daemon qui répond à ce compte, jamais une adresse que personne n'a vue répondre
+    if docker_endpoint; then
+      CHOIX+=(--docker-host "$PROV_DOCKER_HOST")
+      [[ -z "$PROV_DOCKER_ECARTE" ]] || echo "  DOCKER_HOST=$PROV_DOCKER_ECARTE ne répond pas : la sonde reçoit la socket par défaut, $PROV_DOCKER_HOST"
+    elif [[ -n "$PROV_DOCKER_ECARTE" ]]; then
+      echo "  DOCKER_HOST=$PROV_DOCKER_ECARTE ne répond pas : la sonde ne le reçoit pas"
+    fi
+    exec sudo bash "$SELF" doctor ${ARGS[@]+"${ARGS[@]}"} ${CHOIX[@]+"${CHOIX[@]}"}
+  fi
+  exec "$PROVISION" doctor ${ARGS[@]+"${ARGS[@]}"}
 }
 
-case "${1:-help}" in
+case "$1" in
   up)        shift; cmd_up "$@" ;;
   doctor)    shift; cmd_doctor "$@" ;;
   *)         fail "verbe inconnu : $1" "workstation up | doctor  (--help pour l'aide)" ;;

@@ -12,8 +12,8 @@ d'elle-même, sans l'installeur.
 
 | geste | ce qu'il fait |
 |---|---|
-| `boot.sh` | le BOOT du conteneur, PID 1 sous `tini` (`ENTRYPOINT` du Dockerfile) : joue `init.sh apply`, les quatre gestes de `../forge.d/` (`tokens`, `catalogues`, `ops-branch`, `deck-oidc`), le convergeur d'humains, la console et le deck, les deux exécuteurs, puis `exec sshd`. Ses mots (`verify`, `roles`, `roles-tfvars`, `catalogue-root`, `catalogue-source`) sont l'API de l'image et délèguent à `lcars tool` ; `forge-apply` joue `forge-gestures apply` dans le conteneur |
-| `init.sh` | l'init de l'INSTANCE : le siège (résolu puis créé), les zones de face, la source et le corpus ops, les clés d'hôte SSH, le layout du volume et du magasin, la skill du siège, `pilot.assignee` — idempotent, ce qu'une instance neuve doit avoir sur son volume |
+| `boot.sh` | le BOOT du conteneur, PID 1 sous `tini` (`ENTRYPOINT` du Dockerfile) : joue `init.sh apply`, les quatre gestes de `../forge.d/` dans l'ordre du poste (`catalogues`, `tokens`, `ops-repo`, `deck-oidc`), le convergeur d'humains, la console et le deck, les deux exécuteurs, puis `exec sshd`. Ses mots (`verify`, `roles`, `roles-tfvars`, `catalogue-root`, `catalogue-source`) sont l'API de l'image et délèguent à `lcars tool` ; `forge-apply` joue `forge-gestures apply` dans le conteneur |
+| `init.sh` | l'init de l'INSTANCE : le siège (résolu puis créé), l'adresse de la forge (`forge.url`, lisible par une session ssh), les zones de face, la source et le corpus ops, les clés d'hôte SSH, le layout du volume et du magasin, la skill du siège, `pilot.assignee` — idempotent, ce qu'une instance neuve doit avoir sur son volume |
 
 ## Le protocole
 
@@ -43,9 +43,9 @@ compose donne au conteneur — et les défauts du protocole pour le reste.
 Ce qu'il ne fait pas : les gestes de forge (`../forge.d/`, le minteur `../provision-role-tokens.sh`),
 joués par `boot.sh` après lui ; les humains (le convergeur) ; les services (`boot.sh`).
 
-`boot.sh` ne joue AUCUN module de l'installeur, et rien dans le conteneur ne lit `deploy/` : l'image
-runtime ne le porte plus (lot 7) — seul le stage `verify` du Dockerfile le copie pour jouer le
-doctor au build, et `final` repart de `runtime` avec le tampon `/opt/lcars/.verified`. Les
-fichiers de boot sont des objets du produit, hors de la table de l'installeur : `/run/lcars-boot.state`
-(`awaiting-config`, `init-failed`), `/run/lcars-seat.login`, `/run/lcars-provision.rc`,
+`boot.sh` ne joue AUCUN module de l'installeur, et rien au boot ne lit `deploy/`. L'image en porte
+pourtant une copie, sous `/opt/lcars/deploy` : `62-runtime-helpers` l'embarque sur tout substrat, le
+stage `verify` du Dockerfile y joue le doctor au build, et `final`, qui part de `runtime`, la garde
+avec le tampon `/opt/lcars/.verified`. Les fichiers de boot sont des objets du produit, hors de la table de l'installeur : `/run/lcars-boot.state`
+(`awaiting-config`, `init-failed`), `/run/lcars-seat.login`, `/run/lcars-forge.rc`,
 `/run/lcars-humans.rc`, `/opt/lcars/.verified` — `deploy/container status` les lit de l'hôte.

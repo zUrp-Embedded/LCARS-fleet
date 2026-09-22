@@ -2,19 +2,18 @@
 # SOURCE: deploy/lib/provision-audit.sh
 # AUTHOR: bob
 # STARDATE: 2026-09-04
-# STATUS: l'audit de la machine (`provision audit`) de `provision`, sourcé par lui
+# STATUS: `provision audit` — ce qui est apparu sur la machine entre deux instantanés et que system.manifest ne déclare pas ; sourcé par provision
 
 audit_run() {
   local avant="${1:-}" apres="${2:-}"
   [[ -r "$avant" && -r "$apres" ]] \
     || die "audit attend deux instantanés lisibles : provision audit --before <f> --after <f>"
-  [[ -r "$MANIFEST_FILE" ]] || die "manifeste introuvable ($MANIFEST_FILE)"
+  [[ -r "$PROV_MANIFEST_FILE" ]] || die "manifeste introuvable ($PROV_MANIFEST_FILE)"
 
-  local rows; rows="$(grep -vE '^\s*#|^\s*$' "$MANIFEST_FILE")"
+  local rows; rows="$(grep -vE '^\s*#|^\s*$' "$PROV_MANIFEST_FILE")"
   local -a declares=()
-  local cls obj _mode _owner sub
-  # shellcheck disable=SC2034
-  while read -r cls obj _mode _owner sub; do declares+=("$obj"); done <<<"$rows"  # le trait ne change pas la couverture
+  local obj
+  while read -r _ obj _; do declares+=("$obj"); done <<<"$rows"
 
   couvert() {
     local p="$1" d
@@ -29,12 +28,11 @@ audit_run() {
   }
 
   local -A _apt=()
-  local _dpkg="${LCARS_DPKG:-dpkg}"
-  if [[ -r "$JOURNAL_FILE" ]] && command -v "$_dpkg" >/dev/null 2>&1; then
+  if [[ -r "$PROV_JOURNAL_FILE" ]] && command -v dpkg >/dev/null 2>&1; then
     local _pkg _f
     # shellcheck disable=SC2013
-    for _pkg in $(awk '$1=="apt_installed"{ $1=""; print }' "$JOURNAL_FILE"); do
-      while read -r _f; do [[ -n "$_f" ]] && _apt["$_f"]=1; done < <("$_dpkg" -L "$_pkg" 2>/dev/null || true)
+    for _pkg in $(awk '$1=="apt_installed"{ $1=""; print }' "$PROV_JOURNAL_FILE"); do
+      while read -r _f; do [[ -n "$_f" ]] && _apt["$_f"]=1; done < <(dpkg -L "$_pkg" 2>/dev/null || true)
     done
   fi
 
@@ -49,8 +47,8 @@ audit_run() {
   echo ""
   printf '  %d objet(s) apparu(s), %d appartenant à un paquet apt journalisé, %d non couvert(s) par la table.\n' \
     "$n_apparu" "$n_apt" "$n_nu"
-  [[ -r "$JOURNAL_FILE" ]] \
-    || echo "  ${_PA}journal illisible ($JOURNAL_FILE) — les fichiers des paquets apt sont comptés comme non déclarés${_PN}"
+  [[ -r "$PROV_JOURNAL_FILE" ]] \
+    || echo "  ${_PA}journal illisible ($PROV_JOURNAL_FILE) — les fichiers des paquets apt sont comptés comme non déclarés${_PN}"
   [[ "$n_nu" -eq 0 ]] || {
     echo "  ${_PA}Chacun est un défaut : soit il se déclare, soit il cesse d'être posé.${_PN}"
     return 1

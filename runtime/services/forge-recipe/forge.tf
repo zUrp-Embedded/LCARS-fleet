@@ -2,7 +2,8 @@
 # LCARS Fleet — empreinte forge (structure déclarative)
 #
 # Provisionne la STRUCTURE d'une forge Gitea vierge pour accueillir une fleet :
-# comptes (système + rôles + humain), org `fleet`, teams + memberships.
+# comptes (système + rôles + humain), UNE org par play (`var.org` : l'org système, puis chaque
+# catalogue), teams + memberships.
 #
 # HORS de ce fichier, par choix :
 #   · les tokens runtime      → bin/provision-role-tokens.sh (le provider ne minte
@@ -162,7 +163,7 @@ variable "org" {
   default     = "fleet"
 }
 
-resource "gitea_org" "fleet" {
+resource "gitea_org" "this" {
   name       = var.org
   visibility = "public"
 
@@ -184,7 +185,7 @@ resource "gitea_org" "fleet" {
   # a ete retire des teams (cf. la cicatrice sur `gitea_team`) parce que Gitea relit `permission` en
   # `none` — une valeur INVALIDE en ecriture, que l'update renvoyait et que Gitea refusait. La
   # visibilite, elle, se relit `public`/`limited` : des valeurs valides. Plan apres ce bloc :
-  # `gitea_org.fleet` disparait du plan, l'org reste `limited`.
+  # `gitea_org.this` disparait du plan, l'org reste `limited`.
   lifecycle {
     ignore_changes = [visibility, repo_admin_change_team_access]
   }
@@ -246,8 +247,10 @@ locals {
   }
 
   # ⚠ `humans` N'EXISTE QUE DANS L'ORG SYSTÈME, et cette recette est jouée UNE FOIS PAR ORG — pour
-  # `fleet` par `cmd_apply`, puis pour chaque catalogue par `cmd_install`, qui la recopie dans le
-  # dossier du catalogue avec `var.org` = son nom.
+  # l'org système par `cmd_apply` (`-var org=<système>`, sans aucun rôle métier : le rail d'outillage
+  # et le registre d'incidents écrivent sous le compte système), puis pour chaque catalogue par
+  # `cmd_install`, qui la recopie dans le dossier du catalogue avec `var.org` = son nom — le catalogue
+  # standard `fleet` compris, installé depuis la release comme n'importe quel autre.
   #
   # POURQUOI ELLE N'A RIEN À FAIRE DANS UNE ORG DE CATALOGUE. Elle répondait à UNE question : le
   # préflight d'onboarding vérifiait l'adhésion de l'humain à `<catalogue>:humans` avant de créer un
@@ -258,9 +261,9 @@ locals {
   #
   # ⚠ ET CETTE ABSENCE DÉPEND D'UN RÉGLAGE D'INSTANCE : sous `DEFAULT_USER_IS_RESTRICTED=true`,
   # l'adhésion à `<catalogue>:humans` serait la SEULE chose qui rend un catalogue visible à un
-  # humain — un compte restreint ne voit que ce qui lui est explicitement accordé (mesuré le
-  # 2026-08-17 : 404 sur l'org d'un catalogue en étant connecté, 200 en anonyme). La forge naît sans
-  # ce drapeau, et `50-forge` signale en drift un compte restreint ; le remettre aveuglerait tous les
+  # humain — un compte restreint ne voit que ce qui lui est explicitement accordé (404 sur l'org
+  # d'un catalogue en étant connecté, 200 en anonyme). La forge naît sans ce drapeau, et
+  # `forge.d/tokens.sh` signale en drift un compte restreint ; le remettre aveuglerait tous les
   # humains sur tous les catalogues.
   #
   # LA FORME EST UN CONDITIONNEL ET PAS UN MODULE SÉPARÉ, mesuré : un module neuf n'hérite pas de la
@@ -271,32 +274,65 @@ locals {
     # l'humain daily — READ. LE lock qui compte : voit + commente, ne relabellise ni ne crée. Rend
     # `stage/*` infalsifiable côté acteur indépendant, et `can_create_repos = false` EST ce lock.
     humans = { permission = "read", can_create_repos = false }
+
+    # ⚠ QUI APPROUVE UNE DEMANDE D'OUTILLAGE. Gitea n'accepte dans une whitelist de protection QUE
+    # les membres d'une team de l'org : un collaborateur de dépôt, fût-il site-admin et propriétaire
+    # effectif, en est écarté EN SILENCE (mesuré le 2026-09-18 sur le banc VIERGE 2004 — un PATCH
+    # qui rend 200 et une liste qui reste vide). La protection nomme donc cette TEAM et aucun compte.
+    #
+    # Sa composition ne se déclare nulle part : elle se DÉRIVE du drapeau site-admin de la forge, à
+    # chaque passe (`forge-gestures.sh`, `derive_admins`). Une table de noms tenue à la main
+    # divergerait — ⚖ user 2026-09-18 : « une autre table tenue à la main va diverger, c'est perdu
+    # d'avance ».
+    #
+    # WRITE, pas plus : approuver exige de pouvoir écrire sur le dépôt (mesuré : `read` est écarté
+    # comme l'absence de team). Ce que ce write ouvre par ailleurs est refermé par les protections
+    # de `main` et `incidents`.
+    admins = { permission = "write", can_create_repos = false }
   }) : local.base_teams
+
+  # LE NOM DE CETTE TEAM A UNE SEULE ÉCRITURE : la table ci-dessus la déclare, les protections de
+  # `ops.tf` la nomment par ce local, et le geste la compose par le même nom lu ici.
+  approvers_team = "admins"
 }
 
 # L'ORG SYSTÈME EST NOMMÉE, PAS DEVINÉE. Elle porte l'identité (`humans`, lue par le convergeur et
-# par le deck) ; les orgs de catalogue portent du travail. Une recette qui sert les deux a besoin de
-# savoir laquelle elle sert, et une variable le dit mieux qu'une convention de nommage.
+# par le deck) et le dépôt du système (`_ops`) ; les orgs de catalogue portent du travail. Une
+# recette qui sert les deux a besoin de savoir laquelle elle sert, et une variable le dit mieux
+# qu'une convention de nommage.
+#
+# ⚠ CE DÉFAUT A TROIS JUMEAUX, tenus par les murs de `deploy/tests/variable_walls.bats` :
+# `PROV_FORGE_ORG_DEFAULT` (installeur), `LCARS_FORGE_ORG` (`services/lib/module-protocol.sh`) et
+# l'org de `Fleet.Toolchain.ops_repo/0`. Le nom est réservé au système : aucun catalogue ni projet
+# ne le porte (⚖ user 2026-09-16, option B).
 variable "system_org" {
   type        = string
   description = "Org qui porte l'identité de la fleet — la seule à recevoir la team `humans`"
-  default     = "fleet"
+  default     = "lcars"
 }
 
-# ⚠ PAS DE `ignore_changes = [permission]` ICI, ET C'EST UN CORRECTIF.
-# Le motif qu'il aurait, et qui reste vrai : Gitea 1.26 stocke l'accès en units_map et relit le champ
-# `permission` top-level en « none » (déprécié), donc le provider voit un drift perpétuel
-# write→none. Mais sur une team IMPORTÉE, la valeur planifiée d'un attribut ignoré est celle de
-# l'ÉTAT, soit « none » — et l'update part avec, ce que Gitea refuse : `permission mode invalid`,
-# les cinq teams d'un coup (mesuré 2026-08-16). Un garde-fou cosmétique transformerait l'import en
-# panne dure.
-# Le prix, mesuré et assumé : `permission` et `units` ne convergent jamais en lecture, donc chaque
-# apply annonce et rejoue un update par team. Il réussit, l'apply rend 0 — mais un plan VIDE est
-# impossible tant que le provider relit ce champ ainsi. C'est le bruit, pas la panne.
+# ⚠ LE BRUIT DES TEAMS EST UN DÉFAUT DU PROVIDER, PAS DE CETTE RECETTE — et aucune forme écrite ici
+# ne le supprime. Mesuré le 2026-09-16 sur une Gitea 1.26.1 et le provider 0.8.1 (la dernière
+# publiée), les cinq formes possibles :
+#
+#   1. `permission = "write"` (ce qui est écrit ici) : la forge STOCKE l'accès dans `units_map` et
+#      relit `permission` en « none ». Le provider voit donc un drift perpétuel write→none, et
+#      chaque apply rejoue un update par team. Il réussit : c'est du bruit, pas une panne.
+#   2. `units_map` déclaré en plus : sans effet, le drift porte sur `permission` lui-même.
+#   3. `permission = "none"` — ce que la forge stocke, et ce que la doc du provider annonce comme
+#      valeur admise : le PROVIDER refuse, « permission mode invalid ». L'API de la forge, elle,
+#      l'accepte (POST → 201, PATCH → 200, l'accès reste celui d'`units_map`).
+#   4. `units_map` SANS `permission` : même refus du provider.
+#   5. `lifecycle { ignore_changes = [permission] }` : le plan n'est pas vide pour autant, et le
+#      premier apply qui touche une team meurt sur le même « permission mode invalid ». Le
+#      garde-fou cosmétique transforme le bruit en panne dure.
+#
+# Un plan VIDE est donc hors d'atteinte tant que le provider valide `permission` contre un ensemble
+# plus étroit que sa propre documentation, et qu'il relit un champ que la forge n'écrit plus.
 resource "gitea_team" "this" {
   for_each                 = local.teams
   name                     = each.key
-  organisation             = gitea_org.fleet.name
+  organisation             = gitea_org.this.name
   permission               = each.value.permission
   can_create_repos         = each.value.can_create_repos
   include_all_repositories = true
@@ -362,10 +398,11 @@ resource "gitea_team_membership" "externals" {
   depends_on = [gitea_user.role]
 }
 
-# LE COMPTE BUILT-IN, et il n'est PAS une personne : il tient le siège du compte que l'admin d'une
-# forge crée à son installation. Sa raison d'être aujourd'hui est un TUTORIEL — il donne à l'admiral
-# une cible sur laquelle exercer la promotion (`is_admin` sur la forge → onglet admin du deck à la
-# session suivante), sans avoir à enrôler une vraie personne pour essayer.
+# L'HUMAIN DE DÉMONSTRATION, et il n'est PAS une personne : c'est un admin de LCARS que cette recette
+# pose (site-admin de la forge, `instance/accounts.tf`), pour essayer LCARS sur un banc sans enrôler
+# une vraie personne. Il n'est pas le siège : le siège est l'admin du système — le compte qui
+# installe sur un poste, le compte n°1 de la forge dans un conteneur —, il porte le compte
+# d'administration de la forge, et la fleet lui est fermée.
 #
 # `count` et pas une ressource inconditionnelle : `humans` n'existe que dans l'org système (cf. la
 # table plus haut), donc l'adhésion la suit. Une org de catalogue n'a ni la team ni ce compte.
@@ -380,7 +417,7 @@ resource "gitea_team_membership" "human" {
 
 # ⚠ LE COMPTE SYSTÈME N'EST MEMBRE D'AUCUNE TEAM, ET IL NE DOIT PAS LE DEVENIR.
 #
-# `fleet:humans` répond « qui est une personne de cette fleet ». Une liste qui contient son propre
+# `lcars:humans` répond « qui est une personne de cette fleet ». Une liste qui contient son propre
 # lecteur n'est plus un filtre d'enrôlement — c'est une liste que le système peuple. Une adhésion du
 # système à `humans` ferait exactement ça, pour un droit qu'il a déjà.
 #
@@ -405,8 +442,8 @@ resource "gitea_team_membership" "human" {
 # source serait lue au PLAN — c'est-à-dire avant que l'org existe, et l'apply mourrait sur une
 # forge vierge. Avec, la lecture est différée à l'apply, après la création.
 data "gitea_teams" "org" {
-  organisation = gitea_org.fleet.name
-  depends_on   = [gitea_org.fleet]
+  organisation = gitea_org.this.name
+  depends_on   = [gitea_org.this]
 }
 
 resource "gitea_team_membership" "owner" {

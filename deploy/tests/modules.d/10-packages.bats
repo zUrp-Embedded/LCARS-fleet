@@ -6,17 +6,20 @@
 # STATUS: témoins des paquets du runtime — présence mesurée par dpkg, pose par apt, sonde bwrap réelle
 
 load ../refute
+load ../support/decor
 
 setup() {
+  local _v
+  while read -r _v; do unset "$_v" 2>/dev/null || true; done \
+    < <(compgen -v | grep -E '^(LCARS_|PROV_)' || true)
   SRC="$BATS_TEST_DIRNAME/../../modules.d/10-packages.sh"; [ -f "$SRC" ]
   export PROVISION_LIB="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
   export PROVISION_MODULE=10-packages PROV_SUBSTRATE=wsl
   export PROV_HUMAN; PROV_HUMAN="$(id -un)"
-  export LCARS_CHANNEL_FILE="$BATS_TEST_TMPDIR/etc/lcars/channel"; mkdir -p "$(dirname "$LCARS_CHANNEL_FILE")"
-  export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/private"
+  decor_pose
   export INSTALLES="$BATS_TEST_TMPDIR/installes"; : > "$INSTALLES"
   export CALLS="$BATS_TEST_TMPDIR/calls"; : > "$CALLS"
-  BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN"
+  BIN="$DECOR_BIN"
   cat > "$BIN/dpkg-query" <<'EOF'
 #!/usr/bin/env bash
 pkg="${@: -1}"
@@ -35,7 +38,6 @@ echo "BWRAP:$*" >> "$CALLS"
 exit "${STUB_BWRAP_RC:-0}"
 EOF
   chmod 0755 "$BIN"/*
-  export PATH="$BIN:$PATH"
 }
 
 mod() { run bash "$SRC" "$@"; }
@@ -93,6 +95,23 @@ liste() { sed -n '/^PACKAGES=(/,/^)/p' "$SRC" | grep -vE '^PACKAGES=\(|^\)|^\s*#
   STUB_BWRAP_RC=1 mod apply
   [ "$status" -eq 1 ]
   [[ "$output" == *"FAIL  10-packages: bwrap installé mais un sandbox minimal ÉCHOUE"*"apparmor_restrict_unprivileged_userns=0"* ]]
+}
+
+@test "xz-utils est dans la liste : 16-node détare le précompilé de node, un .tar.xz" {
+  grep -qE 'fetch_verify "https://nodejs\.org/[^"]*\.tar\.xz"' "$BATS_TEST_DIRNAME/../../modules.d/16-node.sh" \
+    || { echo "16-node ne télécharge plus un .tar.xz — ce cas n'a plus de sujet"; return 1; }
+  liste | grep -qx xz-utils
+}
+
+# ⚠ SANS `zstd`, L'INSTALLEUR OFFICIEL DE CLAUDE TÉLÉCHARGE 230 Mo DE BINAIRE NU. Il prend
+# l'artefact COMPRESSÉ quand zstd est là, et le brut sinon. Mesure du 2026-09-17 sur LCARS-beta,
+# zstd absent et lien à ~540 ko/s : le téléchargement n'aboutissait jamais, et l'échec se présentait
+# comme une somme de contrôle fausse sur un fichier qui n'existe pas. AUCUN humain n'avait `claude`.
+@test "zstd est dans la liste : l'installeur de claude prend l'artefact compressé quand il est là" {
+  local claude="$BATS_TEST_DIRNAME/../../../runtime/services/human.d/40-claude-bin.sh"
+  grep -q 'claude.ai/install.sh' "$claude" \
+    || { echo "40-claude-bin ne joue plus l'installeur officiel — ce cas n'a plus de sujet"; return 1; }
+  liste | grep -qx zstd
 }
 
 @test "apply : apt qui refuse est un échec, sans sonde derrière" {

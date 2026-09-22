@@ -3,55 +3,72 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
 # STATUS: PROTO-V2 — forge : SONDE de la structure (territoire OpenTofu) + jambe tokens (A4)
-# APPLY-ON: any
-# CHECK-ON: any
-# NEEDS: root
-# AFTER: 48-forge-host 50-catalogues 61-forge-structure
+# JOUE PAR : le boot du conteneur (a chaque demarrage) et l'installeur d'un poste, par un
+# appelant mince. Ni terrain ni ordre ne se declarent ici : ces en-tetes ne sont lus que dans
+# `deploy/modules.d`, et les recopier ici promettait une mecanique que personne ne joue.
 
 set -euo pipefail
-# shellcheck source=../lib/provision-lib.sh
-# Le protocole des modules du PRODUIT (Q3, lot 6, 2026-09-04) : ce geste est joue par le conteneur a l'init
-# de son instance et par l'installeur a l'install (63-forge-tokens, un appelant mince).
+# Ce geste est joue par le boot du conteneur et, sur un poste, par 63-forge-tokens (un appelant
+# mince) : un remede qu'il emet doit valoir sur les deux.
 # shellcheck source=../lib/module-protocol.sh
 . "${LCARS_MODULE_PROTOCOL:?LCARS_MODULE_PROTOCOL non pose — lance via un module de l installeur ou le boot du conteneur, pas le geste nu}"
 : "${LCARS_LOGIN:=}"
 
 : "${LCARS_PASSWORDS_FILE:=$LCARS_PRIVATE_DIR/forge-role-passwords.json}"
-# Lot 6 (2026-09-04) — CORRECTION au lot 1 : le minteur n'est PAS « install seulement ». Le poste le
-# joue ici, a l'install ; le CONTENEUR le joue a l'init de son instance, qui est du PRODUIT (Q1). Un
-# geste joue en prod est du produit : il vit avec les gestes de forge, et l'installeur l'APPELLE —
-# le sens permis (60 appelle deploy-release, 61 appelle forge-gestures).
 # Le minteur est le VOISIN de ce dossier — un geste de forge du produit, comme celui-ci.
 A4_SCRIPT="${LCARS_ROLE_TOKENS_SCRIPT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/provision-role-tokens.sh}"
 # LE ROSTER DU MINT SE DERIVE DU RELEASE, PAS D'UNE LISTE ECRITE ICI : les roles du catalogue
 # embarque (« lcars tool roles-tfvars » sans argument), plus ceux de chaque catalogue installe, plus
 # le plancher que l'appelant apporte (`LCARS_ROLES` — l'installeur en a un ; le conteneur n'en a pas
-# besoin, la release porte le sien). C'etait `prov_roles` dans la lib de l'installeur.
-_lcars_cli() {
-  [[ -n "${LCARS_CLI:-}" ]] && { printf '%s' "$LCARS_CLI"; return 0; }
-  if command -v lcars >/dev/null 2>&1; then command -v lcars; return 0; fi
-  printf '%s' "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/bin/lcars"
-}
-roles_of_machine() {
-  local out="${LCARS_ROLES:-}" cli root
-  cli="$(_lcars_cli)"
+# besoin, la release porte le sien).
+# `lcars_cli` vit dans le protocole : trois gestes la cherchaient, avec le meme corps.
+# LES ROSTERS, PAR ORG. Une ligne « <org> <login>… » par catalogue (celui de la release, puis chaque
+# catalogue installe), et le plancher `LCARS_ROLES` de l'appelant sur la ligne de la release. Un
+# compte de role est membre de l'org de SON catalogue — sa recette le place dans ses teams — et de
+# nulle part ailleurs : l'org systeme n'a aucun role metier (⚖ user 2026-09-16, option B). Une ligne
+# dont l'org est vide est un roster que la release n'a pas su lire : ses comptes se mintent, leur
+# adhesion ne se sonde pas.
+org_rosters() {
+  local cli root
+  cli="$(lcars_cli)"
   if [[ -r "$cli" ]] && command -v jq >/dev/null; then
-    out="$out $(bash "$cli" tool roles-tfvars 2>/dev/null | jq -r '(.roles[]?, .system_roles[]?)' 2>/dev/null | tr '\n' ' ' || true)"
+    printf '%s %s\n' \
+      "$(bash "$cli" tool roles-tfvars 2>/dev/null | jq -r '.org // ""' 2>/dev/null || true)" \
+      "${LCARS_ROLES:-} $(bash "$cli" tool roles-tfvars 2>/dev/null | jq -r '(.roles[]?, .system_roles[]?)' 2>/dev/null | tr '\n' ' ' || true)"
     if [[ -d "$LCARS_CATALOGUES_DIR" ]]; then
       for root in "$LCARS_CATALOGUES_DIR"/*/; do
         [[ -f "${root}catalogue.yaml" ]] || continue
-        out="$out $(bash "$cli" tool roles-tfvars "${root%/}" 2>/dev/null | jq -r '(.roles[]?, .system_roles[]?)' 2>/dev/null | tr '\n' ' ' || true)"
+        printf '%s %s\n' \
+          "$(bash "$cli" tool roles-tfvars "${root%/}" 2>/dev/null | jq -r '.org // ""' 2>/dev/null || true)" \
+          "$(bash "$cli" tool roles-tfvars "${root%/}" 2>/dev/null | jq -r '(.roles[]?, .system_roles[]?)' 2>/dev/null | tr '\n' ' ' || true)"
       done
     fi
+  else
+    printf '%s %s\n' "" "${LCARS_ROLES:-}"
   fi
-  printf '%s\n' $out | grep -v '^$' | sort -u | tr '\n' ' ' | sed 's/ $//'
 }
-# LE ROSTER EST DERIVE, PAS DECLARE — `prov_roles` (provision-lib) lit ce que les catalogues
-# INSTALLES declarent, plus le plancher systeme. Resolu UNE fois ici et non a chaque usage : entre
-# deux appels d'un meme cycle la liste ne doit pas bouger, sinon la sonde et le mint travaillent sur
-# deux ensembles differents et le rapport parle d'un etat que personne n'a converge.
+roles_of_machine() { # → tous les logins de role, dedoublonnes, sans leur org
+  # `awk NF` et non `grep -v '^$'` : un roster vide fait rendre 1 a grep, donc sous `pipefail` une
+  # MORT du geste la ou il doit rendre un refus nomme. Une liste vide est un etat, pas une panne.
+  printf '%s\n' "$ROSTERS" | cut -d' ' -f2- | tr ' ' '\n' | awk 'NF' | sort -u | tr '\n' ' ' | sed 's/ $//'
+}
+# Les rosters sont resolus UNE fois ici et non a chaque usage : entre deux appels d'un meme cycle la
+# liste ne doit pas bouger, sinon la sonde et le mint travaillent sur deux ensembles differents et le
+# rapport parle d'un etat que personne n'a converge.
+ROSTERS="$(org_rosters)"
 ROLES="$(roles_of_machine)"
 ACCOUNTS="$ROLES $LCARS_SYSTEM_ACCOUNT"
+
+# Aucun plancher de roles n'est grave ici : les roles viennent de la release et des catalogues
+# installes, lus par `lcars tool roles`. Un roster vide n'est donc pas « zero role a poser » — la
+# release porte son propre catalogue, lu sans argument — c'est une lecture qui n'a pas abouti : la
+# CLI est absente ou illisible, `jq` manque, la release ne repond pas. Le geste le dit et s'arrete
+# la, plutot que de converger une forge sur une liste devinee.
+roster_vide() { # roster_vide <check|apply> — ne rend la main que si le roster porte au moins un role
+  [[ -z "$ROLES" ]] || return 0
+  p_fail "aucun rôle lisible — la release et les catalogues installés les déclarent (« lcars tool roles-tfvars »), et rien n'est minté sur un roster deviné. Sur un poste, le module des catalogues (50) précède celui des jetons (63) ; dans un conteneur, le geste « catalogues » précède « tokens » au boot"
+  if [[ "$1" == apply ]]; then verdict_apply; else verdict_check; fi
+}
 
 # La forme se teste ICI, pas chez l'appelant : `curl` accepte un « host:port » nu et lui prefixe
 # `http://`, alors que le runtime concatene `base_url` verbatim (Fleet.Forge.Client.Transport) et
@@ -107,12 +124,36 @@ missing_accounts() { # → la liste des comptes absents (vide = structure compl�
   printf '%s' "${absents# }"
 }
 
+# L'etat d'un jeton en CINQ mots. `-r` seul confondait trois faits : un fichier absent, un fichier
+# present que ce compte ne peut pas ouvrir (0600 a lcars-authority, lu par le doctor d'un humain),
+# et un fichier vide. Le premier se pose, le deuxieme ne se conclut pas, le troisieme se repose.
+token_state() { # <fichier> -> present | empty | unreadable | absent | unmeasurable
+  local st
+  st="$(prov_file_state "$1")"
+  if [[ "$st" == present && -z "$(read_token "$1")" ]]; then st=empty; fi
+  printf '%s' "$st"
+}
+# La phrase d'un jeton qu'on ne peut pas ouvrir : ce qui est mesure (proprietaire, mode) et le geste.
+# Le sujet vient de l'appelant, l'accord aussi (`f` : « autorite … presente », `m` : « jeton … present »).
+# Le geste ne vaut que sur un poste : dans le conteneur, le doctor tourne deja en root.
+token_unreadable_why() { # <fichier> <f|m>
+  local owner_mode accord=présent
+  [[ "${2:-m}" == f ]] && accord=présente
+  owner_mode="$(stat -c '%U:%G, mode %a' -- "$1" 2>/dev/null || true)"
+  printf '%s mais illisible pour %s (%s, %s) — rien n'"'"'est conclu sur son contenu ; sur un poste, la sonde se rejoue sous sudo pour le mesurer' \
+    "$accord" "$(id -un 2>/dev/null || echo "ce compte")" "$1" "${owner_mode:-propriétaire et mode illisibles}"
+}
+MASTER_POSE_GESTE="sur un poste, « deploy/workstation up » la pose ; pour un conteneur, « FORGE_ADMIN_TOKEN=<jeton master> deploy/container config » depuis l'hôte"
+
 check_master_authority() {
-  if [[ -r "$LCARS_MASTER_TOKEN_FILE" ]]; then
-    p_ok "autorité de création présente ($LCARS_MASTER_TOKEN_FILE) — un catalogue de plus s'enrôle sans geste d'opérateur"
-  else
-    p_warn "pas d'autorité de création ($LCARS_MASTER_TOKEN_FILE) — le conteneur tourne, mais tout geste STRUCTUREL (enrôler un catalogue, ajouter un rôle) redevient manuel : « deploy/container config » la pose"
-  fi
+  local f="$LCARS_MASTER_TOKEN_FILE"
+  case "$(token_state "$f")" in
+    present)      p_ok "autorité de création présente ($f) — un catalogue de plus s'enrôle sans geste d'opérateur" ;;
+    unreadable)   p_warn "autorité de création $(token_unreadable_why "$f" f)" ;;
+    unmeasurable) p_warn "autorité de création $(prov_state_why unmeasurable "$f")" ;;
+    empty)        p_warn "autorité de création VIDE ($f) — le fichier existe sans jeton : tout geste STRUCTUREL (enrôler un catalogue, ajouter un rôle) redevient manuel. Pour la reposer, $MASTER_POSE_GESTE" ;;
+    *)            p_warn "pas d'autorité de création ($f absent) — LCARS tourne, mais tout geste STRUCTUREL (enrôler un catalogue, ajouter un rôle) redevient manuel. Pour la poser, $MASTER_POSE_GESTE" ;;
+  esac
 }
 
 # ⚠ DEUX REGIMES DE PROPRIETE DANS LE REPERTOIRE PRIVE, ET LES DEUX SE MESURENT. Le jeton master et
@@ -180,7 +221,7 @@ ensure_passwords_entries() {
   done
   [[ "${#absents[@]}" -eq 0 ]] && return 0
   if [[ ! -r "$LCARS_FORGE_SEED_FILE" ]]; then
-    p_drift "entrées passwords manquantes (${absents[*]}) et pas de seed ($LCARS_FORGE_SEED_FILE) — « FORGE_SEED_PASSWORD=<seed> deploy/container config » le pose (ou complète $LCARS_PASSWORDS_FILE), puis relance"
+    p_drift "entrées passwords manquantes (${absents[*]}) et pas de seed ($LCARS_FORGE_SEED_FILE) — sur un poste, « deploy/workstation up » le pose ; pour un conteneur, « FORGE_SEED_PASSWORD=<seed> deploy/container config » depuis l'hôte, puis « deploy/container up » (ou compléter $LCARS_PASSWORDS_FILE)"
     return 1
   fi
   local seed tmp rc=0
@@ -210,32 +251,32 @@ forge_code() { # $1=chemin d'API → code HTTP, sous le jeton système s'il exis
 # un membre qui se cache que pour quelqu'un qui n'est PAS membre (mesuré : `chief` membre caché 404,
 # `nonmember` 404). Les traiter pareil produisait une consigne inapplicable — « rends ton adhésion
 # publique » à qui n'en a pas — et masquait le défaut inverse : un compte avec un jeton et aucune
-# team, qui est exactement ce que `chief` a été jusqu'au 2026-08-10. `members/<u>` les sépare (204
-# membre / 404 non-membre) et c'est la sonde qui manquait.
-member_state() { # $1=compte → visible | hidden | absent | unknown
+# team — un compte avec un jeton et aucune adhésion. `members/<u>` les sépare (204 membre /
+# 404 non-membre), et c'est cette séparation qui rend la consigne applicable.
+member_state() { # $1=org  $2=compte → visible | hidden | absent | unknown
   [[ -r "$LCARS_SYSTEM_TOKEN_FILE" ]] || { printf 'unknown'; return; }
-  [[ "$(forge_code "/orgs/$LCARS_FORGE_ORG/members/$1")" == "204" ]] || { printf 'absent'; return; }
-  if [[ "$(forge_code "/orgs/$LCARS_FORGE_ORG/public_members/$1")" == "204" ]]; then
+  [[ "$(forge_code "/orgs/$1/members/$2")" == "204" ]] || { printf 'absent'; return; }
+  if [[ "$(forge_code "/orgs/$1/public_members/$2")" == "204" ]]; then
     printf 'visible'
   else
     printf 'hidden'
   fi
 }
 
-members_in_state() { # $1=état recherché, $2=liste → sous-liste
+members_in_state() { # $1=état recherché, $2=org, $3=liste → sous-liste
   local acct out=""
-  for acct in $2; do [[ "$(member_state "$acct")" == "$1" ]] && out="$out $acct"; done
+  for acct in $3; do [[ "$(member_state "$2" "$acct")" == "$1" ]] && out="$out $acct"; done
   printf '%s' "${out# }"
 }
 
-members_hidden() { members_in_state hidden "$1"; }
-
-# Elle sonde donc le ROSTER SYSTÈME seul : `$LCARS_ROLES` est le plancher (avant que `prov_roles` n'y
-# ajoute les catalogues), et c'est exactement la population de l'org système. La visibilité d'une org
-# de catalogue est posée par `catalogue install`, dans le geste qui crée ses comptes.
+# Chaque compte se sonde dans SON org : le compte systeme dans l'org systeme (il en est proprietaire,
+# la recette l'y met), chaque role dans l'org du catalogue dont le roster le nomme (`ROSTERS`). Un
+# role metier n'est membre d'AUCUNE autre org, et l'org systeme n'a aucun role : le chercher la
+# produirait un drift permanent contre la decision. La visibilite est posee par le geste qui cree les
+# comptes (`apply` pour l'org systeme, `catalogue install` pour chaque catalogue).
 check_members_visible() {
-  local hidden absent unknown org_accounts="$ROLES $LCARS_SYSTEM_ACCOUNT"
-  unknown="$(members_in_state unknown "$org_accounts")"
+  local hidden="" absent="" unknown org roles ligne
+  unknown="$(members_in_state unknown "$LCARS_FORGE_ORG" "$LCARS_SYSTEM_ACCOUNT")"
   if [[ -n "$unknown" ]]; then
     # ⚠ DEUX CAUSES SOUS UN SEUL MESSAGE, ET ELLES N'APPELLENT PAS LE MEME VERDICT. Jeton ABSENT :
     # l'apply le minte, c'est un drift. Jeton PRESENT mais illisible par CE compte : rien n'a été
@@ -248,38 +289,39 @@ check_members_visible() {
     return 0
   fi
 
-  absent="$(members_in_state absent "$org_accounts")"
-  hidden="$(members_hidden "$org_accounts")"
-
-  # shellcheck disable=SC2086 # liste separee par des espaces, l'eclatement EST le rendu
-  [[ -n "$absent" ]] && p_drift \
-    "comptes SANS adhésion à l'org :$(printf ' %s' $absent) — jeton valide, zéro droit d'écriture. La recette ne les place dans aucune team (vérifier les listes writers/judges/externals)"
+  local a h
+  a="$(members_in_state absent "$LCARS_FORGE_ORG" "$LCARS_SYSTEM_ACCOUNT")"
+  h="$(members_in_state hidden "$LCARS_FORGE_ORG" "$LCARS_SYSTEM_ACCOUNT")"
+  [[ -z "$a" ]] || p_drift "compte système $a SANS adhésion à l'org système $LCARS_FORGE_ORG — la recette l'y met (team system, Owners) : sur un poste, « deploy/workstation up » ; pour un conteneur, « deploy/container forge-apply » depuis l'hôte"
+  hidden="$h"
+  while IFS= read -r ligne; do
+    org="${ligne%% *}"; roles="${ligne#* }"
+    [[ "$org" != "$ligne" ]] || roles=""
+    [[ -n "$roles" && "$roles" != " " ]] || continue
+    if [[ -z "$org" ]]; then
+      # shellcheck disable=SC2086 # liste separee par des espaces, l'eclatement EST le rendu
+      p_warn "adhésions de$(printf ' %s' $roles) NON sondées — leur roster ne nomme pas son org (la release ne l'a pas rendu)"
+      continue
+    fi
+    a="$(members_in_state absent "$org" "$roles")"
+    h="$(members_in_state hidden "$org" "$roles")"
+    # shellcheck disable=SC2086 # liste separee par des espaces, l'eclatement EST le rendu
+    [[ -z "$a" ]] || p_drift \
+      "comptes SANS adhésion à l'org $org :$(printf ' %s' $a) — jeton valide, zéro droit d'écriture. La recette de ce catalogue ne les place dans aucune team (vérifier les listes writers/judges/externals) ; « lcars catalogue install $org » la rejoue"
+    absent="$absent $a"; hidden="$hidden $h"
+  done <<< "$ROSTERS"
+  # shellcheck disable=SC2086 # meme liste, l'eclatement dedoublonne
+  hidden="$(printf '%s\n' $hidden | awk 'NF' | sort -u | tr '\n' ' ' | sed 's/ $//')"
 
   if [[ -z "$hidden" ]]; then
     p_ok "adhésions org visibles (comptes machine)"
   else
     # shellcheck disable=SC2086 # meme liste, meme rendu
-    p_drift "adhésions org PRIVÉES :$(printf ' %s' $hidden) — invisibles aux non-membres, donc un humain ne voit pas quels workers travaillent ici. Le geste qui les pose est « deploy/container forge-apply » (il les publicise juste après la structure)"
+    p_drift "adhésions org PRIVÉES :$(printf ' %s' $hidden) — invisibles aux non-membres, donc un humain ne voit pas quels workers travaillent ici. Le geste qui les pose est celui de la structure, qui les publicise juste après elle : sur un poste, « deploy/workstation up » ; pour un conteneur, « deploy/container forge-apply » depuis l'hôte"
   fi
 
-  # ⚠ CES DEUX ETATS NE SONT PAS DES DRIFTS, ET C'EST LE CANON DU 2026-08-30 QUI LE DIT. Le rail pose
-  # les AUTORITES — siège, admin de forge, master token, comptes de service ; les PERSONNES
-  # s'inscrivent sur la forge, et un propriétaire d'org les ajoute. Un humain pas encore membre est
-  # donc l'état NORMAL d'une machine fraîche, pas un écart à réduire.
-  #
-  # Le mot compte parce qu'il engage : un drift promet qu'`apply` converge. Ici `apply` ne peut RIEN
-  # faire — il n'a pas les credentials de la personne, et les avoir serait le contraire du canon. Un
-  # drift qui ne part jamais apprend à l'opérateur que le rapport se lit de travers, et le jour où
-  # un vrai drift s'y trouve, il est dans la même liste.
-  #
-  # Le motif est celui de `64-services` : on RECOPIE la cause et le geste qui la lève, on ne délègue
-  # pas le verdict à un état qu'on ne contrôle pas.
-  if [[ -n "$LCARS_LOGIN" ]] && account_exists "$LCARS_LOGIN"; then
-    case "$(member_state "$LCARS_LOGIN")" in
-      hidden) p_warn "adhésion org de $LCARS_LOGIN privée — geste UTILISATEUR, hors de portée du rail : profil forge → Organizations → $LCARS_FORGE_ORG → visible (ou PUT public_members avec SES credentials)" ;;
-      absent) p_warn "$LCARS_LOGIN n'est membre d'aucune team de $LCARS_FORGE_ORG — état normal tant qu'un propriétaire d'org ne l'a pas ajouté (team humans, lecture). Le rail pose les autorités, pas les personnes" ;;
-    esac
-  fi
+  # Le compte que nomme `LCARS_LOGIN` n'est pas de cette population : `check_login_account` dit ce
+  # qui le concerne, selon qu'il est le siège ou une personne de fleet.
 }
 
 
@@ -291,10 +333,13 @@ check_members_visible() {
 # `forge-runner.sh` aussi — et c'est exactement la forme qui derive.
 check_ci_runner() {
   local body n labels
-  [[ -r "$LCARS_MASTER_TOKEN_FILE" ]] || {
-    p_warn "runners CI non sondables (jeton master absent : $LCARS_MASTER_TOKEN_FILE) — rien n'est conclu"
-    return 0
-  }
+  case "$(token_state "$LCARS_MASTER_TOKEN_FILE")" in
+    present)      ;;
+    unreadable)   p_warn "runners CI non sondables — jeton master $(token_unreadable_why "$LCARS_MASTER_TOKEN_FILE" m)"; return 0 ;;
+    unmeasurable) p_warn "runners CI non sondables — jeton master $(prov_state_why unmeasurable "$LCARS_MASTER_TOKEN_FILE")"; return 0 ;;
+    empty)        p_warn "runners CI non sondables (jeton master VIDE : $LCARS_MASTER_TOKEN_FILE) — rien n'est conclu. Pour le reposer, $MASTER_POSE_GESTE"; return 0 ;;
+    *)            p_warn "runners CI non sondables (jeton master absent : $LCARS_MASTER_TOKEN_FILE) — rien n'est conclu"; return 0 ;;
+  esac
   body="$(forge_curl "$LCARS_MASTER_TOKEN_FILE" -fsS -m 10 "$FORGE_BASE_URL/api/v1/admin/actions/runners" 2>/dev/null || true)"
 
   [[ -n "$body" ]] || {
@@ -304,7 +349,7 @@ check_ci_runner() {
 
   n="$(printf '%s' "$body" | jq -r '.total_count // 0' 2>/dev/null || echo 0)"
   if [[ "${n:-0}" -eq 0 ]]; then
-    p_drift "AUCUN runner CI enregistre sur cette forge — tout job reste en attente, aucune PR ne fusionne, et le rail de livraison est mort avant son premier ticket. \`49-forge-runner\` l'enrole : rejoue l'apply, sa sortie dira ce qui a bloque"
+    p_drift "AUCUN runner CI enregistré sur cette forge — tout job reste en attente, aucune PR ne fusionne, et la livraison est morte avant son premier ticket. Sur un poste, « deploy/workstation up » l'enrôle (module 49-forge-runner, sa sortie dira ce qui a bloqué) ; pour un conteneur, « deploy/container runner-token » depuis l'hôte rend le jeton qui enregistre un runner"
   else
     labels="$(printf '%s' "$body" \
       | jq -r '[.runners[]? | .name + " [" + ([.labels[]?.name] | join(",")) + "]"] | join(" · ")' 2>/dev/null || true)"
@@ -325,6 +370,7 @@ check() {
        verdict_check ;;
   esac
   p_ok "forge joignable ($FORGE_BASE_URL)"
+  roster_vide check
   check_ci_runner
   probe_registration
   [[ -n "$LCARS_LOGIN" ]] && probe_restricted "$LCARS_LOGIN"
@@ -334,7 +380,7 @@ check() {
   local miss acct
   miss="$(missing_accounts)"
   if [[ -n "$miss" ]]; then
-    p_drift "structure absente (comptes : $miss) — territoire OpenTofu : « deploy/container forge-apply » la pose (tofu est DANS l'image ; « forge-check » enonce le contrat)"
+    p_drift "structure absente (comptes : $miss) — territoire OpenTofu : sur un poste, « deploy/workstation up » la pose ; pour un conteneur, « deploy/container forge-apply » depuis l'hôte (« deploy/container forge-check » énonce le contrat)"
   else
     for acct in $ACCOUNTS; do p_ok "compte $acct"; done
   fi
@@ -353,7 +399,7 @@ check() {
       # « tokens absents/invalides » : le drift apparaissait sans sudo et disparaissait avec, sur des
       # jetons parfaitement valides. Une sonde qui ne peut pas ouvrir ce qu'elle mesure ne mesure
       # rien — elle se mesure elle-meme.
-      p_warn "role-tokens NON SONDABLES — aucun jeton de $LCARS_PRIVATE_DIR n'est lisible par $(id -un 2>/dev/null || echo "ce compte") (ils sont à $LCARS_AUTHORITY_USER) ; relance sous sudo pour conclure"
+      p_warn "role-tokens NON SONDABLES — aucun jeton de $LCARS_PRIVATE_DIR n'est lisible par $(id -un 2>/dev/null || echo "ce compte") (ils sont à $LCARS_AUTHORITY_USER) ; sur un poste, la sonde se rejoue sous sudo pour conclure"
     else
       p_drift "role-tokens absents/invalides (sonde A4 --check) — l'apply les re-mint"
     fi
@@ -361,42 +407,78 @@ check() {
     p_fail "script A4 introuvable/inexécutable : $A4_SCRIPT (checkout incomplet ?)"
   fi
 
-  check_human_onboardable
+  check_login_account
   check_members_visible
   verdict_check
 }
 
-# L'HUMAIN sur la forge — ce que le runtime exige à l'onboarding d'un projet, sondé ICI plutôt
-# que découvert par un pod au milieu d'un create_project ({:human_not_provisioned, …} puis
-# {:human_team_unverifiable, …}, vécus au premier E2E docker). L'appartenance se sonde au
-# niveau ORG (204/404, lisible par le token système) et non au niveau TEAM : `GET
-# /teams/<id>/members/<u>` est 403 pour lui — Gitea réserve la lecture d'une team à ses membres
-# et aux owners, et le système n'est NI l'un NI l'autre (choix forge.tf, blast-radius borné).
-check_human_onboardable() {
-  local tokfile="$LCARS_SYSTEM_TOKEN_FILE" code
-  [[ -n "$LCARS_LOGIN" ]] || { p_ok "aucun humain nomme (LCARS_LOGIN) — l'onboardabilite ne se sonde pas ici"; return 0; }
+# `LCARS_LOGIN` EST L'HUMAIN DE LA PASSE, PAS LE SIÈGE PAR CONSTRUCTION. Sur un poste c'est
+# `PROV_HUMAN` : le compte qui installe, ou celui que `--human` nomme. Dans le conteneur, le boot le
+# pose au siège. Le siège se lit donc à sa source, et le login nommé ne l'est que s'il L'EST :
+#   - l'uid du siège, par `seat_uid` du protocole — la politique de population, écrite une fois ;
+#   - le login du siège que l'init du conteneur écrit dans `LCARS_SEAT_LOGIN_FILE`
+#     (`/run/lcars-seat.login`).
+login_is_seat() { # <login> -> 0 si ce login est le siège de la machine
+  local login="$1" f="${LCARS_SEAT_LOGIN_FILE:-/run/lcars-seat.login}" seat uid
+  if [[ -r "$f" ]]; then
+    seat="$(tr -d '[:space:]' < "$f" 2>/dev/null || true)"
+    [[ -n "$seat" && "$login" == "$seat" ]] && return 0
+  fi
+  seat="$(seat_uid)"
+  [[ -n "$seat" ]] || return 1
+  uid="$(id -u -- "$login" 2>/dev/null)" || return 1
+  [[ "$uid" == "$seat" ]]
+}
+
+check_login_account() {
+  [[ -n "$LCARS_LOGIN" ]] || { p_ok "aucun humain nommé (LCARS_LOGIN) — aucun compte forge ne se sonde ici"; return 0; }
+  if login_is_seat "$LCARS_LOGIN"; then
+    check_seat_account
+  else
+    check_person_account
+  fi
+}
+
+# LE SIÈGE sur la forge : l'admin du système. La fleet lui est fermée (GUARD B), le convergeur ne le
+# matérialise pas (GUARD A), et il n'entre dans aucune team — ni humans, ni une autre. Ce qui se
+# sonde ici est son compte, et rien de son adhésion : un siège hors de l'org est l'état attendu.
+# Ce geste ne crée pas ce compte : son absence est un WARN qui nomme le geste qui le crée.
+check_seat_account() {
   if ! account_exists "$LCARS_LOGIN"; then
-    p_drift "compte forge absent pour l'humain « $LCARS_LOGIN » — l'onboarding projet échouera (human_not_provisioned) : LCARS_HUMAN=$LCARS_LOGIN … « deploy/container forge-apply »"
+    p_warn "compte forge absent pour « $LCARS_LOGIN », le siège (l'admin du système) — ce geste ne le crée pas. Sur un poste dont la forge est montée, « deploy/workstation up » le crée (module 48-forge-host) ; sur une forge fournie, et dans un conteneur, c'est le compte n°1 de la forge, posé par son opérateur"
     return 0
   fi
-  p_ok "compte forge de l'humain ($LCARS_LOGIN)"
-  # Même partage qu'au-dessus : un jeton absent se converge, un jeton qu'on ne peut pas ouvrir se
-  # dit. Les deux menaient au même `p_drift`, donc au même faux écart entre un doctor et un sudo.
+  p_ok "compte forge du siège « $LCARS_LOGIN », l'admin du système — il n'entre dans aucune team de la forge, et la fleet ne tourne jamais sous lui"
+}
+
+# UNE PERSONNE DE FLEET sur la forge. Le rail pose les AUTORITÉS — siège, admin de forge, jeton
+# master, comptes de service ; les PERSONNES s'inscrivent sur la forge, et un propriétaire d'org les
+# ajoute à la team humans. Une personne sans compte, hors de l'org, ou dont l'adhésion est privée
+# est donc un état qu'aucun apply ne converge : un WARN, jamais un DRIFT. Seul le jeton système
+# absent, que l'apply minte, est un DRIFT. L'appartenance se sonde au niveau de l'ORG (204/404,
+# lisible par le jeton système) : `GET /teams/<id>/members/<u>` est 403 pour lui, Gitea réservant
+# la lecture d'une team à ses membres et aux propriétaires.
+check_person_account() {
+  local tokfile="$LCARS_SYSTEM_TOKEN_FILE" code
+  if ! account_exists "$LCARS_LOGIN"; then
+    p_warn "compte forge absent pour « $LCARS_LOGIN », une personne de fleet — l'apply ne crée pas le compte d'une personne : elle s'inscrit sur la forge sous ce nom, puis un propriétaire de l'org $LCARS_FORGE_ORG l'ajoute à la team humans"
+    return 0
+  fi
+  p_ok "compte forge de « $LCARS_LOGIN », une personne de fleet"
   case "$(prov_file_state "$tokfile")" in
     present) ;;
-    absent)  p_drift "token système ABSENT ($tokfile) — l'apply le minte ; appartenance de $LCARS_LOGIN à l'org $LCARS_FORGE_ORG non sondable en attendant"; return 0 ;;
-    *)       p_warn  "token système $(prov_state_why "$(prov_file_state "$tokfile")" "$tokfile") — appartenance de $LCARS_LOGIN à l'org $LCARS_FORGE_ORG non sondable"; return 0 ;;
+    absent)  p_drift "jeton système ABSENT ($tokfile) — l'apply le minte dès que le seed est posé ; adhésion de « $LCARS_LOGIN » à l'org $LCARS_FORGE_ORG non sondable en attendant"; return 0 ;;
+    *)       p_warn  "jeton système $(prov_state_why "$(prov_file_state "$tokfile")" "$tokfile") — adhésion de « $LCARS_LOGIN » à l'org $LCARS_FORGE_ORG non sondable"; return 0 ;;
   esac
-  code="$(forge_curl "$tokfile" -s -o /dev/null -w '%{http_code}' -m 10 "$FORGE_BASE_URL/api/v1/orgs/$LCARS_FORGE_ORG/members/$LCARS_LOGIN" 2>/dev/null || true)"
+  code="$(forge_code "/orgs/$LCARS_FORGE_ORG/members/$LCARS_LOGIN")"
   case "$code" in
-    204) p_ok "$LCARS_LOGIN membre de l'org $LCARS_FORGE_ORG (sonde du token système)" ;;
-    # ⚠ LE SECOND SITE DU CANON DU 2026-08-30, ET JE L'AVAIS MANQUE en ne corrigeant que
-    # `member_state`. Mesure du 2026-09-01, banc 2001 : `doctor` SOUS SUDO rendait « bob N'EST PAS
-    # membre de l'org fleet » en DRIFT — sur une machine fraîchement convergée, sans erreur. Le rail
-    # pose les AUTORITES ; une personne entre dans l'org par un propriétaire, et `apply` ne peut pas
-    # le faire à sa place (il n'a pas ses credentials, et les avoir serait le contraire du canon).
-    404) p_warn "$LCARS_LOGIN n'est pas membre de l'org $LCARS_FORGE_ORG — état normal tant qu'un propriétaire ne l'a pas ajouté à la team humans (« deploy/container forge-apply »). L'onboarding projet le refusera d'ici là" ;;
-    *)   p_warn "appartenance de $LCARS_LOGIN à l'org $LCARS_FORGE_ORG NON VERIFIABLE (HTTP $code) — rien n'est conclu ; scope du token système ?" ;;
+    204) if [[ "$(forge_code "/orgs/$LCARS_FORGE_ORG/public_members/$LCARS_LOGIN")" == 204 ]]; then
+           p_ok "« $LCARS_LOGIN » membre de l'org $LCARS_FORGE_ORG, adhésion visible"
+         else
+           p_warn "adhésion de « $LCARS_LOGIN » à l'org $LCARS_FORGE_ORG privée — un geste de la personne, hors de portée de l'apply : profil forge → Organizations → $LCARS_FORGE_ORG → visible"
+         fi ;;
+    404) p_warn "« $LCARS_LOGIN » n'est pas membre de l'org $LCARS_FORGE_ORG — état normal tant qu'un propriétaire de l'org n'a pas ajouté ce compte à la team humans ; l'apply ne pose pas les personnes" ;;
+    *)   p_warn "adhésion de « $LCARS_LOGIN » à l'org $LCARS_FORGE_ORG NON VÉRIFIABLE (HTTP ${code:-sans réponse}) — rien n'est conclu ; portée du jeton système ?" ;;
   esac
 }
 
@@ -412,8 +494,9 @@ apply() {
     2) p_drift "forge injoignable : $FORGE_BASE_URL — tokens non convergés (relance quand elle répond)"
        verdict_apply ;;
   esac
+  roster_vide apply
 
-  # DANS L'APPLY : le boot joue `provision apply` (entrypoint.sh), jamais `check`. Une sonde qui ne
+  # DANS L'APPLY : le boot du conteneur et l'installeur du poste jouent `apply`, jamais `check`. Une sonde qui ne
   # vivrait que dans le check ne parlerait a personne au demarrage, c'est-a-dire au seul moment ou
   # l'operateur peut encore enroler un runner AVANT que la fleet ne depense un producteur.
   #
@@ -429,7 +512,7 @@ apply() {
   local miss
   miss="$(missing_accounts)"
   if [[ -n "$miss" ]]; then
-    p_drift "structure absente (comptes : $miss) — « deploy/container forge-apply » la pose (il faut le token master + le seed ; « forge-check » enonce le contrat)"
+    p_drift "structure absente (comptes : $miss) — sur un poste, « deploy/workstation up » la pose ; pour un conteneur, « deploy/container forge-apply » depuis l'hôte, qui exige le jeton master et le seed (« deploy/container forge-check » énonce le contrat)"
     verdict_apply
   fi
 

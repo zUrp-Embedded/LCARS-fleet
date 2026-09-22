@@ -4,166 +4,71 @@
 # STARDATE: 2026-09-13
 # STATUS: remplace l'image du conteneur d'un banc déjà semé — la forge, son semis et ses jetons restent
 #
-# USAGE : bench-swap-image.sh --image lcars-fleet:xyz [--project <base>] [--bind 0.0.0.0]
-#                             [--forge-port 21000] [--deck-port 20999] [--ssh-port 2222]
-#                             [--creds-from ~/.claude/.credentials.json] [--no-creds] [--human lcars]
-# EXIT  : 0 conteneur remplacé · 1 arguments ou dépendance · 3 le conteneur ne monte pas · 5 credentials
-#         6 le verdict final ne passe pas
+# USAGE : bench-swap-image.sh --image lcars-fleet:xyz [--forge-project <base>] [--bind 0.0.0.0] [--advertise <ip-ou-nom>]
+#                             [--port-forge N] [--port-deck N] [--port-ssh N]
+#                             [--creds-from ~/.claude/.credentials.json] [--no-creds] [--human captain]
+# EXIT  : 0 conteneur remplacé · 1 arguments, image inconnue du daemon, docker muet, forge du banc absente,
+#         ou projet qui n'est pas ce banc · 3 le conteneur ne monte pas · 5 credentials · 6 aucun jeton
+#         de rôle après la relance
 #
-# Détruit le conteneur LCARS et lui seul (pods en vol, worktrees, journaux BEAM partent avec).
-# Ne démarre pas la fleet : le verdict final le rappelle.
+# Sans --forge-project ni option de port, la base et les ports sont les défauts de
+# deploy/installer-constants.env, ceux de bench-up.sh. Détruit le conteneur LCARS et lui seul, après
+# avoir vu la forge du banc et le marqueur de chaque objet de ses projets : ses volumes restent, ce
+# qui vit hors d'eux (pods en vol, journaux BEAM) part avec. Ne démarre pas la fleet : le verdict
+# final le rappelle.
 
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOCKER_DIR="$(cd "$HERE/.." && pwd)"
-
-PROJECT="lcars-nuit"
-# mêmes défauts que bench-up.sh : des ports différents republieraient le conteneur ailleurs que sa forge ne l'annonce
-FORGE_PORT="21000"
-DECK_PORT="20999"
-SSH_PORT="2222"
-BIND="0.0.0.0"
-ADVERTISE=""
-IMAGE=""
-CREDS_FROM="$HOME/.claude/.credentials.json"
-WITH_CREDS=1
-HUMAN="lcars"
-DOCKER_BIN="${DOCKER_BIN:-docker}"
+BENCH_NOM=bench-swap-image
+# shellcheck source=../../lib/bench.sh
+. "$DOCKER_DIR/../lib/bench.sh"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --project)    PROJECT="${2:?}"; shift 2 ;;
-    --forge-port) FORGE_PORT="${2:?}"; shift 2 ;;
-    --deck-port)  DECK_PORT="${2:?}"; shift 2 ;;
-    --ssh-port)   SSH_PORT="${2:?}"; shift 2 ;;
-    --bind)       BIND="${2:?}"; shift 2 ;;
-    --advertise)  ADVERTISE="${2:?}"; shift 2 ;;
-    --image)      IMAGE="${2:?}"; shift 2 ;;
-    --creds-from) CREDS_FROM="${2:?}"; shift 2 ;;
-    --no-creds)   WITH_CREDS=0; shift ;;
-    --human)      HUMAN="${2:?}"; shift 2 ;;
-    -h|--help)    sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) echo "bench-swap-image : option inconnue : $1" >&2; exit 1 ;;
+    -h|--help) sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *)         bench_option "$@"; shift "$BENCH_LU" ;;
   esac
 done
-
-CONTAINER_PROJECT="${PROJECT}-fleet"
-FORGE_PROJECT="${PROJECT}-forge"
-FORGE_NET="${FORGE_PROJECT}_default"
-CONTAINER="${CONTAINER_PROJECT}-lcars-1"
-
-export LCARS_STORE_PREFIX="$CONTAINER_PROJECT"
-# shellcheck source=../../lib/provision-lib.sh
-source "$DOCKER_DIR/../lib/provision-lib.sh"
-# shellcheck source=../../lib/forge-bootstrap.sh
-source "$DOCKER_DIR/../lib/forge-bootstrap.sh"
-if [[ -z "${ADVERTISE:-}" ]]; then advertise_addr "$BIND"; ADVERTISE="$PROV_ADVERTISE"; fi
-FORGE_URL="http://127.0.0.1:${FORGE_PORT}"
-
-say() { echo "bench-swap-image : $*"; }
-die() { echo "bench-swap-image : $1" >&2; exit "${2:-1}"; }
+bench_projets
+bench_adresses
 
 [[ -n "$IMAGE" ]] || die "--image est obligatoire : ce script n'a pas de défaut, se tromper d'image est le seul dégât qu'il puisse faire" 1
 
-# sans banc, le swap monterait un conteneur orphelin, sans réseau de forge ni graine
-"$DOCKER_BIN" network inspect "$FORGE_NET" >/dev/null 2>&1 \
-  || die "réseau $FORGE_NET absent — il n'y a pas de banc « $PROJECT » à mettre à jour (bench-up.sh d'abord)" 1
+OBJETS="$(bench_objets)" \
+  || die "docker ne rend pas les objets des projets $CONTAINER_PROJECT, $FORGE_PROJECT, $RUNNER_PROJECT — rien n'est détruit sur un état non lu" 1
+ETRANGERS="$(bench_etrangers "$OBJETS")"
+[[ -z "$ETRANGERS" ]] || bench_refus_etrangers "$ETRANGERS" "Rien n'est détruit ; un banc se nomme par sa base : --forge-project <base>."
+# sans la forge du banc, le swap monterait un conteneur orphelin, sans réseau de forge ni graine
+[[ "$OBJETS" == *"$FORGE_PROJECT conteneur "* ]] \
+  || die "aucune forge de banc $FORGE_PROJECT — il n'y a pas de banc « $PROJECT » à mettre à jour (bench-up.sh d'abord)" 1
 "$DOCKER_BIN" image inspect "$IMAGE" >/dev/null 2>&1 \
   || die "image $IMAGE inconnue du daemon — elle doit exister avant que le conteneur soit détruit" 1
-
-if [[ "$WITH_CREDS" -eq 1 ]]; then
-  [[ -r "$CREDS_FROM" ]] || die "credentials illisibles : $CREDS_FROM (--no-creds pour un banc sans pods)" 5
-fi
 
 say "banc $PROJECT — le conteneur passe sur $IMAGE (forge, semis et jetons préservés)"
 
 "$DOCKER_BIN" rm -f "$CONTAINER" >/dev/null 2>&1 || true
-
-# create → connect → start, jamais un up : gitea doit résoudre avant le premier boot, sinon le
-# provisionnement part en drift. Les variables passent par un env-file 0600 hors /tmp : un shim
-# sudo remet l'environnement à zéro, et un docker cp en root dans /tmp (sticky) laisse un fichier
-# que son créateur ne peut plus effacer
-SWAP_ENV="${XDG_RUNTIME_DIR:-$HOME/.cache}/lcars-bench-swap.$PROJECT.env"
-mkdir -p "$(dirname "$SWAP_ENV")"
-( umask 077; : > "$SWAP_ENV" )
-cat > "$SWAP_ENV" <<ENVEOF
-LCARS_IMAGE=$IMAGE
-LCARS_ADMIRAL=admiral
-FORGE_BASE_URL=http://gitea:3000
-LCARS_SOURCE_REMOTE=http://gitea:3000/fleet/lcars.git
-LCARS_BIND=$BIND
-LCARS_SSH_PORT=${BIND}:${SSH_PORT}
-LCARS_LANDING_PORT_BIND=${BIND}:${DECK_PORT}
-FORGE_PUBLIC_URL=http://${ADVERTISE}:${FORGE_PORT}
-LCARS_DECK_ORIGINS=http://${ADVERTISE}:${DECK_PORT}
-ENVEOF
-trap 'rm -f "$SWAP_ENV"' EXIT
-
-"$DOCKER_BIN" compose --env-file "$SWAP_ENV" -f "$DOCKER_DIR/docker-compose.yml" -p "$CONTAINER_PROJECT" create \
-  || die "le conteneur ne se crée pas" 3
-
-"$DOCKER_BIN" network connect "$FORGE_NET" "$CONTAINER" \
-  || die "le conteneur ne se branche pas sur $FORGE_NET" 3
-say "conteneur branché sur $FORGE_NET — « gitea » résout avant le premier boot"
-
-"$DOCKER_BIN" compose -p "$CONTAINER_PROJECT" start || die "le conteneur ne démarre pas" 3
-
-wait_healthy() {
-  for _ in $(seq 1 90); do
-    [[ "$("$DOCKER_BIN" inspect -f '{{.State.Health.Status}}' "$CONTAINER" 2>/dev/null)" == "healthy" ]] && return 0
-    sleep 2
-  done
-  return 1
-}
-wait_healthy || die "le conteneur ne devient pas healthy (docker logs $CONTAINER)" 3
+quiet bench_conteneur_monte \
+  || die "le conteneur ne se crée pas (le réseau $FORGE_NET existe-t-il ? les volumes du magasin ?)" 3
+bench_attendre_healthy || die "le conteneur ne devient pas healthy (docker logs $CONTAINER)" 3
 say "conteneur healthy"
+bench_mot_de_passe "$BENCH_ADMIRAL" "$(bench_admiral_password)"
+bench_creds
 
-# le statut de chpasswd se lit une fois : un « && say || say » lirait celui de say
-if printf 'admiral:%s\n' "$(bench_admiral_password)" | "$DOCKER_BIN" exec -i "$CONTAINER" chpasswd 2>/dev/null; then
-  say "mot de passe de banc posé sur admiral (ssh, sudo)"
-else
-  say "admiral : mot de passe non posé — ssh par clé, ou « docker exec -u admiral $CONTAINER bash »"
-fi
+# une relance suffit : la graine de la forge existe, le geste tokens minte les jetons de rôle au boot
+say "relance pour que le geste tokens minte les jetons de rôle sur la graine existante"
+bench_relance
 
-# les credentials partent avec l'ancien conteneur ; sans elles la fleet a l'air saine et ne produit aucun pod
-if [[ "$WITH_CREDS" -eq 1 ]]; then
-  "$DOCKER_BIN" exec -i -u "$HUMAN" "$CONTAINER" bash -c \
-      'mkdir -p ~/.claude && cat > ~/.claude/.credentials.json && chmod 600 ~/.claude/.credentials.json' \
-    < "$CREDS_FROM" || die "credentials non posées dans le conteneur" 5
-  say "credentials anthropic reposées chez $HUMAN"
-else
-  say "credentials non posées (--no-creds) — aucun pod ne pourra démarrer, par choix"
-fi
-
-# une relance suffit : la graine de la forge existe, 63-forge-tokens minte les jetons de rôle au boot
-say "relance pour que 63-forge-tokens minte les jetons de rôle sur la graine existante"
-"$DOCKER_BIN" restart "$CONTAINER" >/dev/null || die "relance du conteneur impossible" 3
-wait_healthy || die "le conteneur ne redevient pas healthy après relance" 3
-
-# mesuré par cp et inspect, jamais par exec : à travers un relais de socket, exec rend 0 et zéro
-# octet, et une mesure bâtie dessus lit le vide ; le flux tar de docker cp dit la taille sans
-# toucher le disque
-ROLE_TOKENS="$("$DOCKER_BIN" cp "$CONTAINER:/opt/lcars/var/tokens" - 2>/dev/null | tar -t 2>/dev/null | grep -c '\.gitea_token$' || true)"
+ROLE_TOKENS="$(bench_jetons_de_role)"
 [[ "${ROLE_TOKENS:-0}" -gt 0 ]] || die "aucun jeton de rôle après relance — le conteneur ne voit pas la graine de la forge" 6
 
-CREDS_SIZE="$("$DOCKER_BIN" cp "$CONTAINER:/home/$HUMAN/.claude/.credentials.json" - 2>/dev/null \
-              | tar -tv 2>/dev/null | awk 'NR==1 {print $3}' || true)"
-if [[ "${CREDS_SIZE:-}" =~ ^[0-9]+$ ]] && [[ "$CREDS_SIZE" -gt 0 ]]; then
-  CREDS_OK=oui
-else
-  CREDS_OK=non
-fi
-
-REVISION="$("$DOCKER_BIN" inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$CONTAINER" 2>/dev/null \
-            | sed -n 's/^LCARS_IMAGE_REVISION=//p' | head -1)"
-REVISION="${REVISION:-inconnue}"
-
+REVISION="$(bench_revision "$IMAGE")"
 say "─────────────────────────────────────────────────────────"
 say "conteneur remplacé"
-say "  image     : $IMAGE   (révision $REVISION)"
+say "  image     : $IMAGE   (révision ${REVISION:-inconnue})"
 say "  forge     : $FORGE_URL   (préservée — ni resemée ni redémarrée)"
-say "  jetons    : $ROLE_TOKENS fichiers dans /opt/lcars/var/tokens"
-say "  creds     : $CREDS_OK"
+say "  jetons    : $ROLE_TOKENS fichiers dans $(prov_canon "$PROV_TOKENS_DIR")"
+say "  creds     : $([[ "$WITH_CREDS" -eq 1 ]] && echo oui || echo non)"
 say "  la fleet n'est pas démarrée : docker exec -u $HUMAN $CONTAINER bash -lc 'fleet start'"
 say "─────────────────────────────────────────────────────────"

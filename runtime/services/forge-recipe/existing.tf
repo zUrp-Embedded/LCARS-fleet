@@ -1,17 +1,10 @@
 # ═══════════════════════════════════════════════════════════════════════════
 # LCARS Fleet — ce que la forge PORTE DÉJÀ, et les imports qui en découlent
 #
-# POURQUOI CE FICHIER EXISTE. Sans lui, la recette est rejouable une seule fois : un apply à état
-# vide contre une forge déjà provisionnée meurt en 409 « user already exists » — 7 erreurs, 0
-# création (mesuré 2026-08-16). Son état devrait alors SURVIVRE, donc vivre là où on peut le
-# garder : hors du conteneur, chez l'opérateur, avec un binaire tofu que rien n'installe.
-#
-# Ce serait la seule pièce du système non convergente. Tout le reste sonde le réel et le converge —
-# chaque module de `provision`, le convergeur d'humains, le doctor, `catalogue verify`, le runtime.
-# Un état de tofu conservé prétendrait détenir une vérité que la forge détient seule.
-#
-# Ce fichier la lui laisse : la forge est sondée, ce qui existe entre dans l'état par `import`, ce
-# qui manque est créé. L'état est JETABLE — reconstruit à chaque apply, jamais conservé.
+# Un apply à état vide contre une forge déjà provisionnée meurt en 409 « user already exists ». La
+# forge est donc sondée : ce qui existe entre dans l'état par `import`, ce qui manque est créé. Un
+# état perdu se reconstruit ainsi, mais ce qui ne s'importe pas serait recréé : l'appelant garde
+# l'état d'une passe à l'autre (61-forge-structure sur un poste).
 # ═══════════════════════════════════════════════════════════════════════════
 
 # La sonde est un programme externe et pas une data source du provider, pour deux raisons mesurées :
@@ -27,6 +20,12 @@ data "external" "forge" {
     org       = var.org
     users     = join(",", var.roles)
     teams     = join(",", keys(local.teams))
+    # le dépôt du système et ses branches, sur l'org système seule (sinon vide : pas de sonde)
+    repo       = local.system_play ? var.system_repo : ""
+    store      = local.system_play ? var.store_repo : ""
+    branches   = local.system_play ? "tool_request,incidents" : ""
+    files      = local.system_play ? "main:README.md,tool_request:README.md,tool_request:ops/toolchains.d/.gitkeep,incidents:work/README.md" : ""
+    protection = local.system_play ? "tool_request,main,incidents" : ""
   }
 }
 
@@ -42,6 +41,24 @@ locals {
   # produit aucun import. C'est la forme qui rend un import FACULTATIF, et elle vaut aussi pour une
   # ressource non indexée — `to` n'a alors pas besoin de `each.key` (mesuré 2026-08-16).
   existing_org = { for k, v in local.existing : trimprefix(k, "org:") => v if startswith(k, "org:") }
+
+  # Le dépôt du système (id numérique), ses branches (`<id du dépôt>/<nom>`), ses fichiers
+  # (`<org>/<dépôt>/<branche>/<chemin encodé>`) et la protection (`<org>/<dépôt>/<règle>`) — les
+  # formes que le provider rend à la création, mesurées. ⚠ LES FICHIERS DE LA BRANCHE PROTÉGÉE
+  # S'IMPORTENT, ET CE N'EST PAS DU CONFORT : une fois la protection posée, le master ne peut plus y
+  # commiter (« user cannot commit to repo », mesuré à état perdu sur le banc 2002) — un fichier
+  # non importé serait « à créer », et l'apply mourrait dessus.
+  existing_repo         = { for k, v in local.existing : trimprefix(k, "repo:") => v if startswith(k, "repo:") }
+  existing_store        = { for k, v in local.existing : trimprefix(k, "store:") => v if startswith(k, "store:") }
+  existing_branches     = { for k, v in local.existing : trimprefix(k, "branch:") => v if startswith(k, "branch:") }
+  existing_files        = { for k, v in local.existing : trimprefix(k, "file:") => v if startswith(k, "file:") }
+  existing_tool_request = { for k, v in local.existing_branches : k => v if k == "tool_request" }
+  existing_incidents    = { for k, v in local.existing_branches : k => v if k == "incidents" }
+  existing_protection   = { for k, v in local.existing : trimprefix(k, "protection:") => v if startswith(k, "protection:") }
+  # une carte par REGLE : un bloc `import` vise UNE ressource, et les trois protections en sont trois
+  existing_prot_request   = { for k, v in local.existing_protection : k => v if k == "tool_request" }
+  existing_prot_main      = { for k, v in local.existing_protection : k => v if k == "main" }
+  existing_prot_incidents = { for k, v in local.existing_protection : k => v if k == "incidents" }
 }
 
 # ⚠ LES IDENTIFIANTS SONT NUMÉRIQUES, POUR LES TROIS TYPES. Le provider convertit l'id d'import en
@@ -60,7 +77,7 @@ import {
 
 import {
   for_each = local.existing_org
-  to       = gitea_org.fleet
+  to       = gitea_org.this
   id       = each.value
 }
 
@@ -70,6 +87,82 @@ import {
   id       = each.value
 }
 
+import {
+  for_each = local.existing_repo
+  to       = gitea_repository.ops[0]
+  id       = each.value
+}
+
+import {
+  for_each = local.existing_store
+  to       = gitea_repository.catalogues[0]
+  id       = each.value
+}
+
+import {
+  for_each = { for k, v in local.existing_files : k => v if k == "store-main:README.md" }
+  to       = gitea_repository_file.catalogues_readme[0]
+  id       = each.value
+}
+
+import {
+  for_each = local.existing_tool_request
+  to       = gitea_repository_branch.tool_request[0]
+  id       = each.value
+}
+
+import {
+  for_each = local.existing_incidents
+  to       = gitea_repository_branch.incidents[0]
+  id       = each.value
+}
+
+import {
+  for_each = { for k, v in local.existing_files : k => v if k == "main:README.md" }
+  to       = gitea_repository_file.ops_readme[0]
+  id       = each.value
+}
+
+import {
+  for_each = { for k, v in local.existing_files : k => v if k == "tool_request:README.md" }
+  to       = gitea_repository_file.tool_request_readme[0]
+  id       = each.value
+}
+
+import {
+  for_each = { for k, v in local.existing_files : k => v if k == "tool_request:ops/toolchains.d/.gitkeep" }
+  to       = gitea_repository_file.tool_request_keep[0]
+  id       = each.value
+}
+
+import {
+  for_each = { for k, v in local.existing_files : k => v if k == "incidents:work/README.md" }
+  to       = gitea_repository_file.incidents_readme[0]
+  id       = each.value
+}
+
+import {
+  for_each = local.existing_prot_request
+  to       = gitea_repository_branch_protection.tool_request[0]
+  id       = each.value
+}
+
+import {
+  for_each = local.existing_prot_main
+  to       = gitea_repository_branch_protection.main[0]
+  id       = each.value
+}
+
+import {
+  for_each = local.existing_prot_incidents
+  to       = gitea_repository_branch_protection.incidents[0]
+  id       = each.value
+}
+
+# PAS D'IMPORT POUR LE COLLABORATEUR NON PLUS, et c'est mesuré : `PUT /repos/<o>/<r>/collaborators/
+# <login>` rend 204 sur un compte qui l'est déjà, et sur un changement de permission (2026-09-17,
+# banc 2003). Une ressource qui converge à la création n'a rien à importer.
+#
 # PAS D'IMPORT POUR LES ADHÉSIONS, et c'est mesuré, pas supposé. `PUT /teams/<id>/members/<login>`
 # rend 204 sur un membre qui l'est déjà, et le provider s'en contente : les 12
 # `gitea_team_membership` se « créent » sur une forge où elles existent toutes, sans une erreur

@@ -49,7 +49,7 @@ des témoins exécutés est la seule source de vérité pour compter et comparer
 
 Une ligne par témoin, `module`, `nom`, `état`, `async`, `temps_us`, `fichier`
 (`test/support/time_formatter.ex`). Deux manifestes se diffent sur les deux premières colonnes.
-Mesuré le 2026-09-06 : 138 modules `async: false` font 266 s de mur sur 317, et vingt d'entre eux
+Mesuré le 2026-09-06 : 138 modules `async: false` font 266 s de mur sur 317 (320 aujourd'hui), et vingt d'entre eux
 en font 84 %.
 
 Cette forme est **vérifiée à l'échelle du dossier** par `tests.dirs_mirror_source`
@@ -91,7 +91,7 @@ divergent.
 
 ⚠ **`lib` est élidé ici et pas là-bas**, et c'est la seule chose de tout le dispositif qui ne se lit
 pas dans l'arbre. `runtime/lib/` contient TOUT le code Elixir : préfixe qui ne discrimine rien, élidé
-comme dans tout projet Elixir. `deploy/lib/` est trois fichiers à côté de `modules.d/` et `docker/` :
+comme dans tout projet Elixir. `deploy/lib/` est un dossier à côté de `modules.d/` et `docker/` :
 il discrimine, il reste. Le motif est dans `tests.dirs_mirror_source`, qui porte les deux racines —
 pas dans cette phrase, qui ne fait que la répéter.
 
@@ -110,6 +110,6 @@ pas dans cette phrase, qui ne fait que la répéter.
 
 `shell_gate.sh` (câblé dans `mix gate`) est le point d'entrée des tests que `mix test` ne voit pas :
 les quatre suites python, nommées une par une dans son registre `PYTESTS`, et tous les `.bats`
-trouvés récursivement sous `test/`, `.claude/skills/`, `deploy/tests/` et
-`runtime/git-hooks/tests/`. `bats` absent n'échoue pas — le compte des suites manquées est ANNONCÉ,
+trouvés récursivement sous `test/`, `.claude/skills/` et `runtime/git-hooks/tests/` —
+`deploy/tests/` se joue par `deploy/gate.sh`. `bats` absent n'échoue pas — le compte des suites manquées est ANNONCÉ,
 et `BATS_MISSING_FATAL=1` durcit le jour où `bats-core` est un prérequis posé partout.

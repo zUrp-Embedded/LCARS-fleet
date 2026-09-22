@@ -63,6 +63,7 @@ defmodule Fleet.Forge.Client.BotLoginCacheTest do
       %{
         base_url: Keyword.fetch!(opts, :base_url),
         token: Keyword.fetch!(opts, :token),
+        anonymous: false,
         req_options: Keyword.get(opts, :req_options, [])
       },
       []

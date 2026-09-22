@@ -87,9 +87,11 @@ proto() { # proto <script> — source le protocole (sujet : zoe) puis joue <scri
   [ "$(grep -c "n'est pas etablie" <<<"$output")" -eq 1 ]
   [[ "$output" == *"UID_MIN illisible dans $PASSWD_DEFS"* ]]
   [[ "$output" == *"pas par ce processus : repare $PASSWD_DEFS"* ]]
-  # Le mot est celui du BEAM : « the bound is declared by the system, not by this process: fix … »
-  grep -q 'declared by the system, not by this process' "$BATS_TEST_DIRNAME/../../../config/runtime.exs"
-  grep -q 'R-no-uid-min' "$BATS_TEST_DIRNAME/../../../config/runtime.exs"
+  # Le mot est celui du BEAM : « the bound is declared by the system, not by this process: fix … ».
+  # Il vit dans GUARD B (Fleet.BootGuard), que config/runtime.exs appelle.
+  local garde="$BATS_TEST_DIRNAME/../../../lib/fleet/boot_guard.ex"
+  grep -q 'declared by the system, not by this process' "$garde"
+  grep -q 'R-no-uid-min' "$garde"
 }
 
 @test "UID_MAX ABSENT du fichier : la frontiere n'est pas etablie non plus, et le message nomme UID_MAX" {
@@ -161,9 +163,10 @@ proto() { # proto <script> — source le protocole (sujet : zoe) puis joue <scri
   [[ "$output" == *"NON-zoe"* ]]
   [[ "$output" == *"NON-admiral"* ]]
   refute_out 'OUI-' <<<"$output"
-  [ "$(grep -c "le siege n'est pas declare" <<<"$output")" -eq 1 ]
+  [ "$(grep -c "le siège n'est pas déclaré" <<<"$output")" -eq 1 ]
   [[ "$output" == *"$LCARS_SEAT_UID_FILE"* ]]
-  [[ "$output" == *"provision apply"* ]]
+  [[ "$output" == *"deploy/workstation up"* ]]
+  [[ "$output" == *"deploy/container config"* ]]
 }
 
 @test "siege declare par LCARS_SYSADMIN_UID seul (fichier absent) : la regle s'applique, sans message" {
@@ -171,5 +174,5 @@ proto() { # proto <script> — source le protocole (sujet : zoe) puis joue <scri
   [ "$status" -eq 0 ]
   [[ "$output" == *"OUI-zoe"* ]]
   [[ "$output" == *"NON-admiral"* ]]
-  refute_out 'siege' <<<"$output"
+  refute_out 'siège' <<<"$output"
 }

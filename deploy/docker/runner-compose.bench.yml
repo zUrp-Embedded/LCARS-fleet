@@ -1,0 +1,20 @@
+# SOURCE: deploy/docker/runner-compose.bench.yml
+# AUTHOR: bob
+# STARDATE: 2026-09-14
+# STATUS: surcouche de banc de runner-compose.yml — le runner du banc et ses volumes portent son marqueur, empilée par forge-runner.sh --bench
+#
+# Le marqueur vit ici et non dans runner-compose.yml : un label, même vide, entre dans l'empreinte de
+# configuration que compose compare, et le runner d'un poste repris à la main serait recréé.
+
+services:
+  act:
+    labels:
+      lcars.bench: "${LCARS_BENCH_BASE:?LCARS_BENCH_BASE absent — la base du banc, posée par forge-runner.sh --bench}"
+
+volumes:
+  data:
+    labels:
+      lcars.bench: "${LCARS_BENCH_BASE:?LCARS_BENCH_BASE absent}"
+  dind:
+    labels:
+      lcars.bench: "${LCARS_BENCH_BASE:?LCARS_BENCH_BASE absent}"

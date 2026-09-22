@@ -107,7 +107,8 @@ defmodule Fleet.Catalogue do
     |> Enum.filter(&File.dir?/1)
   end
 
-  # Forge organisation name: fleet/lcars distinguishes the catalogue from LCARS's repository.
+  # Forge organisation of this catalogue's projects. The system org (`lcars`, PROV_FORGE_ORG_DEFAULT)
+  # is distinct: it carries identity and the system repositories, never a project.
   @bundled_name "fleet"
 
   @doc """
@@ -289,18 +290,44 @@ defmodule Fleet.Catalogue do
   @spec project_template_root() :: Path.t()
   def project_template_root, do: Path.join(root(), @rel_project_template)
 
-  @doc """
-  Returns the repository address used to write a catalogue store inside its organisation.
-  Do not classify existing repositories by this basename: CatalogueDeposits uses owner versus
-  manifest identity. Onboarding may check the address to avoid creating a project where store
-  publication force-pushes. The underscore only distinguishes fleet-created repositories visually.
+  # The system org carries the fleet's identity and the system's own repositories, never a
+  # project. The machine names it (`LCARS_FORGE_ORG`, carried into config by `runtime.exs`); this
+  # default is the same literal as the shell protocol's, and MUR 19 holds the readers equal.
+  @system_org_default "lcars"
 
-  Shell STORE_REPO declarations mirror this value (forge-gestures.sh and forge.d/catalogues.sh).
-  Keep writers and convergence aligned: a wrong lookup can make present material appear absent
-  and trigger removal. CatalogueStoreAddressTest checks the source declarations.
+  @doc """
+  Returns the system organisation: what the installer chose, `#{@system_org_default}` otherwise.
+  """
+  @spec system_org() :: String.t()
+  def system_org,
+    do: Application.get_env(:lcars_fleet, :catalogue_system_org, @system_org_default)
+
+  # One repository for every installed catalogue, one branch each (⚖ user 2026-09-16). What is
+  # installed is then ONE question to the forge — the branches of this repository — instead of a
+  # search across every visible repository, and a catalogue's org carries its projects only.
+  @store_name "_catalogues"
+
+  @doc """
+  Returns the repository that holds every installed catalogue's source, one branch per catalogue.
+
+  A store is a BRANCH of this repository, named after the catalogue (`store_branch/1`), and its
+  identity is still proven by the manifest read at that branch — a branch named `x` whose
+  `catalogue.yaml` declares something else is not the store of `x`.
+
+  Shell STORE_REPO declarations mirror the repository name (forge-gestures.sh and
+  forge.d/catalogues.sh). Keep writers and convergence aligned: a wrong lookup can make present
+  material appear absent and trigger removal. CatalogueStoreAddressTest checks the declarations.
   """
   @spec store_repo() :: String.t()
-  def store_repo, do: "_catalogue"
+  def store_repo, do: "#{system_org()}/#{@store_name}"
+
+  @doc "Returns the store repository's name, without its organisation."
+  @spec store_name() :: String.t()
+  def store_name, do: @store_name
+
+  @doc "Returns the branch that holds `name`'s source inside the store repository."
+  @spec store_branch(String.t()) :: String.t()
+  def store_branch(name) when is_binary(name), do: name
 
   @doc """
   Returns the manifest basename for forge readers; manifest_path/0 joins it to the disk root.

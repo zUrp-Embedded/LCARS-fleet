@@ -2,41 +2,65 @@
 # SOURCE: deploy/provision
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
-# STATUS: le runner du provisionnement — apply, doctor, list, audit sur modules.d/
+# STATUS: le runner du provisionnement — apply, doctor, mesure, list, audit sur modules.d/
 #
 # USAGE
 #   provision apply  [--substrate S] [--only MODULE]… [--human USER] [--env FILE] [--verbose]
 #                    [--port-forge N] [--port-deck N] [--port-ssh N] [--forge-project NOM]
-#   provision doctor (mêmes options) [--porcelain]
+#                    [--faits F]
+#   provision doctor (mêmes options, sans --faits) [--porcelain]
+#   provision mesure --faits F [--sans-privilege] [--substrate S] [--human USER] [--env FILE]
+#                    [--port-forge N] [--port-deck N] [--port-ssh N] [--forge-project NOM]
 #   provision list   [--substrate S]
 #   provision audit  --before F --after F
 #
-#   apply    converge la machine : chaque module joue check, fix, re-check
-#   doctor   sonde seule — le même check que l'apply
+#   apply    converge la machine, en root : chaque module joue check, fix, re-check
+#   doctor   sonde seule, en root — le même check que l'apply
+#   mesure   le préflight seul, pour un lanceur qui décide avant d'agir : sans root, ce qui se lit
+#            sans privilège ; en root, les refus qui protègent la machine, mesurés par root. Ses
+#            faits vont dans --faits ; --sans-privilege joue la première phase même en root, pour la
+#            grille d'un installeur lancé directement en root
 #   list     les modules sélectionnés et leurs en-têtes
 #   audit    ce que la machine porte et que la table ne déclare pas, entre deux instantanés
 #            « find / … > avant ; install ; find / … > après » (une ligne par objet :
 #            <type> <mode> <uid>:<gid> <chemin>)
 #
 #   Un module modules.d/NN-nom.sh déclare en tête APPLY-ON (où il mute), CHECK-ON (où son état
-#   doit être vrai), NEEDS (root ou human) et AFTER (modules qui le précèdent). Il est joué en
-#   processus séparé, dans l'ordre du préfixe.
+#   doit être vrai), NEEDS: root et AFTER (les modules dont il emploie le travail, que « list »
+#   affiche). Il est joué en processus séparé, dans l'ordre du préfixe, seul ordre du runner. Le
+#   préflight (00) est la barrière de l'apply : un terrain qu'il ne déclare pas conforme ne reçoit
+#   aucun autre module. Un apply qui reçoit --faits, la mesure root rendue conforme dans la même
+#   invocation, ne le rejoue pas : il le compte, rendu par la mesure.
 #
-#   Codes  module check  0 conforme · 1 drift · 2 erreur de sonde · 3 mort avant son verdict
+#   Codes  module check  0 conforme · 1 drift · 2 échec (ses lignes FAIL) · 3 mort avant son verdict
 #          module apply  0 convergé · 1 échec · 2 drift résiduel · 3 mort avant son verdict
-#          runner apply  0 convergé · 1 échec · 2 drift résiduel
-#          runner doctor 0 conforme · 1 drift · 2 erreur
+#          runner apply  0 convergé · 1 échec, ou terrain refusé par le préflight · 2 drift résiduel
+#          runner doctor, mesure  0 conforme · 1 drift · 2 erreur
+#          runner audit  0 rien de non déclaré · 1 au moins un objet non déclaré, ou instantané illisible
+#          un refus avant tout module (commande ou option inconnue, valeur absente ou invalide, --env
+#          illisible, substrat contredit) sort en 1, sous chaque commande
 #
-#   --substrate S    wsl, linux ou docker (défaut : docker si /.dockerenv, wsl si noyau Microsoft, linux sinon)
-#   --only M         ce module seulement, répétable — nom complet ou préfixe numérique
-#   --human USER     humain des modules NEEDS: human (défaut : SUDO_USER, sinon l'appelant)
-#   --env FILE       fichier KEY=VALUE sourcé avant tout
+#   --substrate S    wsl, linux ou docker : celui que ce système mesure (docker si /.dockerenv ou
+#                    LCARS_DOCKER=1, wsl sous un noyau Microsoft, linux sinon) ; un autre est refusé,
+#                    sauf par list, qui lit les en-têtes du substrat nommé
+#   --only M         ce module seulement, répétable — nom complet ou préfixe numérique ; apply joue
+#                    le préflight en plus
+#   --human USER     l'humain que les modules servent (défaut : SUDO_USER, sinon l'appelant)
+#   --env FILE       fichier KEY=VALUE sourcé et exporté avant la lib ; les constantes de
+#                    deploy/installer-constants.env ne s'y règlent pas
 #   --port-forge N   ce que la machine publie ; retenu dans son journal pour les passes suivantes
 #   --port-deck N
 #   --port-ssh N
-#   --forge-project NOM   la base des projets compose : NOM-forge, NOM-runner
-#   --verbose
-#   --porcelain      (doctor) une ligne MODULE=OK|DRIFT|ERROR par module
+#   --forge-project NOM   la base des projets compose (NOM-forge, NOM-runner) et du nom d'hôte
+#                    WSL ; une étiquette DNS, retenue dans le journal
+#   --faits F        mesure : le fichier où le préflight écrit ses faits `nom=valeur`, et son
+#                    verdict (preflight=conforme|refuse) ; apply : ce fichier, écrit par une mesure
+#                    root conforme et privé à son compte (0600), à la place du préflight
+#   --verbose, -v
+#   --porcelain      (doctor seulement) une ligne MODULE=OK|DRIFT|FAIL|ERROR par module
+#
+#   LCARS_BUILTIN_HUMAN   l'humain de démonstration d'un banc, retenu dans le journal ; il ne se retire
+#                    pas : son compte de forge porte son travail, et un terrain se refait
 
 set -euo pipefail
 
@@ -45,12 +69,11 @@ DEPLOY_DIR="$(dirname "$SELF")"
 MODULES_DIR="$DEPLOY_DIR/modules.d"
 export PROVISION_LIB="$DEPLOY_DIR/lib/provision-lib.sh"
 
-# l'aide se borne par son contenu, jamais par des numéros de ligne : une aide tronquée ne se signale pas
-usage() { sed -n '/^# USAGE/,/^#   --porcelain/p' "$SELF" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '/^# USAGE/,/^$/p' "$SELF" | sed 's/^# \{0,1\}//'; }
 die()   { echo "provision: $*" >&2; exit 1; }
 
-[[ -f "$PROVISION_LIB" ]] || die "lib introuvable: $PROVISION_LIB"
-[[ -d "$MODULES_DIR" ]]   || die "modules.d introuvable: $MODULES_DIR"
+[[ "$EUID" -ne 0 || -z "${LCARS_DECOR_ROOT:-}" ]] \
+  || die "LCARS_DECOR_ROOT est posée et le runner tourne en root : ce décor de témoin déplace les chemins, pas les comptes, les paquets, les services ni docker. Retirer LCARS_DECOR_ROOT de l'environnement (sudo -E, profil du shell), puis relancer."
 
 # ─── Args ───────────────────────────────────────────────────────────────────────────────────────
 CMD="${1:-}"; shift || true
@@ -59,18 +82,22 @@ PORCELAIN=0
 ENV_FILE=""
 AUDIT_BEFORE=""
 AUDIT_AFTER=""
+FAITS=""
+SANS_PRIVILEGE=0
 declare -a ONLY=()
 
 # les validations ne rendent rien : dans une substitution `X="$(valid_port …)"`, le die ne tuerait
 # que le sous-shell et le refus s'imprimerait sans refuser
 valid_port() {
   [[ "$1" =~ ^[0-9]+$ ]] || die "$2 : « $1 » n'est pas un nombre"
-  (( $1 >= 1024 && $1 <= 65535 )) || die "$2 : $1 hors plage — 1024 à 65535 (sous 1024 le deck, qui tourne sous « lcars-system », ne peut pas binder)"
+  (( $1 >= 1024 && $1 <= 65535 )) || die "$2 : $1 hors plage — 1024 à 65535 (sous 1024 le deck, qui tourne sous son compte de service, ne peut pas binder)"
 }
 
+# la base nomme les projets compose et, « _ » devenu « - », le hostname de l'instance (30-wsl) : une étiquette DNS
 valid_project() {
-  [[ "$1" =~ ^[a-z0-9][a-z0-9_-]*$ ]] \
-    || die "$2 : « $1 » n'est pas un nom de projet compose — minuscules, chiffres, « _ » et « - », et le premier caractère n'est ni l'un ni l'autre"
+  local etiquette="${1//_/-}"
+  [[ "$1" =~ ^[a-z0-9][a-z0-9_-]*$ && "$etiquette" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]] \
+    || die "$2 : « $1 » n'est pas une base de projet — minuscules, chiffres, « _ » et « - », ni « _ » ni « - » aux bords, 63 caractères au plus"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -87,6 +114,8 @@ while [[ $# -gt 0 ]]; do
     --forge-project) valid_project "${2:?--forge-project attend un nom}" --forge-project
                      export PROV_FORGE_BASE="$2"; shift 2 ;;
     --env)       ENV_FILE="${2:?--env attend un fichier}"; shift 2 ;;
+    --faits)     FAITS="${2:?--faits attend un fichier}"; shift 2 ;;
+    --sans-privilege) SANS_PRIVILEGE=1; shift ;;
     --porcelain) PORCELAIN=1; shift ;;
     --verbose|-v) export PROV_VERBOSE=1; shift ;;
     --before)    AUDIT_BEFORE="${2:?--before attend un fichier}"; shift 2 ;;
@@ -95,7 +124,28 @@ while [[ $# -gt 0 ]]; do
     *) die "option inconnue: $1 (--help)" ;;
   esac
 done
-case "$CMD" in apply|doctor|list|audit) ;; ""|-h|--help) usage; exit 0 ;; *) die "commande inconnue: $CMD (--help)" ;; esac
+case "$CMD" in apply|doctor|mesure|list|audit) ;; ""|-h|--help) usage; exit 0 ;; *) die "commande inconnue: $CMD (--help)" ;; esac
+[[ "$PORCELAIN" -eq 0 || "$CMD" == doctor ]] || die "--porcelain ne vaut que pour doctor : $CMD écrit son verdict et son journal en clair"
+[[ -z "$FAITS" || "$CMD" == mesure || "$CMD" == apply ]] || die "--faits ne vaut que pour mesure, qui l'écrit, et apply, qui le reçoit"
+[[ -n "$FAITS" || "$CMD" != mesure ]] || die "mesure écrit ses faits dans --faits FICHIER : sans lui, rien ne serait rendu"
+[[ "${#ONLY[@]}" -eq 0 || "$CMD" != mesure ]] || die "--only ne vaut pas pour mesure : elle joue le préflight seul"
+[[ "$SANS_PRIVILEGE" -eq 0 || "$CMD" == mesure ]] || die "--sans-privilege ne vaut que pour mesure"
+# sous un décor de témoin, le runner ne tourne jamais en root (refus plus haut) : apply et doctor s'y jouent sans privilège
+[[ "$EUID" -eq 0 || -n "${LCARS_DECOR_ROOT:-}" || ( "$CMD" != apply && "$CMD" != doctor ) ]] \
+  || die "$CMD exige root : un fichier que ce compte ne lit pas passerait pour absent — relancer : sudo $SELF $CMD${ONLY[0]:+ --only ${ONLY[*]}}"
+if [[ "$CMD" == mesure ]]; then
+  : 2>/dev/null > "$FAITS" || die "--faits $FAITS : non inscriptible — la mesure y écrit ses faits"
+  PROV_PHASE=sans-privilege; [[ "$EUID" -ne 0 || "$SANS_PRIVILEGE" -eq 1 ]] || PROV_PHASE=root
+  export PROV_FACTS_FILE="$FAITS" PROV_PHASE
+else
+  # hors mesure, le préflight se joue entier et n'écrit aucun fait
+  unset PROV_FACTS_FILE PROV_PHASE
+  [[ -z "$FAITS" || "$(sed -n 's/^phase=//p' "$FAITS" 2>/dev/null)|$(sed -n 's/^preflight=//p' "$FAITS" 2>/dev/null)" == "root|conforme" ]] \
+    || die "--faits $FAITS : ce n'est pas une mesure root conforme (phase=root, preflight=conforme) — apply refusé avant tout module"
+  # la mesure de l'invocation écrit un fichier privé au compte qui joue l'apply : un fichier d'un autre ne dispense pas du préflight
+  [[ -z "$FAITS" || "$(stat -c '%u %a' "$FAITS" 2>/dev/null)" == "$EUID 600" ]] \
+    || die "--faits $FAITS : ce fichier n'a pas été écrit par la mesure de ce compte (propriétaire $EUID, mode 0600 attendus) — apply refusé avant tout module"
+fi
 
 if [[ -n "$ENV_FILE" ]]; then
   [[ -r "$ENV_FILE" ]] || die "--env illisible: $ENV_FILE"
@@ -106,9 +156,12 @@ if [[ -n "$ENV_FILE" ]]; then
 fi
 
 # Les paramètres retenus par la machine (ligne `params` de son journal) : lus après les drapeaux,
-# avant les défauts de la lib — un drapeau explicite gagne, le défaut d'usine perd.
+# avant les défauts de la lib — un drapeau explicite gagne, le défaut d'usine perd. Le chemin du
+# journal se lit dans le fichier des constantes, que la lib n'a pas encore chargé.
 _journal_params() {
-  local f="${LCARS_JOURNAL_FILE:-${PROV_ROOT:-/opt/lcars}/var/install.journal}" ligne kv k v
+  local f ligne kv k v
+  # illisible, le refus revient à la lib, qui le nomme
+  f="${LCARS_DECOR_ROOT:-}$(sed -n 's/^PROV_JOURNAL_FILE=//p' "$DEPLOY_DIR/installer-constants.env" 2>/dev/null)" || return 0
   [[ -r "$f" ]] || return 0
   ligne="$(sed -n 's/^params  *//p' "$f" | head -1)" || return 0
   for kv in $ligne; do
@@ -119,26 +172,38 @@ _journal_params() {
   done
 }
 _journal_params
+[[ -z "${PROV_FORGE_BASE:-}" ]] || valid_project "$PROV_FORGE_BASE" PROV_FORGE_BASE
 
 # shellcheck source=lib/provision-lib.sh
 . "$PROVISION_LIB"
 
-[[ "$SUBSTRATE" == "auto" ]] && SUBSTRATE="$(detect_substrate)"
+_mesure="$(detect_substrate)"
+[[ "$SUBSTRATE" != "auto" ]] || SUBSTRATE="$_mesure"
 case "$SUBSTRATE" in wsl|docker|linux) ;; *) die "substrat inconnu: $SUBSTRATE (wsl|docker|linux)" ;; esac
+# un substrat forcé choisirait les modules d'un autre terrain : 30-wsl sur un linux, docker-ce à côté de Docker Desktop
+[[ "$CMD" == list || "$SUBSTRATE" == "$_mesure" ]] \
+  || die "--substrate $SUBSTRATE : ce système se mesure « $_mesure » — le substrat se constate, il ne se force pas. Relancer sans --substrate."
 export PROV_SUBSTRATE="$SUBSTRATE"
+unset _mesure
 
-# L'uid du siège se dérive ici, du compte qui a lancé le runner — jamais de PROV_HUMAN, que le
-# convergeur remplace par l'humain de fleet quand il rejoue les modules NEEDS: human.
-_seat_login="${SUDO_USER:-$(id -un)}"
-_seat_uid="$(id -u -- "$_seat_login" 2>/dev/null || true)"
-if [[ "$_seat_uid" =~ ^[0-9]+$ ]]; then
-  : "${LCARS_SYSADMIN_UID:=$_seat_uid}"
-else
-  echo "[provision] uid du siège illisible pour « $_seat_login » — LCARS_SYSADMIN_UID reste ${LCARS_SYSADMIN_UID:-1000}, la garde du siège retient cet uid-là" >&2
-  : "${LCARS_SYSADMIN_UID:=1000}"
+# Ce qui POSE refuse un nom demandé deux fois dans l'espace de noms de la forge ; ce qui LIT ne
+# refuse rien — la machine fautive est celle qu'on veut sonder. Le nom arrive par trois chemins,
+# et le journal en est un : une machine installée avant ce refus le rejouerait telle quelle.
+[[ "$CMD" != apply ]] || prov_refuse_homonymes || exit 1
+
+# Même règle pour les faits du produit : ce qui POSE refuse une constante qui ment sur son fait
+# (⚖ décision 3), ce qui LIT ne refuse rien. Un kit dont les deux fichiers ont divergé poserait des
+# objets que le produit irait chercher ailleurs, sans qu'aucun module ne rougisse.
+[[ "$CMD" != apply ]] || prov_refuse_faits_divergents || exit 1
+
+# l'uid du siège vient du compte qui a lancé le runner, jamais de --human
+if [[ -z "${LCARS_SYSADMIN_UID:-}" ]]; then
+  _seat_login="${SUDO_USER:-$(id -un)}"
+  LCARS_SYSADMIN_UID="$(id -u -- "$_seat_login" 2>/dev/null)" \
+    || die "uid du siège illisible pour « $_seat_login » (SUDO_USER, sinon l'appelant) — la garde du siège ne retient pas un uid deviné ; LCARS_SYSADMIN_UID le donne"
+  unset _seat_login
 fi
 export LCARS_SYSADMIN_UID
-unset _seat_login _seat_uid
 
 # shellcheck disable=SC2119 # l'argument de prov_source_rev est optionnel : l'appel nu est le cas nominal
 PROV_SOURCE_REV="$(prov_source_rev)"
@@ -153,37 +218,24 @@ substrate_in() {
   prov_substrate_satisfait "$1" "$SUBSTRATE"
 }
 
-# AFTER vérifie que le module nommé existe et précède ; il ne ferme pas `--only` transitivement,
-# et le préfixe numérique reste l'ordre.
 declare -a SELECTED=() EFFECTIVE=()
 for mod in "$MODULES_DIR"/[0-9][0-9]-*.sh; do
   [[ -f "$mod" ]] || die "aucun module dans $MODULES_DIR"
   name="$(basename "$mod" .sh)"
-  apply_on="$(module_field "$mod" APPLY-ON)"
-  check_on="$(module_field "$mod" CHECK-ON)"
-  needs="$(module_field "$mod" NEEDS)"
-  [[ -n "$apply_on" ]] || die "$name: header '# APPLY-ON:' manquant"
-  [[ -n "$check_on" ]] || die "$name: header '# CHECK-ON:' manquant"
-  [[ -n "$needs" ]]    || die "$name: header '# NEEDS:' manquant"
-  after="$(module_field "$mod" AFTER)"
-  for dep in $after; do
-    [[ -f "$MODULES_DIR/$dep.sh" ]] || die "$name: AFTER nomme « $dep », qui n'est pas un module de $MODULES_DIR"
-    [[ "$dep" < "$name" ]] || die "$name : AFTER « $dep », mais $dep ne le précède pas — le rang est l'ordre, l'un des deux est à renommer"
-  done
-  if [[ "$check_on" != "any" ]]; then
-    for s in $apply_on; do
-      [[ "$s" == "any" ]] && die "$name: APPLY-ON any exige CHECK-ON any"
-      case " $check_on " in *" $s "*) ;; *) die "$name: APPLY-ON contient « $s » hors de CHECK-ON ($check_on)" ;; esac
-    done
-  fi
-  if [[ "${#ONLY[@]}" -gt 0 ]]; then
+  if [[ "$CMD" == mesure ]]; then
+    [[ "$name" == 00-* ]] || continue
+  elif [[ "${#ONLY[@]}" -gt 0 ]]; then
     keep=0
     for o in "${ONLY[@]}"; do [[ "$name" == "$o" || "$name" == "$o"-* ]] && keep=1; done
+    # le préflight est la barrière de tout apply : --only choisit ce qui mute, pas ce qui garde
+    [[ "$CMD" == apply && "$name" == 00-* ]] && keep=1
     [[ "$keep" -eq 1 ]] || continue
   fi
-  substrate_in "$check_on" || continue
+  substrate_in "$(module_field "$mod" CHECK-ON)" || continue
   SELECTED+=("$mod")
-  if [[ "$CMD" == "apply" ]] && substrate_in "$apply_on"; then
+  if [[ -n "$FAITS" && "$CMD" == apply && "$name" == 00-* ]]; then
+    EFFECTIVE+=("mesure")
+  elif [[ "$CMD" == "apply" ]] && substrate_in "$(module_field "$mod" APPLY-ON)"; then
     EFFECTIVE+=("apply")
   else
     EFFECTIVE+=("check")
@@ -200,35 +252,17 @@ if [[ "$CMD" == "list" ]]; then
   exit 0
 fi
 
-# ─── Garde de privilège : le runner n'escalade jamais, il dés-escalade (NEEDS: human) ──────────
-if [[ "$CMD" == "apply" && "$EUID" -ne 0 ]]; then
-  for i in "${!SELECTED[@]}"; do
-    if [[ "${EFFECTIVE[$i]}" == "apply" && "$(module_field "${SELECTED[$i]}" NEEDS)" == "root" ]]; then
-      die "apply exige root pour $(basename "${SELECTED[$i]}" .sh) — relancer : sudo $SELF apply${ONLY[0]:+ --only ${ONLY[*]}}"
-    fi
-  done
-fi
-
-# ─── Verrou (apply seulement) — dérivé de ce qui va tourner, jamais d'un argument ───────────────
+# ─── Verrou (apply) ─────────────────────────────────────────────────────────────────────────────
 if [[ "$CMD" == "apply" ]]; then
-  _lock_scope=""
-  if [[ -n "${PROV_HUMAN:-}" ]]; then
-    _lock_scope="$PROV_HUMAN"
-    for mod in "${SELECTED[@]}"; do
-      [[ "$(module_field "$mod" NEEDS)" == "human" ]] || { _lock_scope=""; break; }
-    done
-  fi
-
-  LOCK="$(prov_lock_path "$_lock_scope")" || die "verrou: emplacement sûr indisponible — apply refusé"
+  # AVANT LE VERROU, parce que ce refus ne dépend d'aucun état de la machine : les primitives sont
+  # une propriété de L'ARBRE, et prendre un verrou pour le relâcher aussitôt ne renseigne personne.
+  prov_exige_primitives "provision apply" || exit 1
+  LOCK="$(prov_lock_path)" || die "verrou: emplacement sûr indisponible — apply refusé"
   exec 9>"$LOCK"
-  flock -n 9 \
-    || die "un autre apply est en cours${_lock_scope:+ pour « $_lock_scope »} (lock: $LOCK)"
+  flock -n 9 || die "un autre apply est en cours (lock: $LOCK)"
 fi
 
 # ─── Le journal de cette machine ────────────────────────────────────────────────────────────────
-JOURNAL_FILE="${LCARS_JOURNAL_FILE:-$PROV_ROOT/var/install.journal}"
-MANIFEST_FILE="${LCARS_SYSTEM_MANIFEST:-$(dirname "$SELF")/system.manifest}"
-
 # shellcheck source=lib/provision-audit.sh
 . "$(dirname "$PROVISION_LIB")/provision-audit.sh"
 
@@ -237,28 +271,23 @@ if [[ "$CMD" == "audit" ]]; then
   exit $?
 fi
 if [[ "$CMD" == "apply" ]]; then
-  PROV_JOURNAL_ACC="$(mktemp "${TMPDIR:-/tmp}/prov-journal.XXXXXX" 2>/dev/null || true)"
+  PROV_JOURNAL_ACC="$(mktemp "${TMPDIR:-/tmp}/prov-journal.XXXXXX" 2>/dev/null)" \
+    || die "aucun fichier temporaire ne se crée dans ${TMPDIR:-/tmp} — la passe y accumule son journal ; apply refusé avant tout module"
   export PROV_JOURNAL_ACC
 fi
 
-# run_module <module> <apply|check> — un sous-shell par module (PROV_HUMAN ne survit pas au tour),
-# le fd du verrou fermé (un enfant détaché par un module ne doit pas le garder).
+# run_module <module> <nom> <apply|check> — un sous-shell par module, le fd du verrou fermé (un enfant
+# détaché par un module ne doit pas le garder)
 run_module() {
-  local mod="$1" eff="$2" human="${PROV_HUMAN:-}" name
-  name="$(basename "$mod" .sh)"
-  # shellcheck disable=SC2030,SC2031 # la portée d'un tour est le sous-shell, c'est voulu
-  (
-    export PROVISION_RUN=1 PROVISION_MODULE="$name" PROV_HUMAN="$human"
-    if [[ "$(module_field "$mod" NEEDS)" != "human" || "$(id -un)" == "$human" ]]; then
-      bash "$mod" "$eff"
-    else
-      as_human bash "$mod" "$eff"
-    fi
-  ) 9>&-
+  ( export PROVISION_RUN=1 PROVISION_MODULE="$2"; bash "$1" "$3" ) 9>&- </dev/null
+}
+
+garde_armee() { # garde_armee <module> → 0 s'il source la lib, dont la garde change une mort en 3
+  grep -qE '^\. "\$\{PROVISION_LIB' "$1"
 }
 
 # ─── Exécution ──────────────────────────────────────────────────────────────────────────────────
-total=0 ok=0 drift=0 failed=0
+total=0 ok=0 drift=0 failed=0 REFUS=0
 declare -a REPORT=()
 
 for i in "${!SELECTED[@]}"; do
@@ -266,18 +295,45 @@ for i in "${!SELECTED[@]}"; do
   name="$(basename "$mod" .sh)"
   eff="${EFFECTIVE[$i]}"
   total=$((total + 1))
+  if [[ "$eff" == mesure ]]; then
+    [[ "$PORCELAIN" -eq 1 ]] || echo "${_PC}=== $name (rendu par la mesure) ===${_PN}"
+    ok=$((ok + 1)); REPORT+=("$name=OK")
+    continue
+  fi
   if [[ "$CMD" == "apply" && "$eff" == "check" ]]; then
     [[ "$PORCELAIN" -eq 1 ]] || echo "${_PC}=== $name (check — APPLY-ON=$(module_field "$mod" APPLY-ON), hors substrat $SUBSTRATE) ===${_PN}"
   else
     [[ "$PORCELAIN" -eq 1 ]] || echo "${_PC}=== $name ($eff) ===${_PN}"
   fi
   rc=0
-  run_module "$mod" "$eff" || rc=$?
+  run_module "$mod" "$name" "$eff" || rc=$?
+  if [[ "$CMD" == mesure ]]; then
+    if [[ "$rc" -eq 0 ]]; then echo preflight=conforme; else echo preflight=refuse; fi >> "$FAITS"
+  fi
+  # tout verdict du préflight autre que « convergé » refuse le terrain, un plancher en dérive compris
+  if [[ "$CMD" == apply && "$name" == 00-* && "$rc" -ne 0 ]]; then
+    failed=$((failed + 1)); REPORT+=("$name=FAIL"); REFUS=1
+    case "$rc" in
+      1) constat="ses lignes FAIL ci-dessus" ;;
+      2) constat="ses lignes DRIFT ci-dessus" ;;
+      3) constat="la ligne ERREUR ci-dessus" ;;
+      *) echo "${_PR}ERREUR $name:${_PN} mort avant de rendre son verdict (rc=$rc)" >&2
+         constat="la ligne ERREUR ci-dessus" ;;
+    esac
+    echo "${_PR}ARRÊT${_PN} : le préflight refuse ce terrain ($constat) — aucun autre module n'est joué" >&2
+    break
+  fi
   case "$CMD:$eff:$rc" in
     *:*:3) failed=$((failed + 1)); REPORT+=("$name=ERROR") ;;
-    doctor:check:0) ok=$((ok + 1));       REPORT+=("$name=OK") ;;
-    doctor:check:1) drift=$((drift + 1)); REPORT+=("$name=DRIFT") ;;
-    doctor:check:*)
+    doctor:check:0|mesure:check:0) ok=$((ok + 1));       REPORT+=("$name=OK") ;;
+    doctor:check:1|mesure:check:1) drift=$((drift + 1)); REPORT+=("$name=DRIFT") ;;
+    # un module qui source la lib meurt en 3 par sa garde : son 2 est verdict_check sur ses lignes FAIL, qui
+    # sont le constat ; sans la lib, un 2 peut être une mort sous pipefail, et reste une sonde en erreur
+    doctor:check:2|mesure:check:2) if garde_armee "$mod"; then failed=$((failed + 1)); REPORT+=("$name=FAIL")
+      else failed=$((failed + 1)); REPORT+=("$name=ERROR")
+        echo "${_PR}ERREUR $name:${_PN} sonde en erreur (rc=2) — ce module ne source pas la lib : sans ligne FAIL au-dessus, il est mort avant de rendre son verdict" >&2
+      fi ;;
+    doctor:check:*|mesure:check:*)
       failed=$((failed + 1)); REPORT+=("$name=ERROR")
       echo "${_PR}ERREUR $name:${_PN} sonde en erreur (rc=$rc) — si aucune ligne FAIL n'apparaît au-dessus, le module est mort avant de rendre son verdict" >&2 ;;
     apply:apply:0)  ok=$((ok + 1));       REPORT+=("$name=OK") ;;
@@ -290,11 +346,6 @@ for i in "${!SELECTED[@]}"; do
       failed=$((failed + 1)); REPORT+=("$name=FAIL")
       echo "FAIL  $name: état-cible non tenu sur $SUBSTRATE et inapplicable ici (APPLY-ON=$(module_field "$mod" APPLY-ON)) — rebâtir l'image qui le fournit" >&2 ;;
   esac
-  # le préflight est une barrière : un terrain refusé ne reçoit aucune mutation
-  if [[ "$CMD" == apply && "$name" == 00-* && "$failed" -gt 0 ]]; then
-    echo "${_PR}ARRÊT${_PN} : le préflight refuse ce terrain — aucun autre module n'est joué" >&2
-    break
-  fi
 done
 
 # ─── Verdict ────────────────────────────────────────────────────────────────────────────────────
@@ -302,33 +353,32 @@ if [[ "$PORCELAIN" -eq 1 ]]; then
   printf '%s\n' "${REPORT[@]}"
 else
   echo ""
-  # Le journal s'écrit même quand la passe ne pose rien ; les inventaires apt_* s'additionnent
-  # avec ceux des passes précédentes, le reste décrit cette passe.
-  if [[ "$CMD" == "apply" && -n "${PROV_JOURNAL_ACC:-}" ]]; then
+  # Le journal s'écrit même quand la passe ne pose rien ; l'inventaire apt_installed s'additionne
+  # avec celui des passes précédentes, le reste décrit cette passe.
+  if [[ "$CMD" == "apply" ]]; then
     _journal_ancien=""
-    [[ -r "$JOURNAL_FILE" ]] && _journal_ancien="$(grep -E '^(apt_installed|apt_already) ' "$JOURNAL_FILE" || true)"
-    if mkdir -p "$(dirname "$JOURNAL_FILE")" 2>/dev/null; then
-      {
-        echo "# SOURCE: $JOURNAL_FILE"
+    [[ -r "$PROV_JOURNAL_FILE" ]] && _journal_ancien="$(grep -E '^apt_installed ' "$PROV_JOURNAL_FILE" || true)"
+    if ! {
+      mkdir -p "$(dirname "$PROV_JOURNAL_FILE")" \
+      && {
+        echo "# SOURCE: $PROV_JOURNAL_FILE"
         echo "# STATUS: mesure, pas declaration — ce qui a été posé sur cette machine ; deploy/system.manifest dit ce qui peut l'être."
-        echo "# apt_installed / apt_already : la distinction n'est connaissable qu'avant l'install."
         echo "posed_at      $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-        echo "source_rev    ${PROV_SOURCE_REV:-inconnue}"
+        echo "source_rev    $PROV_SOURCE_REV"
         echo "substrate     $SUBSTRATE"
         echo "params        $(prov_params_line)"
         echo "prefix        $PROV_PREFIX"
         echo "modules       total=$total ok=$ok drift=$drift failed=$failed"
         { printf '%s\n' "$_journal_ancien"; cat "$PROV_JOURNAL_ACC"; } \
-        | awk '{ k=$1; $1=""; sub(/^ /,""); acc[k]=acc[k] " " $0 }
+        | awk 'NF { k=$1; $1=""; sub(/^ /,""); acc[k]=acc[k] " " $0 }
              END { for (k in acc) {
                      n=split(acc[k], w, " "); delete seen; out=""
                      for (i=1;i<=n;i++) if (w[i]!="" && !(w[i] in seen)) { seen[w[i]]=1; out=out " " w[i] }
                      printf "%-13s%s\n", k, out } }' | sort
-      } > "$JOURNAL_FILE" 2>/dev/null \
-        && chmod 0644 "$JOURNAL_FILE" 2>/dev/null \
-        || echo "  ${_PA}journal NON écrit ($JOURNAL_FILE) — l'install est faite, sa trace ne l'est pas${_PN}"
-    else
-      echo "  ${_PA}journal NON écrit : $(dirname "$JOURNAL_FILE") inaccessible${_PN}"
+      } > "$PROV_JOURNAL_FILE" \
+      && chmod 0644 "$PROV_JOURNAL_FILE"
+    } 2>/dev/null; then
+      echo "  ${_PA}journal NON écrit ($PROV_JOURNAL_FILE) — la passe a joué, sa trace n'est pas posée${_PN}"
     fi
     rm -f "$PROV_JOURNAL_ACC"
   fi
@@ -343,12 +393,19 @@ else
     "$(_tint "$_PR" "échecs" "$failed")"
   if [[ "$CMD" == "doctor" && "$drift" -gt 0 ]]; then
     if [[ "$SUBSTRATE" == "docker" ]]; then
-      echo "  ${_PA}→ l'image ne se converge pas :${_PN} rebâtir l'image (deploy/pack.sh) — un drift ici est une image non conforme à son build"
+      # qui lit ce doctor a tiré l'image publiée : le remède se joue depuis l'hôte, sans bâtir
+      echo "  ${_PA}→ un conteneur ne se converge pas sur place :${_PN} depuis l'hôte, tirer à nouveau l'image de cette version"
+      echo "    et recréer le conteneur sur ses volumes : LCARS_IMAGE=<image:version> deploy/container pull, puis"
+      echo "    LCARS_IMAGE=<image:version> deploy/container -p <projet> up (un banc : deploy/docker/bench/bench-swap-image.sh"
+      echo "    --forge-project <base> --image <image:version>). Si le drift revient sur l'image fraîche, le signaler avec"
+      echo "    la révision $PROV_SOURCE_REV et ces lignes."
     else
       echo "  ${_PA}→ converger :${_PN} sudo $SELF apply"
     fi
   fi
-  if [[ "$CMD" == "apply" && "$failed" -gt 0 ]]; then
+  if [[ "$REFUS" -eq 1 ]]; then
+    echo "  ${_PR}→ TERRAIN REFUSÉ${_PN} par le préflight — aucun module n'a été joué après lui ; son constat est au-dessus."
+  elif [[ "$CMD" == "apply" && "$failed" -gt 0 ]]; then
     echo "  ${_PR}→ EN ÉCHEC${_PN} sur $failed module(s) — voir les lignes FAIL ci-dessus."
     [[ "$drift" -gt 0 ]] && \
       echo "    ($drift autre(s) module(s) en DRIFT : état-cible non tenu, souvent en conséquence.)"
@@ -357,6 +414,6 @@ else
     echo "    DRIFT ci-dessus. Rien n'est cassé ; il manque un geste (forge, credentials, réseau)."
   fi
 fi
-[[ "$failed" -gt 0 ]] && exit "$([[ "$CMD" == "doctor" ]] && echo 2 || echo 1)"
-[[ "$drift" -gt 0 ]] && exit "$([[ "$CMD" == "doctor" ]] && echo 1 || echo 2)"
+[[ "$failed" -gt 0 ]] && exit "$([[ "$CMD" == "apply" ]] && echo 1 || echo 2)"
+[[ "$drift" -gt 0 ]] && exit "$([[ "$CMD" == "apply" ]] && echo 2 || echo 1)"
 exit 0

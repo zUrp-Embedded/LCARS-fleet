@@ -13,9 +13,22 @@
 
 set -euo pipefail
 
-FORGE_URL="${LCARS_FORGE_URL:-$(cat /home/lcars/tokens/forge.url 2>/dev/null || true)}"
+# L'adresse de la forge, là où la session du siège la trouve : `FORGE_BASE_URL` s'il est dans
+# l'environnement (une session « docker exec » l'hérite du service), sinon `forge.url` du répertoire
+# des jetons (0644, dans un dossier que le groupe fleet traverse, et le siège est dans fleet). Ce
+# fichier est posé sur les deux rails : par l'installeur sur un poste, par l'init du démarrage dans un
+# conteneur — une session ssh n'hérite pas de l'environnement du service. Même ordre que le protocole
+# des gestes de forge.
+# ⚖ Decision 3 : le repertoire des jetons et le compte systeme sont des FAITS de la machine.
+# `../../../lib` resout un checkout comme une machine posee — l'arbre `services/` est copie entier.
+FACTS_SH="${LCARS_FACTS_SH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../../lib/facts.sh}"
+[[ -r "$FACTS_SH" ]] || FACTS_SH=/opt/lcars/services/lib/facts.sh
+# shellcheck source=../../../lib/facts.sh
+. "$FACTS_SH"
+FORGE_URL_FILE="$LCARS_PRIVATE_DIR/forge.url"
+FORGE_URL="${LCARS_FORGE_URL:-${FORGE_BASE_URL:-$(head -n1 "$FORGE_URL_FILE" 2>/dev/null | tr -d '[:space:]' || true)}}"
 # ⚠ LE JETON SYSTEME, PAS LE MASTER, ET C'EST UNE CORRECTION DE PRIVILEGE. Ce script ne fait que
-# DEUX LECTURES sur un depot PUBLIC — mesure du 2026-08-23 sur une forge vivante : `fleet/lcars` est
+# DEUX LECTURES sur un depot PUBLIC — mesure du 2026-08-23 sur une forge vivante : le dépôt système (`lcars/_ops`) est
 # `private=false, internal=false`, et ses deux points d'entree (`issues`, `pulls`) repondent 200 en
 # ANONYME. Aucune de ces lectures n'est site-admin.
 #
@@ -30,21 +43,28 @@ FORGE_URL="${LCARS_FORGE_URL:-$(cat /home/lcars/tokens/forge.url 2>/dev/null || 
 # l'equipe `humans` de la forge, avec trente secondes de peremption — et un refus qui dirait « il
 # est lisible par le groupe fleet » enverrait chercher une adhesion. La question se pose a
 # `roles.sock` : le service la porte a la forge A L'INSTANT du geste.
-SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-system_starfleet}"
-AUTHORITY_ASK="${LCARS_AUTHORITY_ASK_BIN:-/usr/local/bin/lcars-authority-ask}"
-OPS_REPO="${LCARS_OPS_REPO:-fleet/lcars}"
+SYSTEM_ACCOUNT="$LCARS_SYSTEM_ACCOUNT"
+AUTHORITY_ASK="${LCARS_AUTHORITY_ASK_BIN:-$LCARS_LINK_DIR/lcars-authority-ask}"
+# Le depot du systeme vit dans l'org systeme : une DERIVATION du fait, la meme que celle du
+# protocole des modules — une org renommee par l'installeur emmene son depot.
+OPS_REPO="${LCARS_OPS_REPO:-$LCARS_FORGE_ORG/_ops}"
 # Nom GELE, autorite `Fleet.Toolchain.branch/0`, recopie tenue par le contrat
 # `toolchain.branch_single_source`. Reglable a moitie, il ferait relever une boite aux lettres
 # pendant que les demandes atterrissent dans une autre.
 BRANCH="tool_request"
 
-[[ -n "$FORGE_URL" ]] || { echo "system-issues: URL de forge inconnue (LCARS_FORGE_URL ou tokens/forge.url)" >&2; exit 1; }
-[[ -x "$AUTHORITY_ASK" ]] || { echo "system-issues: client d'autorite absent ($AUTHORITY_ASK) — « provision apply » le pose" >&2; exit 1; }
+[[ -n "$FORGE_URL" ]] || { echo "system-issues: adresse de la forge inconnue — ni FORGE_BASE_URL dans l'environnement, ni $FORGE_URL_FILE lisible. Sur un poste, « deploy/workstation up » écrit ce fichier ; dans un conteneur, son démarrage l'écrit depuis FORGE_BASE_URL (« FORGE_BASE_URL=<url> deploy/container config » depuis l'hôte, puis « deploy/container up ») ; ailleurs, « FORGE_BASE_URL=<url> » devant la commande" >&2; exit 1; }
+[[ -x "$AUTHORITY_ASK" ]] || { echo "system-issues: client d'autorité absent ($AUTHORITY_ASK) — sur un poste, « deploy/workstation up » le pose ; dans un conteneur, c'est l'image qui le porte" >&2; exit 1; }
 
 # La cause du refus est deja imprimee en francais par le client, sur stderr. La reformuler ici la
 # remplacerait par une plus vague : ce script sait qu'il n'a pas de jeton, il ne sait pas pourquoi.
+#
+# ⚠ UN REFUS N'ARRETE PAS LA LECTURE. Le siege n'entre pas dans la team humans (aucun siege n'est
+# privilegie aupres de l'autorite), donc l'autorite lui refuse le jeton ; or ces deux lectures portent
+# sur un depot public, que la forge sert en anonyme. Sans jeton, elles se font en anonyme, et le
+# script le dit ; un depot qui ne se lit pas en anonyme est alors un refus nomme, jamais une liste vide.
 TOKEN="$("$AUTHORITY_ASK" "$SYSTEM_ACCOUNT")" \
-  || { echo "system-issues: pas de jeton de forge (cause ci-dessus)" >&2; exit 1; }
+  || { TOKEN=""; echo "system-issues: pas de jeton de forge pour ce compte (cause ci-dessus) — lecture anonyme de $OPS_REPO, dépôt public" >&2; }
 
 api="$FORGE_URL/api/v1"
 
@@ -55,21 +75,36 @@ api="$FORGE_URL/api/v1"
 #
 # `-K -` lit la configuration sur stdin — le secret passe par un tube, jamais par argv ni par un
 # fichier. La sortie de `curl` reste sur stdout, donc les `| jq` en aval ne changent pas.
-curl_auth() { # <url> — rend le corps de la reponse sur stdout
+curl_auth() { # <url> — rend le corps de la reponse sur stdout ; sans jeton, la lecture est anonyme
+  if [[ -z "$TOKEN" ]]; then
+    curl -sSf -m 15 "$1"
+    return
+  fi
   printf 'header = "Authorization: token %s"\n' "$TOKEN" \
     | curl -sSf -m 15 -K - "$1"
 }
 
+lecture_ko() { # la phrase d'une lecture en echec, selon qu'elle etait anonyme ou non
+  if [[ -z "$TOKEN" ]]; then
+    echo "(lecture anonyme refusée : $OPS_REPO ne se lit pas sans jeton, et l'autorité n'en donne pas à ce compte)"
+  else
+    echo "(lecture impossible — la forge répond-elle ? $FORGE_URL)"
+  fi
+  RC=1
+}
+
+RC=0
 echo "═══ Boite de reception sysadmin — $OPS_REPO ═══"
 echo
 echo "── Issues error_system (ouvertes) ──"
 curl_auth "$api/repos/$OPS_REPO/issues?state=open&labels=error_system&type=issues&limit=50" \
   | jq -r '.[] | "#\(.number)  [\(.created_at[:10])]  \(.title)"' \
-  || echo "(lecture impossible — forge down ?)"
+  || lecture_ko
 echo
 echo "── PR d'outillage en attente (vers $BRANCH) ──"
 curl_auth "$api/repos/$OPS_REPO/pulls?state=open&limit=50" \
   | jq -r --arg b "$BRANCH" '.[] | select(.base.ref == $b) | "!\(.number)  [\(.created_at[:10])]  \(.title)"' \
-  || echo "(lecture impossible — forge down ?)"
+  || lecture_ko
 echo
 echo "(signature d'une PR : sur la forge — approve, l'auto-merge fait le reste ; detail : chaque ticket)"
+exit "$RC"

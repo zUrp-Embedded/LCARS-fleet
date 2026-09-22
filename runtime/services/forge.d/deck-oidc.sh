@@ -3,21 +3,20 @@
 # AUTHOR: DrDree
 # STARDATE: (posée par /push-github)
 # STATUS: PROTO-V2 — pose le client OAuth2 du deck du conteneur + son fichier de config
-# APPLY-ON: any
-# CHECK-ON: any
-# NEEDS: root
-# AFTER: 21-service-accounts 63-forge-tokens
+# JOUE PAR : le boot du conteneur (a chaque demarrage) et l'installeur d'un poste, par un
+# appelant mince. Ni terrain ni ordre ne se declarent ici : ces en-tetes ne sont lus que dans
+# `deploy/modules.d`, et les recopier ici promettait une mecanique que personne ne joue.
 
 set -euo pipefail
 
-# Le protocole des modules du PRODUIT (Q3, lot 6, 2026-09-04) : ce geste est joue par le conteneur en prod
-# et par l'installeur a l'install ; l'hote — l'un ou l'autre, ou un temoin — nomme le fichier.
+# L'hote nomme le protocole (LCARS_MODULE_PROTOCOL) : le boot du conteneur, un module de
+# l'installeur, ou un temoin. Le contrat de ce dialecte est dans le fichier source.
 # shellcheck source=../lib/module-protocol.sh
 . "${LCARS_MODULE_PROTOCOL:?LCARS_MODULE_PROTOCOL non pose — lance via un module de l installeur ou le boot du conteneur, pas le geste nu}"
 
 APP_NAME="lcars-deck"
 TOKEN_FILE="$LCARS_SYSTEM_TOKEN_FILE"
-OIDC_GROUP="${LCARS_SYSTEM_GROUP:-${LCARS_SYSTEM_USER:-lcars-system}}"
+OIDC_GROUP="$LCARS_SYSTEM_GROUP"
 
 callback_uris() {
   # DEUX ECRITURES DE LA LOOPBACK, PARCE QU'OAUTH2 COMPARE DES CHAINES. `localhost` et `127.0.0.1`
@@ -27,7 +26,7 @@ callback_uris() {
   # entre par l'autre, APRES son identification (mesure du 2026-08-18).
   local out="http://127.0.0.1:$LCARS_LANDING_PORT/auth/callback http://localhost:$LCARS_LANDING_PORT/auth/callback" o u
 
-  advertise_addr "${LCARS_DECK_BIND:-0.0.0.0}"
+  advertise_addr "$LCARS_DECK_BIND"
   if [[ -z "$LCARS_ADVERTISE_WHY" && -n "$LCARS_ADVERTISE" ]]; then
     u="http://$LCARS_ADVERTISE:$LCARS_LANDING_PORT/auth/callback"
     case " $out " in *" $u "*) ;; *) out="$out $u" ;; esac
@@ -185,7 +184,7 @@ apply() {
     verdict_apply
   fi
   if [[ ! -r "$TOKEN_FILE" ]]; then
-    p_drift "$TOKEN_FILE absent — 63-forge-tokens n'a pas encore minté le token système ; client OAuth2 NON posé"
+    p_drift "$TOKEN_FILE absent — le geste des jetons n'a pas encore minté le jeton système ; client OAuth2 NON posé, il se posera à la convergence suivante"
     verdict_apply
   fi
 
@@ -246,7 +245,7 @@ apply() {
         '{client_id:$ci, client_secret:$cs, public_url:$pub, internal_url:$int,
           redirect_uris:($uris|split(" "))}' > "$tmp"
   chmod 0640 "$tmp"
-  chgrp "$OIDC_GROUP" "$tmp" 2>/dev/null || p_warn "groupe $OIDC_GROUP inconnu — $LCARS_DECK_OIDC_FILE restera illisible par le deck (il tourne sous ce compte ; « provision apply --only 21-service-accounts » le pose)"
+  chgrp "$OIDC_GROUP" "$tmp" 2>/dev/null || p_warn "groupe $OIDC_GROUP inconnu — $LCARS_DECK_OIDC_FILE restera illisible par le deck (il tourne sous ce compte : sur un poste, « deploy/workstation up » le pose ; dans un conteneur, c'est l'image qui le porte)"
   mv -f "$tmp" "$LCARS_DECK_OIDC_FILE"
   LCARS_CHANGED=$((LCARS_CHANGED + 1))
   p_chg "client OAuth2 « $APP_NAME » posé → $LCARS_DECK_OIDC_FILE (retours : $uris)"
@@ -257,7 +256,7 @@ apply() {
   verdict_apply
 }
 
-case "${1:?usage: 66-deck-oidc.sh <check|apply>}" in
+case "${1:?usage: deck-oidc.sh <check|apply>}" in
   check) check ;;
   apply) apply ;;
   *) p_die "mode inconnu: $1 (check|apply)" ;;

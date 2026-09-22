@@ -4,46 +4,46 @@
 # STARDATE: 2026-09-04
 # STATUS: actif — l'INIT DE L'INSTANCE du conteneur, cote produit : le siege, les zones, le layout du volume
 #
-# ⚖ user 2026-09-04 (Q1 du chantier deploy-independance) : « pour docker, pourquoi on pourrait pas
-# build l'image, et qu'elle reste alive entre 2 demarrages ? … dans docker, le deploy semble n'avoir
-# aucun interet a partir dans le container ». Le modele est celui de Docker : l'image est le
-# produit, le conteneur une instance, l'etat dans le volume. Ce que le boot du conteneur faisait par
-# `provision apply --substrate docker` — rejouer l'INSTALLEUR a chaque demarrage — est ici, cote
-# produit, en un geste idempotent : ce qu'une instance neuve doit avoir sur son volume, et rien
-# de plus. Pas de `mix`, pas de table de l'installeur, pas de `deploy/`.
+# Ce qu'une instance neuve doit avoir sur son volume, et rien de plus, en un geste idempotent. Pas de
+# `mix`, pas de table de l'installeur, pas de `deploy/`.
 #
 # CE QUE CE GESTE POSE (et d'ou chaque ligne vient) :
 #   - le SIEGE : le sysadmin du conteneur — resolu (table `forge-uid.map`, sinon le #1 de la forge
 #     par le jeton master, sinon la semence `LCARS_ADMIRAL`), cree a l'uid `LCARS_UID`, sudoer,
-#     `authorized_keys` s'il y en a une. C'etait le §1 de l'entrypoint.
+#     `authorized_keys` s'il y en a une.
 #   - `/etc/lcars/seat.uid` : ce que GUARD B lit pour refuser une fleet sous le siege.
-#   - les zones de FACE : `/home/projects`, `.ops`, `.workshop` (2775 root:fleet) — §1bis.
-#   - la SOURCE et le corpus ops, si l'appelant les nomme (`LCARS_SOURCE_REMOTE`) — §1ter.
-#   - les cles d'hote SSH, PERSISTANTES dans le volume `/home` — §2.
-#   - le LAYOUT du volume : ce que `25-directories` et `26-store` posent côté poste, posé ici
-#     en substrat docker — les repertoires de `/opt/lcars/var`, du magasin, de `/run/lcars`, la
+#   - les zones de FACE : `/home/projects`, `.ops`, `.workshop` (2775 root:fleet).
+#   - la SOURCE et le corpus ops, si l'appelant les nomme (`LCARS_SOURCE_REMOTE`).
+#   - les cles d'hote SSH, PERSISTANTES dans le volume `/home`.
+#   - `forge.url` du repertoire des jetons, depuis `FORGE_BASE_URL` : l'adresse qu'une session ssh
+#     du siege lit, puisqu'elle n'herite pas de l'environnement du service.
+#   - le LAYOUT du volume : ce que `25-directories` pose dans l'image et sur un poste, repose ici
+#     sur les volumes du conteneur — les repertoires de `/opt/lcars/var`, du magasin, de `/run/lcars`, la
 #     skill du siege, `pilot.assignee`. Les memes chemins, modes et proprietaires que la table de
 #     l'installeur declare (`deploy/system.manifest`, substrat `any`) — par CONVENTION, pas par
 #     lecture : c'est le contrat entre les deux rails, et `verify` le mesure au build.
 #
-# CE QU'IL NE FAIT PAS : les gestes de FORGE (jetons, cache des catalogues, branche ops, client
+# CE QU'IL NE FAIT PAS : les gestes de FORGE (jetons, cache des catalogues, depot du systeme, client
 # OAuth2) — ce sont `forge.d/` et le minteur, joues par le boot APRES ce geste ; les humains — c'est
 # le convergeur ; les services — c'est le boot.
 #
 # VERDICT : le protocole des modules. `apply` rend 0 converge, 2 drift residuel, 1 echec ; `secrets`
 # et `store` rejouent une seule de ses parts (l'import des secrets, le magasin) avec le meme verdict.
-# `seat` seul resout et enregistre le siege, ecrit `/run/lcars-seat.login`, et rend 3 quand le conteneur
+# `seat` seul resout et enregistre le siege, ecrit `/run/lcars-seat.login`, et rend 4 quand le conteneur
 # n'a rien pour le determiner — l'etat « en attente de configuration ».
 
 set -euo pipefail
 : "${LCARS_MODULE_TAG:=container-init}"
+# L'adresse de la forge TELLE QUE L'ENVIRONNEMENT LA DONNE, lue AVANT le protocole : celui-ci la
+# complete depuis `forge.url`, le fichier que `forge_url_file` pose.
+FORGE_URL_ENV="${FORGE_BASE_URL:-}"
 # shellcheck source=../lib/module-protocol.sh
 . "${LCARS_MODULE_PROTOCOL:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/module-protocol.sh}"
 
 LCARS_UID="${LCARS_UID:-1000}"
 SEAT_UID_FILE="${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid}"
 SEAT_LOGIN_FILE="${LCARS_SEAT_LOGIN_FILE:-/run/lcars-seat.login}"
-UID_MAP_FILE="${LCARS_UID_MAP_FILE:-$LCARS_PRIVATE_DIR/forge-uid.map}"
+UID_MAP_FILE="$LCARS_UID_MAP_FILE"
 HOST_KEYS_DIR="${LCARS_HOST_KEYS_DIR:-/home/.lcars-container/ssh}"
 STORE_ROOT="${LCARS_STORE_ROOT:-}"
 SKILL_SRC="${LCARS_ADMIRAL_SKILLS_SRC:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/admiral/skills}"
@@ -89,8 +89,13 @@ seat_resolve() { # -> SEAT_LOGIN pose ; rc 0 resolu · 3 indeterminable · 1 div
     return 3
   fi
   seat_record "$SEAT_LOGIN" "$LCARS_UID" || p_warn "siege : nom NON enregistre dans $UID_MAP_FILE — le boot suivant le re-derivera"
-  mkdir -p "$(dirname "$SEAT_LOGIN_FILE")" 2>/dev/null || true
-  printf '%s\n' "$SEAT_LOGIN" > "$SEAT_LOGIN_FILE" && chmod 0644 "$SEAT_LOGIN_FILE"
+  # Le nom du siege est lu par le boot juste apres : un echec d'ecriture ici se COMPTE, il ne se
+  # laisse pas rattraper trois etapes plus loin par un « incoherent » qui ne dit pas d'ou il vient.
+  if mkdir -p "$(dirname "$SEAT_LOGIN_FILE")" 2>/dev/null \
+     && printf '%s\n' "$SEAT_LOGIN" > "$SEAT_LOGIN_FILE" && chmod 0644 "$SEAT_LOGIN_FILE"; then
+    return 0
+  fi
+  p_fail "$SEAT_LOGIN_FILE NON pose — le boot ne saura pas sous quel nom jouer les gestes de forge"
   return 0
 }
 seat_uid_file() {
@@ -106,10 +111,10 @@ seat_create() {
     useradd -m -u "$LCARS_UID" -s /bin/bash "$SEAT_LOGIN" || { p_fail "siege : useradd $SEAT_LOGIN (uid $LCARS_UID) refuse"; return 1; }
     LCARS_CHANGED=$((LCARS_CHANGED + 1)); p_chg "sysadmin $SEAT_LOGIN cree (uid $LCARS_UID)"
   fi
-  if getent group sudo >/dev/null 2>&1 && ! id -nG "$SEAT_LOGIN" | tr ' ' '\n' | grep -qx sudo; then
+  if getent group sudo >/dev/null 2>&1 && [[ " $(id -nG "$SEAT_LOGIN" 2>/dev/null) " != *" sudo "* ]]; then
     usermod -aG sudo "$SEAT_LOGIN" && p_chg "$SEAT_LOGIN ∈ sudo" || p_warn "« $SEAT_LOGIN » n'a PAS ete ajoute au groupe sudo — il n'aura pas d'elevation"
   fi
-  if ! id -nG "$SEAT_LOGIN" | tr ' ' '\n' | grep -qx "$LCARS_FLEET_GROUP"; then
+  if [[ " $(id -nG "$SEAT_LOGIN" 2>/dev/null) " != *" $LCARS_FLEET_GROUP "* ]]; then
     usermod -aG "$LCARS_FLEET_GROUP" "$SEAT_LOGIN" && p_chg "$SEAT_LOGIN ∈ $LCARS_FLEET_GROUP" || p_fail "$SEAT_LOGIN ∉ $LCARS_FLEET_GROUP"
   fi
   local home; home="$(getent passwd "$SEAT_LOGIN" | cut -d: -f6)"
@@ -138,7 +143,11 @@ faces() {
     || p_fail "zones de face NON posees"
 }
 source_trees() {
-  local src="${LCARS_SOURCE_DIR:-/home/projects/LCARS}" remote="${LCARS_SOURCE_REMOTE:-}" ref="${LCARS_SOURCE_REF:-}"
+  # ⚠ LA SOURCE EST LA FACE DE CODE D'UN PROJET, pas un arbre a cote (⚖ user 2026-09-16). Le nom
+  # vient de `Fleet.Layout.system_project/0` ; un mur bats tient ce defaut d'accord avec lui. Avant,
+  # cet arbre vivait sous `/home/projects/LCARS` et son depot s'appelait `<org>/lcars` : deux noms
+  # pour une chose, que rien ne tenait ensemble.
+  local src="${LCARS_SOURCE_DIR:-/home/projects/lcars-fleet}" remote="${LCARS_SOURCE_REMOTE:-}" ref="${LCARS_SOURCE_REF:-}"
   if [[ ! -d "$src/.git" && -n "$remote" ]]; then
     local -a args=(--depth 1); [[ -n "$ref" ]] && args+=(--branch "$ref")
     rm -rf "${src}.part"
@@ -187,22 +196,33 @@ host_keys() {
 # ─── LE LAYOUT DU VOLUME ───────────────────────────────────────────────────────────────────────
 # Les memes chemins, modes et proprietaires que `deploy/system.manifest` declare en substrat `any`
 # ou `docker` — c'est le contrat entre les deux rails ; `verify` le mesure au build de l'image.
+# UNE TABLE, ET UN SEUL `|| true`. Le protocole COMPTE les echecs (`p_fail`), mais ce module tourne
+# sous `set -e` : sans `|| true`, errexit emporte le module au premier dossier refuse, et c'est lui
+# qui decide a la place du compteur. La regle etait recopiee a chaque ligne — treize fois, et la
+# quatorzieme oubliee ne se serait vue qu'en production.
+layout_table() { # chemin mode proprietaire — les memes que deploy/system.manifest declare
+  printf '%s\n' \
+    "/opt/lcars/var 0755 root:root" \
+    "$LCARS_PRIVATE_DIR 0710 $LCARS_AUTHORITY_USER:$LCARS_FLEET_GROUP" \
+    "$LCARS_CATALOGUES_DIR 0750 $LCARS_AUTHORITY_USER:$LCARS_FLEET_GROUP" \
+    "$LCARS_CATALOGUES_WORK 0700 $LCARS_AUTHORITY_USER:$LCARS_AUTHORITY_USER" \
+    "/var/lib/lcars 0755 root:root" \
+    "/var/tmp/lcars 0755 root:root" \
+    "/var/tmp/lcars/toolchain-work 0700 root:root" \
+    "$LCARS_DEPOSIT_SPOOL 2750 $LCARS_SYSTEM_USER:$LCARS_AUTHORITY_USER" \
+    "/etc/lcars 0755 root:root" \
+    "/run/lcars 0755 root:root" \
+    "/run/lcars/toolchain 2775 root:$LCARS_FLEET_GROUP" \
+    "/run/lcars/authority 0750 $LCARS_AUTHORITY_USER:$LCARS_FLEET_GROUP" \
+    "/run/lcars/deposit 0750 $LCARS_AUTHORITY_USER:$LCARS_AUTHORITY_USER" \
+    "/run/lcars/privileged 0750 root:$LCARS_FLEET_GROUP" \
+    "/run/lock/lcars 0700 root:root"
+}
 layout() {
-  ensure_dir /opt/lcars/var                     0755 root:root || true
-  ensure_dir "$LCARS_PRIVATE_DIR"                 0710 "$LCARS_AUTHORITY_USER:$LCARS_FLEET_GROUP" || true
-  ensure_dir "$LCARS_CATALOGUES_DIR"             0750 "root:$LCARS_FLEET_GROUP" || true
-  ensure_dir "${LCARS_CATALOGUES_WORK:-/opt/lcars/var/tofu}" 0700 "$LCARS_AUTHORITY_USER:$LCARS_AUTHORITY_USER" || true
-  ensure_dir /var/lib/lcars                     0755 root:root || true
-  ensure_dir /var/tmp/lcars                     0755 root:root || true
-  ensure_dir /var/tmp/lcars/toolchain-work      0700 root:root || true
-  ensure_dir "${LCARS_DEPOSIT_SPOOL:-/var/tmp/lcars/deposit}" 2750 "${LCARS_DECK_USER:-lcars-system}:${LCARS_AUTHORITY_GROUP:-$LCARS_AUTHORITY_USER}" || true
-  ensure_dir /etc/lcars                         0755 root:root || true
-  ensure_dir /run/lcars                         0755 root:root || true
-  ensure_dir /run/lcars/toolchain               2775 "root:$LCARS_FLEET_GROUP" || true
-  ensure_dir /run/lcars/authority               0750 "$LCARS_AUTHORITY_USER:$LCARS_FLEET_GROUP" || true
-  ensure_dir /run/lcars/deposit                 0750 "$LCARS_AUTHORITY_USER:${LCARS_AUTHORITY_GROUP:-$LCARS_AUTHORITY_USER}" || true
-  ensure_dir /run/lcars/privileged              0750 "root:$LCARS_FLEET_GROUP" || true
-  ensure_dir /run/lock/lcars                    0700 root:root || true
+  local path mode owner
+  while read -r path mode owner; do
+    ensure_dir "$path" "$mode" "$owner" || true   # p_fail a deja compte : errexit ne decide de rien
+  done < <(layout_table)
   store
 }
 # ─── LE MAGASIN ────────────────────────────────────────────────────────────────────────────────
@@ -230,8 +250,28 @@ store() {
   store_tree sysroots   0755 root:root
   store_tree state      2775 "root:$LCARS_FLEET_GROUP"
 }
-# La skill du siege et la projection du siege dans le magasin — ce que `45-sudoers-toolchain` posait
-# pour l'uid du sysadmin. `pilot.assignee` : a qui le pilote assigne ce que personne ne prend.
+# ─── L'ADRESSE DE LA FORGE, LISIBLE PAR LE SIEGE ───────────────────────────────────────────────
+# Une session ouverte par ssh n'herite pas de l'environnement du service : sshd ne transmet pas
+# `FORGE_BASE_URL`. Le skill du siege (`system-issues`) lit alors `forge.url` du repertoire des
+# jetons, le fichier que l'installeur pose sur un poste : 0644, dans un dossier 0710 que le groupe
+# fleet traverse, et le siege est dans fleet (`seat_create`). L'init le pose ici depuis
+# l'environnement. Sans adresse, il le retire : le protocole des gestes le lirait sinon comme
+# l'adresse courante, et une forge retiree de la configuration resterait visee.
+forge_url_file() {
+  local f="$LCARS_PRIVATE_DIR/forge.url"
+  if [[ -n "$FORGE_URL_ENV" ]]; then
+    write_atomic "$f" 0644 "root:$LCARS_FLEET_GROUP" <<<"$FORGE_URL_ENV" || true   # un echec est deja compte
+  elif [[ -e "$f" || -L "$f" ]]; then
+    if rm -f -- "$f"; then
+      p_chg "$f retiré — FORGE_BASE_URL n'est plus posé, aucune adresse de forge n'est gardée"
+    else
+      p_fail "$f NON retiré — les gestes de forge viseraient encore l'adresse qu'il porte"
+    fi
+  fi
+  return 0
+}
+
+# `pilot.assignee` : a qui le pilote assigne ce que personne ne prend.
 seat_extras() {
   local home; home="$(getent passwd "$SEAT_LOGIN" | cut -d: -f6)"
   if [[ -d "$SKILL_SRC/system-issues" && -n "$home" && -d "$home" ]]; then
@@ -251,8 +291,15 @@ seat_extras() {
 
 cmd_seat() {
   local rc=0; seat_resolve || rc=$?
-  [[ "$rc" -eq 0 ]] && seat_uid_file
-  exit "$rc"
+  # 3 appartient a la garde du protocole (mort avant verdict) : l'attente de configuration, qui est
+  # un etat de ce module, sort en 4 — le meme code que l'apply rend pour le meme etat.
+  LCARS_VERDICT_RENDERED=1
+  [[ "$rc" -ne 3 ]] || exit 4
+  [[ "$rc" -eq 0 ]] || exit "$rc"
+  seat_uid_file
+  # ET C'EST LE COMPTEUR QUI CONCLUT : un siege resolu dont le NOM ou l'UID n'a pas pu etre publie
+  # sortait en 0, et le boot enchainait sur des fichiers qui n'existent pas.
+  verdict_apply
 }
 # ⚖ user 2026-09-04 (Q1) : « container config » pose les secrets COTE HOTE ; le compose les monte sous
 # /run/secrets ; l'instance les IMPORTE dans son repertoire prive au boot — une fois, et a nouveau
@@ -293,7 +340,10 @@ cmd_apply() {
   local rc=0; seat_resolve || rc=$?
   case "$rc" in
     0) : ;;
-    3) exit 3 ;;
+    # L'ATTENTE DE CONFIGURATION EST UN ETAT DE CE MODULE, PAS UN VERDICT DU PROTOCOLE, et elle a
+    # son code a elle : 3 appartient a la garde (mort avant verdict), et les confondre ferait dormir
+    # le conteneur sur un init qui a plante. Le verdict se marque : la garde n'a rien a rattraper.
+    3) LCARS_VERDICT_RENDERED=1; exit 4 ;;
     *) verdict_apply ;;
   esac
   seat_uid_file
@@ -302,6 +352,7 @@ cmd_apply() {
   source_trees
   host_keys
   layout
+  forge_url_file
   seat_extras
   verdict_apply
 }

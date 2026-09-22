@@ -59,7 +59,7 @@ defmodule Fleet.Spawner.Pod.Egress do
 
   defp provision_socket(pod_id, cap_profile, launcher_path, path) do
     with :ok <- File.mkdir_p(Path.dirname(path)) do
-      case start(path, warn_if_open(allowlist(cap_profile, launcher_path), cap_profile),
+      case start(path, note_policy(allowlist(cap_profile, launcher_path), cap_profile),
              pod_id: pod_id
            ) do
         {:ok, listen} ->
@@ -72,9 +72,13 @@ defmodule Fleet.Spawner.Pod.Egress do
     end
   end
 
-  # Record the role’s open policy explicitly; lack of blocked-host logs does not explain it.
-  defp warn_if_open(:open, cap_profile) do
-    Logger.warning(
+  # ⚠ INFO, NOT WARNING, AND THAT IS THE POINT (⚖ user 2026-09-17): every role now declares
+  # `network: open`. A warning per pod would fire on every spawn, for a decision that was taken —
+  # and a line that always fires stops being read, taking the lines that matter with it. This is a
+  # lifecycle fact: the policy this pod runs under, recorded because the absence of blocked-host
+  # logs does not explain itself. The day a role is closed again, ITS line changes here.
+  defp note_policy(:open, cap_profile) do
+    Logger.info(
       "Egress: role #{CapProfile.name(cap_profile)} runs with an OPEN allowlist (`network: open`) " <>
         "— every host is reachable. The pod is still sealed and still leaves through this proxy; " <>
         "what is gone is the host wall."
@@ -83,7 +87,14 @@ defmodule Fleet.Spawner.Pod.Egress do
     :open
   end
 
-  defp warn_if_open(allowed, _cap_profile), do: allowed
+  defp note_policy(allowed, cap_profile) do
+    Logger.info(
+      "Egress: role #{CapProfile.name(cap_profile)} runs behind a host wall " <>
+        "(`network: #{CapProfile.network(cap_profile)}`, #{length(allowed)} host(s) allowed)."
+    )
+
+    allowed
+  end
 
   @doc """
   Closes the listener and attempts to remove its socket file/directory.
@@ -322,12 +333,28 @@ defmodule Fleet.Spawner.Pod.Egress do
     end
   end
 
+  # The host resolver appends its search list to a bare name: on a network whose DNS answers
+  # every name under that suffix, a host that does not exist resolves and the wall opens. An IP
+  # literal is used as is; a name the hosts file declares (/etc/hosts, a container's `extra_hosts`)
+  # connects to that address; any other name is looked up absolute (trailing dot).
+  defp upstream_address(host) do
+    name = String.to_charlist(host)
+
+    with {:error, _} <- :inet.parse_address(name),
+         {:error, _} <- :inet_hosts.gethostbyname(name, :inet) do
+      String.to_charlist(String.trim_trailing(host, ".") <> ".")
+    else
+      {:ok, {:hostent, _name, _aliases, :inet, 4, [ip | _]}} -> ip
+      {:ok, ip} -> ip
+    end
+  end
+
   defp serve(client, allowed, pod_id) do
     with {:ok, line} <- :gen_tcp.recv(client, 0, @connect_timeout_ms),
          {:ok, host, port} <- decide(line, allowed),
          {:ok, upstream} <-
            :gen_tcp.connect(
-             String.to_charlist(host),
+             upstream_address(host),
              port,
              [:binary, active: false],
              @connect_timeout_ms

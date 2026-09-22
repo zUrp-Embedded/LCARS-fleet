@@ -236,33 +236,48 @@ defmodule Mix.Tasks.Lcars.Contracts.BootArtifactCheckTest do
     end
   end
 
+  # DEUX MOITIES, ET UNE SEULE EST UN VERT CREUX : le module doit PORTER le refus, et le boot doit
+  # l'APPELER. Un module que personne ne branche laisse la machine ouverte ; un appel a une garde qui
+  # ne refuse rien est une decoration.
   describe "runtime.no_root_boot_guard — root resout ~/.gitea_token vers le jeton admin" do
-    test "la garde presente et ancree → vert" do
-      root =
-        arbre([
-          {"config/runtime.exs",
-           "if :os.getuid() == 0,\n" <>
-             "  do: raise(\"R-no-root-runtime: refusing to boot as root\")\n"}
-        ])
+    @garde {"lib/fleet/boot_guard.ex",
+            "defp judge(\"0\", _, _, _),\n" <>
+              "  do: {:error, \"R-no-root-runtime: refuses to run as root\"}\n"}
+    @cablage {"config/runtime.exs",
+              "case Fleet.BootGuard.verify() do\n  :ok -> :ok\n  {:error, m} -> raise m\nend\n"}
 
-      assert %{status: :pass, evidence: []} = Runtime.check_no_root_runtime_guard(root)
+    test "la garde presente ET appelee → vert" do
+      assert %{status: :pass, evidence: []} =
+               Runtime.check_no_root_runtime_guard(arbre([@garde, @cablage]))
     end
 
-    test "⚠ L'ANCRE EN COMMENTAIRE NE COMPTE PAS — la garde doit etre du CODE" do
+    test "la garde que personne n'appelle est nommee — le module seul ne protege rien" do
+      root = arbre([@garde, {"config/runtime.exs", "import Config\n"}])
+
+      assert %{status: :fail, evidence: [ev]} = Runtime.check_no_root_runtime_guard(root)
+      assert ev =~ "does not call"
+    end
+
+    test "⚠ L'ANCRE EN COMMENTAIRE NE COMPTE PAS — le refus doit etre du CODE" do
       root =
         arbre([
-          {"config/runtime.exs", "# R-no-root-runtime : refuser un boot en root\nimport Config\n"}
+          {"lib/fleet/boot_guard.ex",
+           "# R-no-root-runtime : refuser un boot en root\ndef verify, do: :ok\n"},
+          @cablage
         ])
 
       assert %{status: :fail, evidence: [ev]} = Runtime.check_no_root_runtime_guard(root)
       assert ev =~ "anti-root"
     end
 
-    test "l'ancre absente est nommee" do
+    test "les deux moities absentes sont nommees toutes les deux" do
       root = arbre([{"config/runtime.exs", "import Config\n"}])
 
-      assert %{status: :fail, evidence: [ev]} = Runtime.check_no_root_runtime_guard(root)
-      assert ev =~ "anti-root"
+      assert %{status: :fail, evidence: [module, boot]} =
+               Runtime.check_no_root_runtime_guard(root)
+
+      assert module =~ "anti-root"
+      assert boot =~ "does not call"
     end
   end
 

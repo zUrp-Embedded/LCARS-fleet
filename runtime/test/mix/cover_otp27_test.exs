@@ -7,7 +7,7 @@ defmodule Mix.CoverOtp27Test do
   refuse sous OTP 27 (erlang/otp#11524) ; sous OTP >= 28.4 cover l'accepte, le temoin rougit, et ce
   rouge DIT quoi faire : retirer `tool:` et `otp27_refused:` de `mix.exs`, supprimer
   `test/support/cover_otp27.ex` et ce fichier. Un temoin qui resterait vert sur un outil devenu
-  inutile laisserait douze modules hors mesure pour rien.
+  inutile laisserait ces modules hors mesure pour rien.
   """
   use ExUnit.Case, async: true
 

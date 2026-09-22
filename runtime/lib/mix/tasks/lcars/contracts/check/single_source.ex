@@ -16,7 +16,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
   import Mix.Tasks.Lcars.Contracts.Check.Support
 
   @doc """
-  Compares five named shell/Python mirrors with Fleet.Toolchain.branch/0.
+  Compares four named shell/Python mirrors with Fleet.Toolchain.branch/0.
 
   The executor and converger must agree on the branch whose head they request
   and accept. This check does not verify signatures, branch protection or head
@@ -29,8 +29,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
   @spec check_toolchain_branch_single_source(String.t()) :: Support.result()
   def check_toolchain_branch_single_source(root) do
     mirrors = [
-      "services/forge.d/ops-branch.sh",
-      "services/forge-gestures.sh",
+      # ⚠ `services/forge.d/ops-repo.sh` N'EST PLUS UN MIROIR, et c'est un progres, pas un oubli :
+      # depuis la phase 7 il n'ecrit plus ce nom, il DEMANDE la mesure au release, qui lit
+      # `Fleet.Toolchain.branch/0`. Une ecriture de moins ne se remplace pas par une ligne ici.
+      # The recipe lays the branch and its protection; the gesture only verifies.
+      "services/forge-recipe/ops.tf",
       "services/admiral/skills/system-issues/list.sh",
       # The converger's accepted branch and the executor's requested branch must agree.
       "bin/lcars-toolchain-converge",
@@ -205,21 +208,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
     end
   end
 
-  # ⚠ UNE DECLARATION DERIVEE EST UNE DECLARATION. provision-lib compose `$PROV_ROOT/var/catalogues`
-  # depuis une racine ecrite UNE fois ; on accepte la forme que la lib PORTE si elle se resout a la
-  # valeur de l'autorite — sinon on exige le litteral, et le miroir rougit en nommant le fichier.
-  defp lib_installed_form(root, installed) do
-    with {:ok, lib_src} <- File.read(Path.expand("../deploy/lib/provision-lib.sh", root)),
-         {raw, ^installed} <- Support.shell_default_resolved(lib_src, "PROV_CATALOGUES_DIR") do
-      raw
-    else
-      _ -> installed
-    end
-  end
-
   @doc """
   Compares Layout's shipped and installed catalogue roots with six named source
-  patterns in CLI, forge gestures, manifest and provisioning defaults.
+  patterns in CLI, forge gestures, manifest and installer constants.
 
   Shipped seeds and the installed cache serve different purposes; both creators
   and readers must agree. Scope is decided per mirror. This checks expected source
@@ -266,25 +257,25 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
       }
     else
       shipped = Path.join(platform, dirname)
-      lib_installed_form = lib_installed_form(root, installed)
 
+      # ⚖ Decision 3: the shell has ONE declaration of these two roots, `etc/facts.env`, and every
+      # script reads it (`services/lib/facts.sh`). The mirrors that used to sit in `bin/lcars` and
+      # `forge-gestures.sh` are gone — checking them here would pin a literal that no longer exists.
       mirrors = [
-        {"bin/lcars", ~r/CAT_SHIPPED="\$\{LCARS_CATALOGUES_SHIPPED:-#{Regex.escape(shipped)}\}"/,
-         "the CLI's shipped-catalogue default"},
-        {"bin/lcars", ~r/CAT_DIR="\$\{LCARS_CATALOGUES_DIR:-#{Regex.escape(installed)}\}"/,
-         "the CLI's installed-catalogue default"},
-        {"services/forge-gestures.sh", ~r/\$\{LCARS_DEMO_CATALOGUE:-#{Regex.escape(shipped)}\//,
+        {"etc/facts.env", ~r/^LCARS_CATALOGUES_SHIPPED=#{Regex.escape(shipped)}$/m,
+         "the machine fact the shell and the Python read (shipped)"},
+        {"etc/facts.env", ~r/^LCARS_CATALOGUES_DIR=#{Regex.escape(installed)}$/m,
+         "the machine fact the shell and the Python read (installed)"},
+        # A DERIVATION of the fact, not a copy of it: the gesture names the sub-tree, never the root.
+        {"services/forge-gestures.sh", ~r/\$\{LCARS_DEMO_CATALOGUE:-\$LCARS_CATALOGUES_SHIPPED\//,
          "the demo catalogue the forge gesture publishes"},
-        {"services/forge-gestures.sh", ~r/\$\{LCARS_CATALOGUES_DIR:-#{Regex.escape(installed)}\}/,
-         "the installed root the forge gesture reads"},
         # Le createur de l'arbre livre est unique depuis le 2026-09-11 : `62-runtime-helpers`
         # embarque `catalogues/` du kit sous la racine, sur un poste comme dans l'image. Le `COPY`
         # de l'image d'avant etait un jumeau ; il n'y a plus de second createur a tenir d'accord.
         {"../deploy/system.manifest", ~r/^dir\s+#{Regex.escape(installed)}\s/m,
          "the manifest row that creates the installed tree"},
-        {"../deploy/lib/provision-lib.sh",
-         ~r/:\s*"\$\{PROV_CATALOGUES_DIR:=#{Regex.escape(lib_installed_form)}\}"/,
-         "the provisioning default"}
+        {"../deploy/installer-constants.env",
+         ~r/^PROV_CATALOGUES_DIR=#{Regex.escape(installed)}$/m, "the installer constant"}
       ]
 
       {checked, skipped} =
@@ -327,8 +318,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
   The manifest confirms the agreed path through a dir row when deploy is present;
   it does not define the directory's semantic name.
 
-  Four holders are listed. A single substitution pass resolves provisioning
-  defaults; unknown variables remain literal. Missing/unreadable files are dropped
+  Three holders are listed, each read as a literal. Missing/unreadable files are dropped
   from the comparison, while readable files lacking their anchor fail. Fewer than
   two readable declarations and no broken anchors returns an explicit skip.
 
@@ -349,42 +339,31 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
     [
       {"lib/fleet/credentials/role_token.ex", ~r/@default_dir\s+"([^"]+)"\s*$/m,
        "the BEAM's role-token directory"},
-      {"../deploy/lib/provision-lib.sh", ~r/:\s*"\$\{PROV_TOKENS_DIR:=([^}]+)\}"/,
-       "the provisioning default"},
-      {"../deploy/accept", ~r/PRIVATE_DIR="\$\{LCARS_PRIVATE_DIR:-([^}]+)\}"/,
-       "the acceptance gate's default"},
-      {"services/lib/module-protocol.sh", ~r/:\s*"\$\{LCARS_PRIVATE_DIR:=([^}]+)\}"/,
-       "the product module protocol's default"}
+      {"../deploy/installer-constants.env", ~r/^PROV_TOKENS_DIR=(.+)$/m,
+       "the installer constant"},
+      # ⚖ Decision 3: the shell declares it ONCE, as a machine fact. `services/lib/facts.sh` is the
+      # only reader; the module protocol sources it and no longer writes a default of its own.
+      {"etc/facts.env", ~r/^LCARS_PRIVATE_DIR=(.+)$/m, "the machine fact the product reads"}
     ]
   end
 
-  # One-pass expansion handles derived provisioning defaults without interpreting shell.
-  defp prov_defaults(root) do
-    case File.read(Path.expand("../deploy/lib/provision-lib.sh", root)) do
-      {:ok, src} -> Support.shell_defaults(src)
-      _ -> %{}
-    end
-  end
-
   defp private_dir_declarations(root) do
-    defauts = prov_defaults(root)
-
     {in_scope, out} =
       Enum.split_with(private_dir_holders(), fn {rel, _, _} ->
         mirror_scope(rel, root) == :required
       end)
 
-    results = Enum.map(in_scope, &read_private_dir_holder(&1, root, defauts))
+    results = Enum.map(in_scope, &read_private_dir_holder(&1, root))
 
     {for({:ok, rel, what, v} <- results, do: {rel, what, v}),
      for({:unreadable, rel, what} <- results, do: {rel, "#{what}: declaration not readable"}),
      out |> Enum.map(&elem(&1, 0)) |> Enum.uniq()}
   end
 
-  defp read_private_dir_holder({rel, rx, what}, root, defauts) do
+  defp read_private_dir_holder({rel, rx, what}, root) do
     with {:ok, body} <- File.read(Path.expand(rel, root)),
          [_, v] <- Regex.run(rx, code_of(body)) do
-      {:ok, rel, what, Support.resolve_shell(defauts, v)}
+      {:ok, rel, what, v}
     else
       {:error, _} -> {:absent, rel, what}
       _ -> {:unreadable, rel, what}
@@ -517,23 +496,21 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
          ~r/variable\s+"system_account"\s*\{(?:(?!\}).)*?default\s*=/s,
          "carries a `default =` again — the name must arrive from roles.auto.tfvars.json, not from the recipe",
          :forbidden},
-        {"../deploy/lib/provision-lib.sh", ~r/:\s*"\$\{PROV_SYSTEM_ACCOUNT:=#{e}\}"/,
-         "the provisioning default (its token file derives from it)"},
+        # The INSTANCE module is a root module: nobody passes it the account, so it keeps a default
+        # — and that default is a second literal the `forge.tf` rule above never looked at. Held as
+        # a MIRROR rather than forbidden: it must EQUAL the authority, and say so when it stops.
+        {"services/forge-recipe/instance/accounts.tf",
+         ~r/variable\s+"system_account"\s*\{(?:(?!\}).)*?default\s*=\s*"#{e}"/s,
+         "the instance module's default"},
+        {"../deploy/installer-constants.env", ~r/^PROV_SYSTEM_ACCOUNT=#{e}$/m,
+         "the installer constant"},
         {"services/forge-recipe/provision-forge-charte.sh", ~r/"#{e}:[A-Za-z0-9_.-]+"/,
          "the avatar map key"},
-        {"services/human-converger.sh", ~r/LCARS_SYSTEM_ACCOUNT:-#{e}\}/,
-         "the human converger's fallback"},
-        {"services/forge-gestures.sh", ~r/LCARS_SYSTEM_ACCOUNT:-#{e}\}/,
-         "the forge gesture's fallback"},
-        {"services/provision-role-tokens.sh", ~r/LCARS_SYSTEM_ACCOUNT:-#{e}\}/,
-         "the token minter's fallback"},
-        {"services/admiral/skills/system-issues/list.sh", ~r/LCARS_SYSTEM_ACCOUNT:-#{e}\}/,
-         "the admiral skill's fallback"},
-        {"bin/lcars", ~r/FORGE_BOT_LOGIN:-#{e}\}/, "the CLI's push-account fallback"},
-        {"bin/publish-transform.sh", ~r/LCARS_SYSTEM_ACCOUNT:-#{e}\}@/,
-         "the publish rewrite's system email"},
-        {"config/runtime.exs", ~r/FORGE_BOT_LOGIN"\)\s*\|\|\s*"#{e}"/,
-         "the runtime's push-account fallback"}
+        # ⚖ Decision 3: SIX shell fallbacks used to be listed here — the converger, the forge
+        # gesture, the token minter, the admiral skill, the CLI and the publish rewrite. They read
+        # the machine fact now, so there is ONE declaration to hold instead of six to keep equal.
+        {"etc/facts.env", ~r/^LCARS_SYSTEM_ACCOUNT=#{e}$/m,
+         "the machine fact the shell, the Python and the Elixir read"}
       ]
 
       {checked, skipped} =
@@ -559,7 +536,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
             evidence: checked |> Enum.map(&elem(&1, 0)) |> Enum.uniq(),
             note:
               "#{inspect(expected)} declared by ForgeIdentity @system_name; #{length(checked)} " <>
-                "sites checked (tofu RECEIVES it, it no longer copies it)" <>
+                "sites checked (the recipe RECEIVES it; only the instance root module " <>
+                "defaults it, and that default is compared here)" <>
                 skipped_note(skipped_labels)
           }
 
@@ -779,6 +757,63 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
   end
 
   @doc """
+  Checks every per-human state directory in the corpus against Layout's `@state_dirname`.
+
+  ⚖ Phase 5. `/run/lcars` — the MACHINE's socket root — has been held since the runtime_root check;
+  its twin, the HUMAN's state directory, was held by nothing while the shell wrote it twenty-four
+  times (`$HOME/.lcars/run/tmux-sock`, `~/.lcars/fleet.env`, `$HOME/.lcars/forge.d`…). A second
+  name here means a launcher that writes a socket where the CLI does not look and the BEAM does
+  not listen — for one human, on one machine, and only once the fleet is started another way.
+
+  The scan reads `$HOME/<name>` and `~/<name>` and stops at the next slash, so
+  `$HOME/.lcars/run/api.sock` counts as `.lcars`. It does not resolve paths, does not inspect
+  dynamically assembled ones, and proves nothing about what a running machine creates.
+  """
+  @spec check_state_dir_single_source(String.t()) :: Support.result()
+  def check_state_dir_single_source(root) do
+    id = "layout.state_dir_single_source"
+
+    remediation =
+      "every per-human state path starts with `Fleet.Layout` `@state_dirname` — a second name is " <>
+        "a socket written where nobody listens, and the two sides only meet on a machine"
+
+    expected = layout_literal(root, "state_dirname")
+
+    if is_nil(expected) do
+      unreadable_authority(id, remediation, "lib/fleet/layout.ex", "@state_dirname")
+    else
+      # `$HOME/x` et `~/x` : les deux formes du meme chemin, tronquees au premier `/` suivant.
+      {vus, porteurs} =
+        scan_corpus_roots(
+          root,
+          ~r{(?:\$HOME/|~/)\.?[A-Za-z0-9_.-]+},
+          &String.replace(&1, ~r{^(?:\$HOME/|~/)}, "")
+        )
+
+      # `.lcars` seul est tenu ici ; les autres noms sous $HOME appartiennent a leur proprietaire
+      # (`.local`, `.claude`, `.config`…) et ce mur n'a rien a en dire.
+      intruses =
+        vus
+        |> Enum.filter(&String.contains?(&1, "lcars"))
+        |> Enum.reject(&(&1 == expected))
+        |> Enum.sort()
+
+      roots_verdict(id, remediation, %{
+        autorite_vue?: Enum.member?(vus, expected),
+        attendue: "occurrence of $HOME/#{expected} in the corpus",
+        intruses: intruses,
+        note_ok:
+          "every per-human LCARS path starts with #{inspect(expected)}, declared by " <>
+            "Fleet.Layout @state_dirname (#{MapSet.size(vus)} distinct name(s) under $HOME " <>
+            "across #{porteurs} files)",
+        note_ko:
+          "authority says #{inspect(expected)} — #{length(intruses)} other LCARS name(s) under " <>
+            "$HOME: " <> Enum.join(intruses, ", ")
+      })
+    end
+  end
+
+  @doc """
   Checks recognised /home/projects roots against Layout face_root attribute clauses,
   plus the explicitly exempt agents' work tree.
 
@@ -864,7 +899,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
   Repository and branch are separate parts of the executor/converger address;
   the branch check does not cover this value.
 
-  Only source defaults in forge-gestures.sh and privileged-executor.py are checked,
+  Only source defaults in the ops-repo gesture, the seat skill, the converger and the executor are checked,
   not effective environment values or the existence of the repository.
   """
   @spec check_ops_repo_single_source(String.t()) :: Support.result()
@@ -899,13 +934,25 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
         "default"
       )
     else
-      e = Regex.escape(expected)
+      # ⚖ Decision 3: NO copy freezes the whole address any more. Every mirror DERIVES the repo
+      # from the org fact (an org the installer renamed takes its repository along); only the
+      # repository half is a literal, and that half is a rule, not a fact.
+      repo_half = expected |> String.split("/", parts: 2) |> List.last() |> Regex.escape()
 
       mirrors = [
-        {"services/forge-gestures.sh", ~r/LCARS_OPS_REPO:-#{e}\}/,
-         "the forge gesture's ops-repo fallback"},
-        {"services/privileged-executor.py", ~r/os\.environ\.get\("LCARS_OPS_REPO",\s*"#{e}"\)/,
-         "the root executor's ops-repo fallback"}
+        {"services/forge.d/ops-repo.sh",
+         ~r/LCARS_OPS_REPO:=\$\{LCARS_FORGE_ORG\}\/#{repo_half}\}/,
+         "the ops-repo gesture's fallback (derived from the org)"},
+        # ⚖ Decision 3: these two derive from the org fact like the gesture does, instead of
+        # freezing the whole address — the org half is a fact, the repository half a rule.
+        {"services/admiral/skills/system-issues/list.sh",
+         ~r/LCARS_OPS_REPO:-\$LCARS_FORGE_ORG\/#{repo_half}\}/,
+         "the seat skill's fallback (derived from the org)"},
+        {"bin/lcars-toolchain-converge", ~r/LCARS_OPS_REPO:-\$LCARS_FORGE_ORG\/#{repo_half}\}/,
+         "the toolchain converger's fallback (derived from the org)"},
+        {"services/privileged-executor.py",
+         ~r/"LCARS_OPS_REPO",\s*"%s\/#{repo_half}"\s*%\s*lcars_facts\.get\("LCARS_FORGE_ORG"\)/s,
+         "the root executor's ops-repo fallback (derived from the org fact)"}
       ]
 
       {checked, skipped} =
@@ -1020,12 +1067,14 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
     }
   end
 
+  # ⚠ `:skip`, PAS `:pass`. Ce mur n'a RIEN mesure : l'arbre qu'il lit n'est pas dans cet artefact.
+  # Rendre `pass` faisait dire « verifie » a une ligne qui disait « pas verifie » dans sa note.
   @spec out_of_scope(String.t(), String.t(), [String.t()]) :: Support.result()
   defp out_of_scope(id, sujet, absents) do
     %{
       id: id,
       remediation: "—",
-      status: :pass,
+      status: :skip,
       evidence: [],
       note:
         "NOT CHECKED here — #{sujet} in this artifact (runtime-only context)" <>
@@ -1097,5 +1146,402 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
         nil
     end)
     |> Enum.map(fn {f, l} -> "#{f}:#{l}" end)
+  end
+
+  # ⚠ LE MODE D'UNE FACE EST UN FAIT DE `Fleet.Layout`, PAS UN LITTERAL QU'ON RECOPIE. Trois chemins
+  # batissent une face d'ecriture — creation, adoption, import — et deux d'entre eux ne posaient
+  # aucun mode : le repertoire naissait sous l'umask du BEAM, l'atelier cessait d'etre ecrivable par
+  # le groupe, et un depot humain s'y refusait sans qu'aucun message ne le dise (mesure du
+  # 2026-09-16 sur LCARS-beta). Un littéral recopié est la forme que reprend ce défaut.
+  @writer_face_mode_rx ~r/0o2[0-7]{3}/
+  @face_mode_declaration "lib/fleet/layout.ex"
+
+  @doc """
+  Checks the setgid modes of the writer faces are declared ONCE, in `Fleet.Layout`.
+
+  Scans the Elixir sources of this tree for a setgid directory literal outside that declaration,
+  comments stripped. It does not check the values against the deployment manifest: the manifest
+  declares the face ROOTS, which `layout.face_roots_provisioned` covers, not a project's face
+  directory inside them.
+  """
+  @spec check_face_mode_single_source(String.t()) :: Support.result()
+  def check_face_mode_single_source(root) do
+    id = "layout.face_mode_single_source"
+
+    declares =
+      case File.read(Path.join(root, @face_mode_declaration)) do
+        {:ok, code} ->
+          case Regex.run(~r/@writer_face_modes\s+%\{[^}]*\}/, code) do
+            [map] -> length(Regex.scan(@writer_face_mode_rx, map))
+            nil -> 0
+          end
+
+        {:error, _} ->
+          0
+      end
+
+    sources =
+      root
+      |> Path.join("lib/**/*.ex")
+      |> Path.wildcard()
+      |> Enum.reject(fn path ->
+        rel = Path.relative_to(path, root)
+        rel == @face_mode_declaration or Support.checker_source?(rel)
+      end)
+
+    copies =
+      for path <- sources,
+          {line, texte} <- grep_lines(path, @writer_face_mode_rx),
+          Regex.match?(@writer_face_mode_rx, strip_comment(texte)),
+          do: "#{Path.relative_to(path, root)}:#{line}"
+
+    Support.measured_verdict(id, %{
+      remediation:
+        "read the mode from `Fleet.Layout.writer_face_mode/1` — a face mode written twice is a " <>
+          "face that stops being group-writable the day one copy moves, in silence",
+      broken: face_mode_broken(declares, sources),
+      findings: Enum.sort(copies),
+      note:
+        "#{declares} writer face mode(s) declared in #{@face_mode_declaration}, " <>
+          "#{length(sources)} other source(s) scanned"
+    })
+  end
+
+  # Two guards, because either half alone would pass on an empty measure: a declaration that no
+  # longer reads as literals, and a corpus this check never opened.
+  defp face_mode_broken(declares, sources) do
+    cond do
+      declares < 2 -> "#{@face_mode_declaration} no longer declares two writer face modes"
+      Support.measured_nothing?(sources) -> "no Elixir source scanned under lib/"
+      true -> nil
+    end
+  end
+
+  # ── Les faits de la machine (⚖ decision 3) ──────────────────────────────────────────────────
+  @facts_file "etc/facts.env"
+  # Les deux lecteurs du fichier — le seul du shell, le seul du Python. Ils le NOMMENT, forcement.
+  @facts_readers ~w(services/lib/facts.sh services/lcars_facts.py lib/fleet/facts.ex)
+  @facts_scan ~w(.sh .bash .py .ex .exs .env)
+  # Les repertoires ou vit du code qui pourrait rejouer un defaut. `priv/` porte du catalogue (de la
+  # prose de SP, pas du code de la machine) et reste dehors, comme partout ailleurs dans ce module.
+  @facts_trees ~w(bin services config lib ../deploy)
+
+  @doc """
+  Refuses a SECOND default for any machine fact declared in `etc/facts.env`.
+
+  A fact is written once and read by four languages. A reader that writes `${LCARS_X:-literal}`,
+  `System.get_env("LCARS_X", literal)` or `environ.get("LCARS_X", literal)` reintroduces the
+  duplicate the file exists to remove, and the copy that drifts is always the one nobody rereads.
+
+  Derivations are allowed and unaffected: `${LCARS_OPS_REPO:-$LCARS_FORGE_ORG/_ops}` names a RULE,
+  not a fact, and its own wall holds it. Only a literal default for a DECLARED fact key is refused.
+
+  Scope is the shell, Python and Elixir of the product plus the installer tree; `priv/` (catalogue
+  prose) and the checkers themselves are out. An absent installer tree is named, not silently passed.
+  """
+  @spec check_facts_single_source(String.t()) :: Support.result()
+  def check_facts_single_source(root) do
+    id = "facts.single_source"
+
+    remediation =
+      "read the fact instead of re-defaulting it: source `services/lib/facts.sh` (shell), " <>
+        "`lcars_facts.get` (Python) or `Fleet.Facts.get!` (Elixir). A fact written twice is a " <>
+        "fact that splits the day one copy moves, and nothing says so"
+
+    keys = facts_keys(root)
+    sources = facts_corpus(root)
+    # Compile once, read each file once: sixteen facts times four hundred files is six thousand
+    # reads of the same bytes, and this check runs on every gate.
+    patterns = Enum.map(keys, &{&1, facts_default_rx(&1)})
+    copies = Enum.flat_map(sources, &facts_copies(&1, root, patterns))
+
+    Support.measured_verdict(id, %{
+      remediation: remediation,
+      broken: facts_broken(keys, sources),
+      findings: copies |> Enum.uniq() |> Enum.sort(),
+      note:
+        "#{length(keys)} machine fact(s) declared in #{@facts_file}, " <>
+          "#{length(sources)} source(s) scanned in #{Enum.join(@facts_trees, ", ")}"
+    })
+  end
+
+  # A NUL-bearing file is not source: reading it as text would scan a provider binary line by line.
+  defp facts_copies(path, root, patterns) do
+    case File.read(path) do
+      {:ok, body} ->
+        if String.contains?(body, <<0>>),
+          do: [],
+          else: facts_scan(body, facts_rel(path, root), patterns)
+
+      _ ->
+        []
+    end
+  end
+
+  defp facts_scan(body, rel, patterns) do
+    body
+    |> String.split("\n")
+    |> Enum.with_index(1)
+    |> Enum.flat_map(fn {texte, line} ->
+      code = strip_comment(texte)
+
+      for {key, rx} <- patterns, Regex.match?(rx, code), do: "#{rel}:#{line} (#{key})"
+    end)
+  end
+
+  # ⚠ C'EST LE `source` QU'ON CHERCHE, PAS LE NOM DU FICHIER. Premiere ecriture de ce mur : il
+  # cherchait la chaine « facts.sh » n'importe ou dans le corps. Commenter la ligne
+  # `. "$FACTS_SH"` le laissait VERT — l'affectation `FACTS_SH="…/facts.sh"` juste au-dessus
+  # portait encore la chaine. Un mur qui cherche un nom mesure une intention ; celui-ci mesure un
+  # GESTE : une ligne de code qui SOURCE, dont la cible mene aux faits.
+  # ⚠ DEUX FORMES, ET LA SECONDE N'EST PAS UNE FACILITE : le `HEALTHCHECK` du Dockerfile source
+  # `/opt/lcars/services/lib/facts.sh` EN DUR, parce qu'il n'a ni voisin ni variable — il tourne
+  # dans l'image, ou le chemin du produit EST le fait. Ne reconnaitre que la variable rendait ce
+  # fichier « debranche » alors qu'il est le plus litteralement branche du depot.
+  # ⚠ ET L'ANCRE N'EST PLUS LE DEBUT DE LIGNE : ce meme `source` vit au milieu d'un `CMD` JSON, donc
+  # derriere un guillemet. Un `source` COMMENTE ne repasse pas pour autant — `facts_cable?` retire
+  # les commentaires AVANT d'appliquer ce motif, et c'est la que la mesure du debranchement tient.
+  @facts_source_shell ~r/(?:^|[;&|(]|["']\s*)\s*(?:\.|source)\s+["']?(?:\$\{?(?:LCARS_FACTS_SH|FACTS_SH|LCARS_MODULE_PROTOCOL|MODULE_PROTOCOL|LCARS_HUMAN_PROTOCOL|HUMAN_PROTOCOL)\b|[^\s"';|&]*\/(?:facts|module-protocol|human-protocol)\.sh\b)/m
+  @facts_cablage %{python: ["lcars_facts"], elixir: ["Fleet.Facts"]}
+
+  @doc """
+  Refuses a file that NAMES a machine fact without being WIRED to a reader of `etc/facts.env`.
+
+  ⚖ Phase 5, la moitie manquante. Les murs de cette famille tiennent tous la meme chose : que la
+  VALEUR d'un fait ne soit ecrite qu'une fois. Aucun ne tenait son APPROVISIONNEMENT. Mesure du
+  2026-09-19 : commenter le `. "$FACTS_SH"` de `services/console.sh` laisse les 80 murs verts, et
+  le lanceur pose son repertoire de socket SANS GROUPE — parce que `$LCARS_CONSOLE_GROUP` vaut la
+  chaine vide. Avant cette passe, le fichier portait `${LCARS_CONSOLE_GROUP:-lcars-console}` : une
+  propriete verifiable statiquement, remplacee par une propriete que rien ne mesurait.
+
+  Etre cable, c'est porter l'un des signes de son langage : sourcer `lib/facts.sh`, ou sourcer un
+  protocole qui le source (`LCARS_MODULE_PROTOCOL`, `LCARS_HUMAN_PROTOCOL`), ou importer
+  `lcars_facts`, ou appeler `Fleet.Facts`. C'est une verification de FORME : elle ne prouve pas que
+  le fichier source est lisible a l'execution, ni que la valeur arrive.
+  """
+  @spec check_facts_readers_wired(String.t()) :: Support.result()
+  def check_facts_readers_wired(root) do
+    id = "facts.readers_wired"
+
+    remediation =
+      "source le lecteur des faits (`services/lib/facts.sh`, ou un protocole qui le source ; " <>
+        "`lcars_facts` en Python, `Fleet.Facts` en Elixir) — un fichier qui NOMME un fait sans " <>
+        "etre branche le lit VIDE, et rien d'autre ne le dit"
+
+    keys = facts_keys(root)
+    sources = facts_corpus(root)
+
+    debranches =
+      for path <- sources,
+          langue = facts_langue(path),
+          langue != nil,
+          body = facts_body(path),
+          body != nil,
+          facts_nomme?(body, keys, langue),
+          not facts_cable?(body, langue),
+          do: facts_rel(path, root)
+
+    Support.measured_verdict(id, %{
+      remediation: remediation,
+      broken: facts_broken(keys, sources),
+      findings: debranches |> Enum.uniq() |> Enum.sort(),
+      note:
+        "#{length(keys)} machine fact(s) declared in #{@facts_file}, " <>
+          "#{length(sources)} source(s) scanned in #{Enum.join(@facts_trees, ", ")}"
+    })
+  end
+
+  @doc """
+  Refuses a shell variable that bears a machine fact's NAME and receives a LITERAL.
+
+  ⚖ Phase 5, the other half of `facts.single_source`. That wall keys on the fact's name inside an
+  expansion — `${LCARS_X:-literal}` — so it sees a second DEFAULT. It cannot see a second VALUE
+  under a shortened name: `SYSTEM_ACCOUNT="system_starfleet_v2"` names no fact and defaults nothing.
+  Measured 2026-09-19: that exact line left all eighty walls green, and the gesture then spoke to
+  the forge as an account nobody declared.
+
+  The rule is the product's own idiom turned into a property: every alias of a fact in this tree
+  reads `NAME="$LCARS_NAME"`. A right-hand side with no expansion in it is a COPY of the value, and
+  a copy is what the facts file exists to remove.
+
+  Scope is the shell of the product and the installer, tests excluded — a bench decor sets literals
+  on purpose, and that is what a decor is for. Array literals are skipped: the installer's
+  translation tables (`PROV_PRODUCT_NAMES`, `PROV_FACT_MIRRORS`) carry `LCARS_X=PROV_Y` pairs, which
+  are NAMES facing each other, not a value written twice. This is a check of FORM: it does not
+  prove the alias is read, nor that the fact it names carries what the caller expects.
+  """
+  @spec check_facts_no_literal_alias(String.t()) :: Support.result()
+  def check_facts_no_literal_alias(root) do
+    id = "facts.no_literal_alias"
+
+    remediation =
+      "assign the alias FROM the fact — `NAME=\"$LCARS_NAME\"` — after sourcing " <>
+        "`services/lib/facts.sh`. A literal under a fact's name is a second value that no wall " <>
+        "compares, and the day the fact moves, this copy stays"
+
+    keys = facts_keys(root)
+    sources = Enum.reject(facts_corpus(root), &facts_decor?(&1, root))
+    patterns = Enum.map(keys, &{&1, facts_alias_rx(&1)})
+
+    copies =
+      for path <- sources,
+          facts_langue(path) == :shell,
+          body = facts_body(path),
+          body != nil,
+          finding <- facts_alias_scan(body, facts_rel(path, root), patterns),
+          do: finding
+
+    Support.measured_verdict(id, %{
+      remediation: remediation,
+      broken: facts_broken(keys, sources),
+      findings: copies |> Enum.uniq() |> Enum.sort(),
+      note:
+        "#{length(keys)} machine fact(s) declared in #{@facts_file}, " <>
+          "#{length(sources)} non-test source(s) scanned in #{Enum.join(@facts_trees, ", ")}"
+    })
+  end
+
+  # `LCARS_X=…` with an unprefixed twin `X=…`: both are the fact's name, and both must read it.
+  defp facts_alias_rx(key) do
+    court = String.replace_prefix(key, "LCARS_", "")
+
+    Regex.compile!(
+      "^\\s*(?:export|local|declare|readonly|typeset)?\\s*(?:#{Regex.escape(key)}|" <>
+        "#{Regex.escape(court)})=(.*)$"
+    )
+  end
+
+  # An array literal opens on `NAME=(` and closes on a lone `)`. Its rows are name→name pairs, not
+  # assignments; scanning them would report the installer's translation tables as copies.
+  defp facts_alias_scan(body, rel, patterns) do
+    body
+    |> String.split("\n")
+    |> Enum.with_index(1)
+    |> Enum.reduce({false, []}, fn {texte, line}, {dans_tableau?, acc} ->
+      code = strip_comment(texte)
+
+      cond do
+        dans_tableau? -> {not Regex.match?(~r/^\s*\)\s*$/, code), acc}
+        Regex.match?(~r/^\s*[A-Za-z_][A-Za-z0-9_]*=\(\s*$/, code) -> {true, acc}
+        true -> {false, acc ++ facts_alias_hits(code, rel, line, patterns)}
+      end
+    end)
+    |> elem(1)
+  end
+
+  defp facts_alias_hits(code, rel, line, patterns) do
+    for {key, rx} <- patterns,
+        [_, valeur] <- [Regex.run(rx, code)],
+        facts_litteral?(valeur),
+        do: "#{rel}:#{line} (#{key})"
+  end
+
+  # A right-hand side with an expansion in it READS something; only one with none is a copy.
+  # An empty one declares nothing, and `$(…)`, `${…}` and `"$X"` all carry the `$`.
+  defp facts_litteral?(valeur) do
+    trimmed = String.trim(valeur)
+    trimmed != "" and not String.contains?(trimmed, "$")
+  end
+
+  # A bench decor sets literals ON PURPOSE — that is what a decor is. Refusing them would make the
+  # wall unplayable, and the witnesses are not the machine.
+  defp facts_decor?(path, root) do
+    path
+    |> facts_rel(root)
+    |> Path.split()
+    |> Enum.any?(&(&1 in ["test", "tests"]))
+  end
+
+  defp facts_cable?(body, :shell) do
+    body
+    |> String.split("\n")
+    |> Enum.map(&strip_comment/1)
+    |> Enum.any?(&Regex.match?(@facts_source_shell, &1))
+  end
+
+  defp facts_cable?(body, langue),
+    do: Enum.any?(@facts_cablage[langue], &String.contains?(body, &1))
+
+  defp facts_langue(path) do
+    case Path.extname(path) do
+      ".py" -> :python
+      ".ex" -> :elixir
+      ".exs" -> :elixir
+      ".sh" -> :shell
+      ".bash" -> :shell
+      # `bin/lcars`, `bin/fleet` : sans extension, et ce sont des scripts shell.
+      "" -> :shell
+      _ -> nil
+    end
+  end
+
+  defp facts_body(path) do
+    case File.read(path) do
+      {:ok, body} -> if String.contains?(body, <<0>>), do: nil, else: body
+      _ -> nil
+    end
+  end
+
+  # Le shell NOMME un fait par une expansion ; le Python et l'Elixir par une chaine litterale.
+  defp facts_nomme?(body, keys, :shell) do
+    code = Enum.map_join(String.split(body, "\n"), "\n", &strip_comment/1)
+    Enum.any?(keys, &Regex.match?(Regex.compile!("\\$\\{?#{Regex.escape(&1)}\\b"), code))
+  end
+
+  defp facts_nomme?(body, keys, _langue) do
+    code = Enum.map_join(String.split(body, "\n"), "\n", &strip_comment/1)
+    Enum.any?(keys, &String.contains?(code, "\"#{&1}\""))
+  end
+
+  defp facts_keys(root) do
+    case File.read(Path.join(root, @facts_file)) do
+      {:ok, body} ->
+        ~r/^([A-Z][A-Z0-9_]*)=/m
+        |> Regex.scan(body)
+        |> Enum.map(&List.last/1)
+
+      _ ->
+        []
+    end
+  end
+
+  defp facts_corpus(root) do
+    @facts_trees
+    |> Enum.map(&Path.expand(&1, root))
+    |> Enum.filter(&File.dir?/1)
+    |> Enum.flat_map(&Support.corpus_files/1)
+    |> Enum.filter(&(Path.extname(&1) in @facts_scan or Path.extname(&1) == ""))
+    |> Enum.reject(fn path ->
+      rel = Path.relative_to(path, root)
+      rel in @facts_readers or Support.checker_source?(rel) or not File.regular?(path)
+    end)
+    |> Enum.sort()
+  end
+
+  # Le voisin s'écrit `../deploy/x`, comme partout ailleurs dans ce module : une preuve absolue
+  # porte le chemin de la MACHINE qui a joué le mur, que personne ne peut retrouver ailleurs.
+  defp facts_rel(path, root) do
+    parent = Path.dirname(root)
+
+    cond do
+      String.starts_with?(path, root <> "/") -> Path.relative_to(path, root)
+      String.starts_with?(path, parent <> "/") -> Path.join("..", Path.relative_to(path, parent))
+      true -> path
+    end
+  end
+
+  # `${K:-lit}` / `${K:=lit}` in shell, `get_env("K", lit)` in Elixir, `get("K", "lit")` in Python.
+  # A default that is itself an expansion (`${K:-$OTHER}`) is a derivation and stays legal.
+  defp facts_default_rx(key) do
+    k = Regex.escape(key)
+    Regex.compile!("\\$\\{#{k}:[-=][^$}][^}]*\\}|[gG]et(?:_env)?\\(\\s*[\"']#{k}[\"']\\s*,")
+  end
+
+  defp facts_broken(keys, sources) do
+    cond do
+      Support.measured_nothing?(keys) -> "#{@facts_file} declares no machine fact"
+      Support.measured_nothing?(sources) -> "no source scanned for a second default"
+      true -> nil
+    end
   end
 end

@@ -86,24 +86,22 @@ fi
 
 # la liste vient d'un find, pas de git : la porte se joue aussi sur un kit détaré sans .git ; les
 # entrées sans extension se reconnaissent à leur shebang, et chaque .bats a le sien (vérifié ci-dessus)
-mapfile -t SHELL_FILES < <(
-  find "$HERE" -type f 2>/dev/null | sort | while IFS= read -r f; do
-    IFS= read -r first < "$f" || true
-    case "$f" in
-      *.bats|*.sh|*.bash) printf '%s\n' "$f"; continue ;;
-    esac
-    [[ "$first" =~ ^#!.*(bash|[^a-z]sh)([[:space:]]|$) ]] && printf '%s\n' "$f"
-  done
-)
+mapfile -t ARBRE < <({ find "$HERE" -type f 2>/dev/null; [[ ! -f "$HERE/../install.sh" ]] || readlink -f "$HERE/../install.sh"; } | sort)
+SHELL_FILES=()
+for f in "${ARBRE[@]}"; do
+  case "$f" in
+    *.bats|*.sh|*.bash) SHELL_FILES+=("$f"); continue ;;
+  esac
+  IFS= read -r first < "$f" || true
+  [[ ! "$first" =~ ^#!.*(bash|[^a-z]sh)([[:space:]]|$) ]] || SHELL_FILES+=("$f")
+done
 if ! command -v shellcheck >/dev/null 2>&1; then
   echo "ÉCHEC: shellcheck absent — ${#SHELL_FILES[@]} fichier(s) shell de l'installeur non audités." >&2
   echo "       Installer : apt install shellcheck." >&2
   exit 1
 fi
-set +e
-SC_FLOOR="$(shellcheck -x --source-path=SCRIPTDIR -S warning -f gcc "${SHELL_FILES[@]}" 2>&1)"
-SC_FLOOR_RC=$?
-set -e
+SC_FLOOR_RC=0
+SC_FLOOR="$(shellcheck -x --source-path=SCRIPTDIR -S warning -f gcc "${SHELL_FILES[@]}" 2>&1)" || SC_FLOOR_RC=$?
 if [[ "$SC_FLOOR_RC" -ne 0 ]]; then
   printf '%s\n' "$SC_FLOOR" >&2
   echo "ÉCHEC: shellcheck plancher — $(printf '%s\n' "$SC_FLOOR" | grep -c ':') signalement(s) de sévérité >= warning sur $(printf '%s\n' "$SC_FLOOR" | cut -d: -f1 | sort -u | grep -c .) fichier(s)." >&2
@@ -133,14 +131,15 @@ go7_source_header() {
 }
 GO7_BAD=()
 GO7_N=0
-while IFS= read -r f; do
+for f in "${ARBRE[@]}"; do
+  case "${f##*.}" in md|sh|py) ;; *) continue ;; esac
   go7_exempt "$f" && continue
   GO7_N=$((GO7_N + 1))
   case "${f##*.}" in
     md) go7_md_header "$f" || GO7_BAD+=("${f#"$HERE/"}") ;;
     sh|py) go7_source_header "$f" || GO7_BAD+=("${f#"$HERE/"}") ;;
   esac
-done < <(find "$HERE" -type f \( -name '*.md' -o -name '*.sh' -o -name '*.py' \) 2>/dev/null | sort)
+done
 if [[ ${#GO7_BAD[@]} -gt 0 ]]; then
   echo "ÉCHEC: GO-7 — ${#GO7_BAD[@]} fichier(s) sans en-tête déclaratif sous $HERE :" >&2
   printf '   %s\n' "${GO7_BAD[@]}" >&2
@@ -149,24 +148,20 @@ if [[ ${#GO7_BAD[@]} -gt 0 ]]; then
 fi
 echo "--- GO-7 : en-têtes déclaratifs ($GO7_N fichier(s) .md/.sh/.py de l'installeur) : OK ---"
 
-# copie assumée du bloc de runtime/test/shell_gate.sh : sans elle, l'environnement du lanceur
-# (FORGE_BASE_URL exporté par provision --env, un LCARS_SEAT_UID_FILE posé à la main, PROV_FLEET_GROUP
-# qui voyage par services.env) retunerait la mesure ; installer_gate.bats tient l'accord des copies
+# l'environnement du lanceur ne règle pas la mesure : un FORGE_BASE_URL exporté par provision --env, ou
+# un LCARS_DECOR_ROOT posé à la main, retuneraient les témoins
+mapfile -t NEUTRES < <(compgen -v | grep -E '^(LCARS_|PROV_|FORGE_)' | sort || true)
 BATS_ENV=()
-while read -r v; do [[ -n "$v" ]] && BATS_ENV+=(-u "$v"); done < <(
-  compgen -v | grep -E '^(LCARS_|PROV_|FORGE_)' | sort
-)
-if [[ "${#BATS_ENV[@]}" -gt 0 ]]; then
-  echo "--- ${#BATS_ENV[@]} variable(s) du lanceur neutralisée(s) : ${BATS_ENV[*]//-u/}"
+for v in "${NEUTRES[@]}"; do BATS_ENV+=(-u "$v"); done
+if [[ "${#NEUTRES[@]}" -gt 0 ]]; then
+  echo "--- ${#NEUTRES[@]} variable(s) du lanceur neutralisée(s) : ${NEUTRES[*]}"
 fi
 
 echo "--- bats${COUCHE:+ (couche $COUCHE)} : ${#JOUES[@]} fichier(s), $BATS_TEST_COUNT cas ---"
 # un cas sauté n'est pas un cas joué : le verdict les compte, sinon un poste qui en saute soixante rend le même vert
 SORTIE="$(mktemp "${TMPDIR:-/tmp}/gate-bats.XXXXXX")"
-set +e
-env "${BATS_ENV[@]}" bats "${JOUES[@]}" | tee "$SORTIE"
-RC="${PIPESTATUS[0]}"
-set -e
+RC=0
+env "${BATS_ENV[@]}" bats "${JOUES[@]}" | tee "$SORTIE" || RC=$?
 SAUTES="$(grep -c '# skip' "$SORTIE" || true)"
 rm -f "$SORTIE"
 

@@ -3,15 +3,13 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
 # STATUS: PROTO-V2 — enrôlement per-humain : ~/.lcars, ~/pods, env seed-once, sondes creds (instruct-only)
-# APPLY-ON: any
-# CHECK-ON: any
-# NEEDS: human
-# AFTER: 20-groups
+# JOUE PAR : le convergeur d'humains, pour chaque humain de la fleet, dans l'ordre des noms.
+# Ni terrain ni dependance ne se declarent ici : ces en-tetes ne sont lus que dans
+# `deploy/modules.d`, et les recopier ici promettait une mecanique que personne ne joue.
 
 set -euo pipefail
-# Le protocole des modules per-humain, cote PRODUIT (Q3, 2026-09-04) : l'hote — le convergeur, ou
-# un temoin — nomme le fichier. Ce module sourcait la lib de l'INSTALLEUR, que son hote reel ne
-# posait pas : il mourait ici, a chaque humain, sur les deux rails.
+# L'hote nomme le protocole per-humain (LCARS_HUMAN_PROTOCOL) : le convergeur, ou un temoin. Le
+# contrat de ce dialecte est dans le fichier source, il ne se recopie pas ici.
 # shellcheck source=../lib/human-protocol.sh
 . "${LCARS_HUMAN_PROTOCOL:?LCARS_HUMAN_PROTOCOL non posé — lance via human-converger, pas le module nu}"
 

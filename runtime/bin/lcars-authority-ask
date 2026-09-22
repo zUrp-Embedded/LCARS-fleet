@@ -28,7 +28,7 @@ if command -v socat >/dev/null 2>&1; then
 elif command -v nc >/dev/null 2>&1; then
   transport=nc
 else
-  echo "autorite: ni « socat » ni « nc » sur ce conteneur — bash n'ouvre pas de socket unix nu" >&2
+  echo "autorite: ni « socat » ni « nc » sur cette machine — bash n'ouvre pas de socket unix nu" >&2
   exit 1
 fi
 
@@ -56,16 +56,17 @@ case "$reponse" in
   Un proprietaire t'y ajoute, et c'est effectif A LA COMMANDE SUIVANTE — rien a redemarrer." >&2
     exit 1 ;;
   FAIL:no_authority)
-    echo "autorite: ce CONTENEUR n'a pas d'autorite utilisable sur sa forge — jeton master absent,
-  illisible, vide, ou refuse. Aucun reessai ne le repose :
-  « FORGE_ADMIN_TOKEN=<jeton> deploy/container config »" >&2
+    echo "autorite: cette machine n'a pas d'autorité utilisable sur sa forge — jeton master absent,
+  illisible, vide, ou refusé. Aucun réessai ne le repose : sur un poste, « deploy/workstation up » ;
+  pour un conteneur, « FORGE_ADMIN_TOKEN=<jeton> deploy/container config » depuis l'hôte" >&2
     exit 1 ;;
   FAIL:forge_unreachable)
     echo "autorite: la forge n'a pas repondu. Ce n'est pas un refus, c'est une absence de reponse —
   le geste se reessaie tel quel." >&2
     exit 1 ;;
   FAIL:no_role_token)
-    echo "autorite: aucun jeton pose pour le compte « $compte » — « provision apply » le minte." >&2
+    echo "autorite: aucun jeton posé pour le compte « $compte ». Sur un poste, « deploy/workstation up » le minte ;
+  dans un conteneur, le démarrage le minte (« deploy/container up » depuis l'hôte)." >&2
     exit 1 ;;
   FAIL:bad_role)
     echo "autorite: « $compte » refuse par le service comme nom de compte forge." >&2

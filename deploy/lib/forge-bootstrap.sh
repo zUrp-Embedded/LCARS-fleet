@@ -4,49 +4,35 @@
 # STARDATE: 2026-09-12
 # STATUS: l'amorçage d'une forge Gitea — montage, compte d'administration, jeton master, seed, humain de banc
 #
-# Sourcée par 48-forge-host (poste) et par le banc (conteneur) : une seule forme pour les deux.
-# Aucun secret dans un argv de l'hôte : curl les lit par sa config sur stdin (-K -), la CLI gitea
-# par une variable transmise à docker exec (-e PW), le mot de passe n'apparaissant que dans le
-# namespace du conteneur de la forge — gitea n'a pas d'entrée stdin pour un mot de passe.
-#
-#   forge_mount <docker> <compose> <projet> <port> <bind> <url publique>   compose up -d
-#   forge_wait <url> [essais]                                              0 quand /api/v1/version répond
-#   forge_admin_ensure <docker> <conteneur> <login> <mot de passe>         imprime « cree » ou « present »
-#   forge_admin_password <docker> <conteneur> <login> <mot de passe>       rotation
-#   forge_master_token <docker> <conteneur> <login> [nom]                  imprime le jeton
-#   forge_seed_new                                                         imprime un seed
-#   forge_token_ok <url> <jeton>                                           0 si le jeton s'authentifie
-#   bench_human_seed <url> <jeton> <humain> <mot de passe>                 mot de passe, site-admin, imprime un jeton opérateur
-#   bench_admiral_password                                                 le mot de passe de l'amiral en banc
-#   bench_human_password                                                   le mot de passe de l'humain en banc
+# Sourcée après provision-lib.sh, par 48-forge-host et workstation (poste) et par le banc
+# (conteneur) : une seule forme pour les deux. La CLI gitea ne reçoit aucun mot de passe : elle le
+# porterait dans l'argv d'un processus que tout l'hôte lit ; il se pose par forge_api.
 
-: "${LCARS_BENCH_ADMIRAL_PW:=toto123456}"
-: "${LCARS_BENCH_HUMAN_PW:=toto32toto32}"
+bench_admiral_password() { printf '%s\n' toto123456; }
+bench_human_password()   { printf '%s\n' toto32toto32; }
 
-bench_admiral_password() { printf '%s\n' "$LCARS_BENCH_ADMIRAL_PW"; }
-bench_human_password()   { printf '%s\n' "$LCARS_BENCH_HUMAN_PW"; }
-
-forge_mount() {
-  local docker="$1" compose="$2" projet="$3" port="$4" bind="$5" root="$6"
-  LCARS_DEVFORGE_PORT="$port" LCARS_DEVFORGE_BIND="$bind" LCARS_DEVFORGE_ROOT_URL="${root%/}/" \
-    "$docker" compose -f "$compose" -p "$projet" up -d
+forge_mount() { # forge_mount <docker> <compose> <projet> <port> <bind> <url publique> [<base du banc>] — le banc empile sa surcouche marquée
+  local docker="$1" compose="$2" projet="$3" port="$4" bind="$5" root="$6" banc="${7:-}"
+  local -a fichiers=(-f "$compose")
+  [[ -z "$banc" ]] || fichiers+=(-f "${compose%.yml}.bench.yml")
+  LCARS_DEVFORGE_PORT="$port" LCARS_DEVFORGE_BIND="$bind" LCARS_DEVFORGE_ROOT_URL="${root%/}/" LCARS_BENCH_BASE="$banc" \
+    "$docker" compose --env-file "$PROV_CONSTANTS_FILE" "${fichiers[@]}" -p "$projet" up -d
 }
 
-forge_wait() {
-  local url="${1%/}" essais="${2:-60}" i
+forge_wait() { # forge_wait <url> [essais] → 0 quand /api/v1/version répond
+  local url="$1" essais="${2:-60}" i
   for ((i = 0; i < essais; i++)); do
-    curl -fsS -m 3 -o /dev/null "$url/api/v1/version" 2>/dev/null && return 0
+    forge_repond "$url" 3 && return 0
     sleep 2
   done
   return 1
 }
 
-forge_admin_ensure() {
-  local docker="$1" conteneur="$2" login="$3" pw="$4" err rc=0
+forge_admin_ensure() { # forge_admin_ensure <docker> <conteneur> <login> → imprime « cree » ou « present » ; le mot de passe se pose ensuite par forge_admin_password
+  local docker="$1" conteneur="$2" login="$3" err rc=0
   err="$(mktemp "${TMPDIR:-/tmp}/forge-admin.XXXXXX")"
-  PW="$pw" "$docker" exec -e PW -u git "$conteneur" sh -c \
-      'gitea admin user create --username "$1" --password "$PW" --email "$1@lcars.local" --admin --must-change-password=false' \
-      _ "$login" >/dev/null 2>"$err" || rc=$?
+  "$docker" exec -u git "$conteneur" gitea admin user create --username "$login" --random-password \
+      --email "$login@lcars.local" --admin --must-change-password=false >/dev/null 2>"$err" || rc=$?
   if [[ "$rc" -eq 0 ]]; then
     rm -f "$err"; echo cree; return 0
   fi
@@ -58,14 +44,17 @@ forge_admin_ensure() {
   return 1
 }
 
-forge_admin_password() {
-  local docker="$1" conteneur="$2" login="$3" pw="$4"
-  PW="$pw" "$docker" exec -e PW -u git "$conteneur" sh -c \
-      'gitea admin user change-password --username "$1" --password "$PW" --must-change-password=false' \
-      _ "$login" >/dev/null 2>&1
+forge_account_password() { # forge_account_password <url> <fichier du jeton master> <login> <mot de passe> [admin] — le mot de passe, et l'adminité si « admin » est nommé ; un refus rend 1 et nomme le code HTTP
+  local code corps='{login_name: $l, source_id: 0, password: $pw, must_change_password: false}'
+  [[ "${5:-}" != admin ]] || corps='{login_name: $l, source_id: 0, password: $pw, must_change_password: false, admin: true}'
+  code="$(forge_api PATCH "$1/api/v1/admin/users/$3" /dev/null --token-file "$2" -m 10 \
+            --json "$corps" --arg l "$3" --rawfile pw <(printf '%s' "$4"))" \
+    || { echo "la forge refuse le compte « $3 » (HTTP $code)" >&2; return 1; }
 }
 
-forge_master_token() {
+forge_admin_password() { forge_account_password "$1" "$2" "$3" "$4" admin; } # forge_admin_password <url> <fichier du jeton master> <login> <mot de passe> — le compte d'administration de la forge : mot de passe et adminité
+
+forge_master_token() { # forge_master_token <docker> <conteneur> <login> [nom] → imprime le jeton
   local docker="$1" conteneur="$2" login="$3" nom="${4:-master-$(date +%s)}" tok
   tok="$("$docker" exec -u git "$conteneur" gitea admin user generate-access-token \
            --username "$login" --token-name "$nom" --scopes all --raw 2>/dev/null | tail -n1 | tr -d '[:space:]')"
@@ -75,32 +64,44 @@ forge_master_token() {
 
 forge_seed_new() { head -c 400 /dev/urandom | tr -dc 'A-Za-z0-9' | cut -c1-20; }
 
-forge_token_ok() {
-  local url="${1%/}"
-  printf 'header = "Authorization: token %s"\n' "$2" | curl -K - -fsS -m 5 -o /dev/null "$url/api/v1/user" 2>/dev/null
+forge_token_ok() { # forge_token_ok <url> <fichier du jeton> → 0 si le jeton s'authentifie
+  forge_api GET "$1/api/v1/user" /dev/null --token-file "$2" -m 5 >/dev/null
 }
 
-bench_human_seed() {
-  local url="${1%/}" tok="$2" humain="$3" pw="$4" code is_admin resp sha
-  # le mot de passe s'écrit dans une requête JSON portée par une config curl : pas de guillemet ni de barre oblique inverse
-  [[ "$pw$humain" != *[\"\\]* ]] || { echo "mot de passe ou login de banc avec « \" » ou « \\ » : refusé" >&2; return 1; }
-  code="$(printf 'header = "Authorization: token %s"\nheader = "Content-Type: application/json"\nrequest = "PATCH"\ndata = "{\\"login_name\\":\\"%s\\",\\"source_id\\":0,\\"password\\":\\"%s\\",\\"must_change_password\\":false,\\"admin\\":true}"\n' \
-             "$tok" "$humain" "$pw" \
-           | curl -K - -s -m 10 -o /dev/null -w '%{http_code}' "$url/api/v1/admin/users/$humain" 2>/dev/null || echo 000)"
-  [[ "$code" == 200 ]] || { echo "la forge refuse le compte « $humain » (HTTP $code)" >&2; return 1; }
-  is_admin="$(printf 'header = "Authorization: token %s"\n' "$tok" \
-              | curl -K - -s -m 5 "$url/api/v1/users/$humain" 2>/dev/null \
-              | python3 -c 'import json,sys; print(json.load(sys.stdin).get("is_admin"))' 2>/dev/null || echo "?")"
-  [[ "$is_admin" == "True" ]] || { echo "« $humain » n'est pas site-admin après la promotion (is_admin=$is_admin)" >&2; return 1; }
-  printf 'user = "%s:%s"\n' "$humain" "$pw" \
-    | curl -K - -s -m 5 -o /dev/null -f "$url/api/v1/user" 2>/dev/null \
-    || { echo "« $humain » ne s'authentifie pas avec le mot de passe posé" >&2; return 1; }
-  resp="$(printf 'user = "%s:%s"\nheader = "Content-Type: application/json"\nrequest = "POST"\ndata = "{\\"name\\":\\"bench-operateur-%s\\",\\"scopes\\":[\\"write:repository\\",\\"write:issue\\",\\"read:organization\\",\\"read:user\\"]}"\n' \
-            "$humain" "$pw" "$(date +%s)" \
-          | curl -K - -s -m 10 "$url/api/v1/users/$humain/tokens" 2>/dev/null || true)"
-  sha="$(printf '%s' "$resp" | python3 -c 'import json,sys
-try: print(json.load(sys.stdin).get("sha1",""))
-except Exception: print("")' 2>/dev/null || true)"
-  [[ -n "$sha" ]] || { echo "la forge n'a pas rendu de jeton opérateur pour « $humain » : ${resp:-<corps vide>}" >&2; return 1; }
+_FORGE_BOOTSTRAP_DEPLOY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# sur un poste, sudo ne transmet pas LCARS_BUILTIN_HUMAN : le délégué la reçoit en option et la relance lui-même
+bench_structure_geste() { # bench_structure_geste <humain> [conteneur] → la commande qui rejoue la structure de la forge pour cet humain, à taper telle quelle : dans le conteneur du banc s'il est nommé, sur le poste sinon
+  if [[ -n "${2:-}" ]]; then
+    printf 'docker exec -u root -e LCARS_BUILTIN_HUMAN=%q %q %q apply\n' "$1" "$2" "$(prov_canon "$PROV_ROOT")/forge-gestures.sh"
+  else
+    printf '%q up --bench --humain-demo %q --only 61-forge-structure\n' "$_FORGE_BOOTSTRAP_DEPLOY_DIR/workstation" "$1"
+  fi
+}
+
+bench_human_seed() { # bench_human_seed <url> <fichier du jeton master> <humain> <mot de passe> [jeton posé] [conteneur du banc] → mot de passe, adminité vérifiée, imprime un jeton opérateur
+  # un jeton posé qui s'authentifie encore est rendu tel quel : chaque passe en minterait un de plus sur la forge
+  # l'adminité de l'humain de démonstration a une seule main, la recette (gitea_user.human, que
+  # 61-forge-structure réapplique à chaque passe) : le banc la lit au jeton master, il ne la pose pas
+  local url="$1" tokfile="$2" humain="$3" pw="$4" pose="${5:-}" conteneur="${6:-}" is_admin body sha
+  forge_account_password "$url" "$tokfile" "$humain" "$pw" || return 1
+  body="$(mktemp "${TMPDIR:-/tmp}/forge-bench.XXXXXX")"
+  forge_api GET "$url/api/v1/users/$humain" "$body" --token-file "$tokfile" -m 5 >/dev/null || true
+  is_admin="$(jq -r '.is_admin' "$body" 2>/dev/null || echo "?")"
+  [[ "$is_admin" == "true" ]] || { echo "« $humain » n'est pas site-admin (is_admin=$is_admin) : son adminité est posée par la structure de la forge (gitea_user.human), qui ne l'a pas appliquée à cet humain — rejouer la structure pour lui :  $(bench_structure_geste "$humain" "$conteneur")" >&2; rm -f "$body"; return 1; }
+  forge_api GET "$url/api/v1/user" /dev/null --basic "$humain" <(printf '%s' "$pw") -m 5 >/dev/null \
+    || { echo "« $humain » ne s'authentifie pas avec le mot de passe posé" >&2; rm -f "$body"; return 1; }
+  if [[ -s "$pose" ]] && forge_token_ok "$url" "$pose"; then
+    rm -f "$body"
+    tr -d '[:space:]' < "$pose"; echo
+    return 0
+  fi
+  : > "$body"   # sans réponse, curl laisse la sortie intacte : le corps lu serait celui de l'humain
+  forge_api POST "$url/api/v1/users/$humain/tokens" "$body" --basic "$humain" <(printf '%s' "$pw") -m 10 \
+    --json '{name: $n, scopes: ["write:repository", "write:issue", "read:organization", "read:user"]}' \
+    --arg n "bench-operateur-$(date +%s)" >/dev/null || true
+  sha="$(jq -r '.sha1 // empty' "$body" 2>/dev/null || true)"
+  [[ -n "$sha" ]] || { echo "la forge n'a pas rendu de jeton opérateur pour « $humain » : $(head -c 300 "$body" 2>/dev/null || true)" >&2; rm -f "$body"; return 1; }
+  rm -f "$body"
   printf '%s\n' "$sha"
 }

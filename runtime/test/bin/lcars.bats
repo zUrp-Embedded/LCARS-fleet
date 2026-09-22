@@ -174,3 +174,104 @@ J
   [[ "$output" == *"phase 1 faite"* ]]
   [[ "$output" != *"[!!]"* ]]
 }
+
+# ⚠ L'AIDE DE CE CLI EST UN HEREDOC NON PROTÉGÉ (`cat >&2 <<EOF`), parce qu'elle interpole `$PROG`.
+# Un accent grave non échappé y ouvre une SUBSTITUTION DE COMMANDE : le shell exécute ce qu'il y a
+# entre les deux et met sa sortie — vide — à la place. L'aide perd alors le fragment, et rien ne le
+# dit : elle s'imprime, elle a l'air normale, il manque juste un bout de phrase.
+#
+# Mesuré le 2026-09-17 : « sont declares (`Fleet.Layout.system_project/0`, le catalogue embarque) »
+# s'imprimait « sont declares (, le catalogue embarque) ». Le plancher shellcheck n'attrape que le
+# cas où le fragment contient aussi un `<` (qu'il lit comme une redirection) ; celui-là passait.
+@test "aide : aucun accent grave non echappe dans le heredoc — sinon l'aide mange son propre texte" {
+  local corps
+  corps="$(awk '/^usage\(\) \{$/,/^EOF$/' "$SCRIPT")"
+  [ -n "$corps" ]
+
+  # un accent grave ECHAPPE (\`) est le seul admis ; tout autre ouvre une substitution
+  local fautifs
+  fautifs="$(grep -n '`' <<<"$corps" | grep -v '\\`' || true)"
+  [ -z "$fautifs" ] || { echo "accents graves non echappes dans l'aide :"; echo "$fautifs"; return 1; }
+}
+
+@test "aide : chaque fragment entre accents graves SURVIT a l'impression — la mesure, pas la relecture" {
+  local rendu; rendu="$(bash "$SCRIPT" --help 2>&1)"
+  [ -n "$rendu" ]
+
+  # l'instrument : ce que la source annonce, et ce que l'aide imprime vraiment
+  local frag n=0
+  while IFS= read -r frag; do
+    n=$((n + 1))
+    [[ "$rendu" == *"$frag"* ]] \
+      || { echo "l'aide n'imprime pas « $frag » — un heredoc l'a substitue"; return 1; }
+  done < <(awk '/^usage\(\) \{$/,/^EOF$/' "$SCRIPT" | grep -o '\\`[^`]*\\`' | sed 's/\\`//g')
+
+  [ "$n" -ge 4 ] || { echo "instrument casse : $n fragment(s) trouve(s), au moins 4 attendus"; return 1; }
+}
+
+# ⚠ UN REPERTOIRE COURANT ILLISIBLE FAIT MOURIR LE BEAM, ET SA PLAINTE NE PARLE DE RIEN. Mesure du
+# 2026-09-18 sur le banc 2004 : `lcars` lance depuis le home d'un AUTRE compte rend un « Kernel pid
+# terminated (logger) » avec une pile `code_server`, puis ecrit un crash dump. Le meme geste dans un
+# dossier lisible marche. Le refus nomme le dossier, le compte, et le geste qui repare.
+@test "un repertoire courant ILLISIBLE est un refus NOMME, avant tout — pas un crash du BEAM" {
+  [ "$(id -u)" -ne 0 ] || skip "a jouer sans privilege : root lit un repertoire en 000"
+  local mur="$TMP/mur"
+  mkdir -p "$mur"
+
+  # ⚠ ON N'ENTRE PAS DANS UN DOSSIER A 000 : le cas REEL est un dossier qu'on habite et dont les
+  # droits tombent — ce qui arrive des qu'un process garde le cwd d'un autre compte (`runuser`).
+  run bash -c "cd '$mur' && chmod 000 '$mur' && '$SCRIPT' help"
+  chmod 755 "$mur"
+
+  [ "$status" -eq 1 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"n'est pas lisible par"* ]] || { echo "$output"; return 1; }
+  [[ "$output" == *"cd ~"* ]]
+  # ce que le crash rendait, et qu'on ne veut plus voir
+  [[ "$output" != *"Kernel pid terminated"* ]]
+}
+
+@test "un repertoire courant LISIBLE ne refuse rien — le garde n'est pas un blocage permanent" {
+  run bash -c "cd '$TMP' && '$SCRIPT' help"
+  [[ "$output" != *"n'est pas lisible"* ]] || { echo "$output"; return 1; }
+}
+
+# ⚠ LA LISTE DES PORTES OUTIL S'ECRIVAIT TROIS FOIS : l'aide, le refus d'une porte inconnue, et le
+# `case` qui dispatche. L'aide a vieilli sans bruit — elle ignorait `system-project` depuis
+# `3420d477` et `ops-repo` depuis `c6e48370`, lues par-dessus l'epaule d'un operateur sur le banc
+# 2005 le 2026-09-19. MUR 22 ne tient que les verbes de PREMIER niveau ; rien ne tenait ceux-ci.
+_portes_declarees() {
+  sed -n 's/^TOOL_PORTES="\(.*\)"$/\1/p' "$SCRIPT" | tr '|' '\n' | awk '{print $1}' | sort -u
+}
+
+# Les etiquettes du `case` de cmd_tool, `a|b)` compris, `*)` exclu.
+_portes_dispatchees() {
+  awk '/^cmd_tool\(\) \{/{on=1} on && /^\}/{exit} on' "$SCRIPT" \
+    | sed -n 's/^    \([a-z0-9|_-]*\))$/\1/p' | tr '|' '\n' | sort -u
+}
+
+@test "MUR: les portes DECLAREES sont exactement celles que cmd_tool dispatche" {
+  local d p
+  d="$(_portes_declarees)"; p="$(_portes_dispatchees)"
+  [ -n "$d" ] || { echo "TOOL_PORTES ne se lit plus dans $SCRIPT — l'instrument ne mesure rien" >&2; return 1; }
+  [ "$(printf '%s\n' "$d" | wc -l)" -ge 4 ] || { echo "seulement $(printf '%s\n' "$d" | wc -l) porte(s) declaree(s) : la forme a change" >&2; return 1; }
+  [ "$d" = "$p" ] || {
+    echo "declarees : $(echo "$d" | tr '\n' ' ')" >&2
+    echo "dispatchees: $(echo "$p" | tr '\n' ' ')" >&2
+    echo "→ une porte nommee d'un seul cote est une porte que l'aide promet et que le script refuse," >&2
+    echo "  ou l'inverse : un operateur la cherche et ne la trouve pas." >&2
+    return 1
+  }
+}
+
+@test "MUR: l'aide ET le refus nomment la meme liste, parce qu'ils la LISENT au meme endroit" {
+  run bash -c "cd '$TMP' && '$SCRIPT' help"
+  local aide="$output"
+  run bash -c "cd '$TMP' && '$SCRIPT' tool porte-qui-nexiste-pas"
+  local refus="$output"
+
+  local porte
+  while read -r porte; do
+    [[ "$aide"  == *"$porte"* ]] || { echo "l'aide ne nomme pas « $porte »" >&2; return 1; }
+    [[ "$refus" == *"$porte"* ]] || { echo "le refus ne nomme pas « $porte »" >&2; return 1; }
+  done < <(_portes_declarees)
+}

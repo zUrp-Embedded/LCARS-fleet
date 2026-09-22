@@ -30,8 +30,10 @@
 # Options : --avatars-dir DIR (défaut : $LCARS_MEDIA_ROOT/avatars, soit /opt/lcars/share/avatars —
 #           ce que l'installation a POSÉ depuis assets/) · --org NAME (défaut fleet ; --org "" pour
 #           sauter l'org) · --admiral LOGIN (le master de CETTE forge : il reçoit le delta simple,
-#           `admiral.png`. Absent = aucun avatar posé sur un compte humain).
-#           Le mapping compte→fichier est une DONNÉE (tableau ENTRIES ci-dessous).
+#           `admiral.png`. Absent = aucun avatar posé sur un compte humain) ·
+#           --catalogue-avatars DIR (les avatars d'un catalogue, nommés par rôle : `<role>.png` va au
+#           compte `<org>_<role>` ; un dossier absent ou vide n'ajoute rien).
+#           Le mapping compte→fichier du catalogue de référence est une DONNÉE (tableau ENTRIES ci-dessous).
 # EXIT : 0 = tout posé/valide · 1 = usage/dépendance · 2 = au moins une entrée en échec.
 
 set -euo pipefail
@@ -48,7 +50,7 @@ CHECK_ONLY=0
 # rôle canon (avec `admiral`) à porter `forge_identity: false`, et le catalogue dit pourquoi —
 # toutes ses écritures passent par le compte système, qui porte donc l'insigne de starfleet — pas
 # le favicon du produit, qui est celui de l'org.
-# L'org `fleet` porte AUSSI le favicon (posée à part, endpoint distinct). L'humain n'est PAS listé : il
+# L'org du play porte AUSSI le favicon (posée à part, endpoint distinct). L'humain n'est PAS listé : il
 # pose son propre avatar (compte daily), on ne le décide pas pour lui.
 #
 # ⚠ CETTE LISTE N'EST PAS UN ROSTER, et ne doit pas le devenir. Elle porte un mapping compte→IMAGE :
@@ -103,7 +105,9 @@ ADMIRAL=""
 # tiers. Un catalogue apporte les siens, `<role>.png`, et le compte se derive : `<org>_<role>`.
 CAT_AVATARS=""
 
-usage() { sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'; }
+# L'aide est l'en-tete entier : de la ligne 2 jusqu'a la premiere ligne qui n'est pas un commentaire.
+# Un numero de ligne de fin couperait le bloc des qu'il grandit.
+usage() { awk 'NR == 1 { next } !/^#/ { exit } { sub(/^# ?/, ""); print }' "$0"; }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -153,7 +157,7 @@ FORGE="${FORGE%/}"
 # AUCUN REPLI. Une installation qui n'a pas pose ses medias est une installation RATEE, pas une
 # installation degradee : servir des identicons en silence rendrait vert un deploiement a moitie
 # fait, et personne ne relierait jamais l'avatar generique a la cause.
-[[ -d "$AVATARS_DIR" ]] || { echo "provision-forge-charte: dossier avatars introuvable: $AVATARS_DIR — l'installation ne les a pas poses (COPY assets/avatars du Dockerfile, ou LCARS_MEDIA_ROOT mal cable)" >&2; exit 1; }
+[[ -d "$AVATARS_DIR" ]] || { echo "provision-forge-charte: dossier avatars introuvable: $AVATARS_DIR — l'installation ne les a pas posés (module 44-media : sur un poste, « deploy/workstation up » les pose ; dans un conteneur, c'est l'image qui les porte), ou LCARS_MEDIA_ROOT est mal câblé" >&2; exit 1; }
 
 # Le master-token n'est requis qu'en mode POSE (le --check lit des champs publics).
 if [[ -n "$ADMIN_TOKEN_FILE" ]]; then

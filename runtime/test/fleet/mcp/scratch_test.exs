@@ -23,6 +23,9 @@ defmodule Fleet.MCP.ScratchTest do
     %{tmp: tmp, dir: dir, path: Path.join(dir, "scratchpad.md")}
   end
 
+  defp git(args), do: System.cmd("git", args, stderr_to_stdout: true)
+  defp g(dir, args), do: git(["-C", dir] ++ args)
+
   # The workshop root is a layout fact, so the suite points the layout at its own tree rather than
   # writing into `/home/projects.workshop`.
   defp park(note, dir) do
@@ -40,12 +43,16 @@ defmodule Fleet.MCP.ScratchTest do
   end
 
   describe "the block" do
-    test "the stamp is a #### heading on LINE 2, carrying the year", %{dir: dir, path: path} do
-      # Include the year so a long-lived scratchpad distinguishes successive Januaries.
+    test "the stamp is a #### heading on LINE 2, carrying the year AND the role", %{
+      dir: dir,
+      path: path
+    } do
+      # Include the year so a long-lived scratchpad distinguishes successive Januaries, and the
+      # role because the commit cannot carry it: it is signed by the system on both sides.
       {:ok, _} = park("une note", dir)
       [_blank, second | _] = String.split(File.read!(path), "\n")
 
-      assert second =~ ~r/^#### \d{4}-\d{2}-\d{2} - \d{2}:\d{2}$/
+      assert second =~ ~r/^#### \d{4}-\d{2}-\d{2} - \d{2}:\d{2} — architect$/
     end
 
     test "the note keeps its line breaks — a block is not a flattened line", %{
@@ -115,6 +122,63 @@ defmodule Fleet.MCP.ScratchTest do
                Scratchpad.scratch(%{pod_id: "p", role: "architect", repo: "fleet/demo"}, "x")
 
       refute File.exists?(absent)
+    end
+  end
+
+  # ⚠ CE FICHIER NE POSAIT AUCUN DEPOT GIT : chaque cas loggait « not a git repository », donc la
+  # PUBLICATION de la note n'etait jouee par rien — et la portee du commit, qui est le defaut mesure
+  # sur banc (deux documents de cadrage partis sous « chore(scratch): note d'atelier »), n'avait
+  # aucun temoin. Ces cas-la posent un vrai depot et une vraie origine.
+  describe "la publication de la note" do
+    setup %{dir: dir, tmp: tmp} do
+      # DANS le tmp du cas : une origine partagee entre deux cas se fait rejeter le second push,
+      # et le temoin mesurerait alors sa propre mise en scene.
+      bare = Path.join(tmp, "origin.git")
+      {_, 0} = git(["init", "-q", "--bare", "-b", "workshop", bare])
+      {_, 0} = git(["init", "-q", "-b", "workshop", dir])
+      {_, 0} = g(dir, ["config", "user.email", "lcars@machine"])
+      {_, 0} = g(dir, ["config", "user.name", "lcars"])
+      {_, 0} = g(dir, ["remote", "add", "origin", bare])
+      File.write!(Path.join(dir, "README.md"), "atelier\n")
+      {_, 0} = g(dir, ["add", "."])
+      {_, 0} = g(dir, ["commit", "-q", "-m", "base"])
+      {_, 0} = g(dir, ["push", "-q", "origin", "HEAD:workshop"])
+      {:ok, bare: bare}
+    end
+
+    test "la note part sur la forge, sous l'identite du systeme et avec le role en trailer", %{
+      dir: dir,
+      bare: bare
+    } do
+      {:ok, _} = park("une note", dir)
+
+      {out, 0} = g(dir, ["log", "-1", "--format=%s%n%ae%n%ce"])
+      [sujet, ae, ce] = String.split(String.trim(out), "\n")
+      assert sujet == "chore(scratch): note d'atelier (architect)"
+      assert ae == Fleet.Credentials.ForgeIdentity.system_email()
+      assert ce == ae
+
+      {out, 0} = g(dir, ["log", "-1", "--format=%(trailers:key=Co-authored-by,valueonly)"])
+      assert String.trim(out) =~ "LCARS-architect"
+
+      {out, 0} = git(["-C", bare, "log", "-1", "--format=%s", "workshop"])
+      assert String.trim(out) == "chore(scratch): note d'atelier (architect)"
+    end
+
+    # LE DEFAUT MESURE SUR BANC : un document commite (ou seulement indexe) a cote partait sous le
+    # message de la note, sans que personne ne l'ait demande. La note ne commite QUE sa note.
+    test "un fichier indexe a cote NE PART PAS avec la note", %{dir: dir} do
+      File.write!(Path.join(dir, "spec.md"), "# une spec en cours\n")
+      {_, 0} = g(dir, ["add", "spec.md"])
+
+      {:ok, _} = park("une note", dir)
+
+      {out, 0} = g(dir, ["show", "--name-only", "--format=", "HEAD"])
+      fichiers = out |> String.split("\n", trim: true) |> Enum.map(&String.trim/1)
+      assert fichiers == ["scratchpad.md"]
+      # la spec reste indexee, intacte : la note ne l'a ni publiee ni desindexee
+      {out, 0} = g(dir, ["diff", "--cached", "--name-only"])
+      assert String.trim(out) == "spec.md"
     end
   end
 

@@ -6,7 +6,6 @@
 # APPLY-ON: wsl linux docker
 # CHECK-ON: any
 # NEEDS: root
-# AFTER: 00-preflight
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
@@ -16,9 +15,17 @@ set -euo pipefail
 # une image serveur qui ne l'active pas les verra « absents ». `sudo` : le rail s'escalade par lui.
 # `procps` : pgrep/pkill, lus par 60, le convergeur et 64. `python3-venv` : PEP 668 est actif, pip
 # hors venv échoue par conception ; build-essential, python3-dev, pkg-config, libssl-dev : les
-# extensions C, node-gyp et les crates -sys que les pods compilent.
+# extensions C, node-gyp et les crates -sys que les pods compilent. `xz-utils` : 16-node détare un
+# .tar.xz, et xz n'est que de priorité standard. `acl` : 30-wsl ouvre les projets au compte de
+# Windows par une entrée nominative, et Ubuntu ne pose pas setfacl.
+#
+# `zstd` : l'installeur OFFICIEL de claude (`40-claude-bin`, per-humain) télécharge l'artefact
+# COMPRESSÉ quand zstd est là, et le binaire NU sinon — 230 Mo. Mesure du 2026-09-17 sur LCARS-beta,
+# zstd absent, lien à ~540 ko/s : le téléchargement n'aboutit jamais, et l'échec se présente comme
+# une somme de contrôle fausse sur un fichier qui n'existe pas. Aucun humain n'avait `claude`.
+# Ce n'est pas un confort : c'est la différence entre une installation qui finit et une qui non.
 PACKAGES=(
-  tmux bubblewrap git curl jq unzip ca-certificates python3 socat
+  tmux bubblewrap git curl jq unzip xz-utils zstd ca-certificates python3 socat acl
   git-filter-repo gh
   util-linux-extra sudo
   procps
@@ -26,11 +33,6 @@ PACKAGES=(
   python3-venv python3-pip build-essential pkg-config python3-dev libssl-dev
   less bash-completion
 )
-
-effective_packages() {
-  printf '%s\n' "${PACKAGES[@]}"
-  return 0
-}
 
 # stderr non étouffé : un as_human impossible doit dire sa cause, pas passer pour un sandbox qui échoue
 probe_bwrap() {
@@ -51,27 +53,22 @@ sonde_bwrap() { # sonde_bwrap <p_drift|p_fail> — le verdict d'un sandbox qui �
 
 check() {
   local pkg pkg_absent=0
-  while IFS= read -r pkg; do
+  for pkg in "${PACKAGES[@]}"; do
     if pkg_installed "$pkg"; then
       p_ok "paquet $pkg"
     else
       p_drift "paquet $pkg absent"
       pkg_absent=1
     fi
-  done < <(effective_packages)
+  done
   [[ "$pkg_absent" -eq 1 ]] || sonde_bwrap p_drift
   verdict_check
 }
 
 apply() {
-  local -a pkgs; mapfile -t pkgs < <(effective_packages)
-  apt_ensure "${pkgs[@]}" || verdict_apply
+  apt_ensure "${PACKAGES[@]}" || verdict_apply
   sonde_bwrap p_fail
   verdict_apply
 }
 
-case "${1:?usage: 10-packages.sh <check|apply>}" in
-  check) check ;;
-  apply) apply ;;
-  *) p_die "mode inconnu: $1 (check|apply)" ;;
-esac
+case "${1:-}" in check|apply) "$1" ;; *) p_die "mode inconnu: ${1:-} (check|apply)" ;; esac

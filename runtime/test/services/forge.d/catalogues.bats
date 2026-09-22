@@ -1,27 +1,32 @@
 #!/usr/bin/env bats
 # SOURCE: runtime/test/services/forge.d/catalogues.bats
 # AUTHOR: DrDree
-# STARDATE: (posee par /push-github)
-# STATUS: bats tests for runtime/services/forge.d/catalogues.sh — le materiel suit la FORGE (geste du produit, lot 6)
+# STARDATE: 2026-09-19
+# STATUS: temoins de forge.d/catalogues.sh — l'APPELANT MINCE qui POSE le materiel des catalogues
 #
 # CE QUE CES TEMOINS TIENNENT, ET POURQUOI CE MODULE EST LE PLUS DANGEREUX DE LA SERIE : il
 # SUPPRIME. C'est legitime — le materiel local est un cache re-clonable — mais exactement une
-# condition rend la suppression sure, et c'est que la lecture de la forge ait REUSSI. Une forge
-# injoignable rend une liste vide, et une liste vide se lit « plus rien n'est installe ». Le module
-# effacerait alors tous les catalogues du conteneur en annoncant qu'il converge.
+# condition rend la suppression sure, et c'est que la lecture de la forge ait REUSSI. Une lecture
+# ratee lue comme une forge vide effacerait tous les catalogues du conteneur en annoncant qu'elle
+# converge.
 #
-# La forge est simulee par un `curl` et un `git` poses en tete de PATH : ces temoins n'ouvrent aucune
-# socket et ne clonent rien de reel. Ce qui est mesure est la DECISION du module, qui est tout ce
-# qu'il apporte — le clone lui-meme est le travail de git.
+# ⚖ PHASE 7 : LA MESURE A DEMENAGE, PAS LA REGLE. Ce geste ne parle plus a la forge — la porte
+# `lcars tool catalogue-installed` mesure (`Fleet.Application.CatalogueMaterial`, temoins en
+# ExUnit), et son CODE porte la distinction qui interdit d'effacer a tort : 0 lu entier · 2 magasin
+# ABSENT · 1 illisible. Sont partis d'ici avec elle : la pagination, le corps JSON, `jq`, les
+# quatre temoins d'identite du manifeste et la sonde d'org. Restent ceux que rien d'autre ne
+# tiendrait : les gardes AVANT la porte, le RELAI de chacun de ses trois codes, et la CONVERGENCE
+# locale — cloner, mettre a jour, balayer.
+#
+# La porte est doublee par un `lcars` pose en tete de PATH, `git` par une doublure qui trace : ces
+# temoins n'ouvrent aucune socket et ne clonent rien de reel.
 
 # ⚠ SC2030/SC2031 : CHAQUE `@test` DE BATS EST UN SOUS-SHELL, et c'est la propriete qu'on veut —
 # un test ne teinte pas le suivant. Que les variables posees dans un test soient « locales » est
 # l'isolation, pas une fuite.
 # shellcheck disable=SC2030,SC2031
 
-# ⚠ SIGNALEMENTS VERIFIES UN PAR UN, AUCUN N'EST UN DEFAUT :
-#   SC2086 — eclatement VOULU d'une liste separee par des espaces
-# shellcheck disable=SC2086
+load ../../support/refute
 
 setup() {
   MOD="$BATS_TEST_DIRNAME/../../../services/forge.d/catalogues.sh"
@@ -35,70 +40,31 @@ setup() {
   export FORGE_BASE_URL="http://forge.invalid"
   mkdir -p "$LCARS_CATALOGUES_DIR" "$BATS_TEST_TMPDIR/bin"
   export PATH="$BATS_TEST_TMPDIR/bin:$PATH"
+  export CALLS="$BATS_TEST_TMPDIR/calls"; : > "$CALLS"
+  export LCARS_CLI="$BATS_TEST_TMPDIR/bin/lcars"
+  URL="http://forge.invalid/lcars/_catalogues.git"
 }
 
-# La forge repond ce qu'on lui dit de repondre — TROIS endpoints : la recherche (corps JSON + header
-# X-Total-Count vers le fichier -D), la sonde d'org (`-w %{http_code}`, depuis D1) et le manifeste
-# brut d'un depot (corps + code, depuis le garde d'identite). Fixtures :
-#   $1            corps JSON de la recherche ; sans argument, la forge est DOWN
-#   FAKE_ORGS     les noms qui repondent 200 sur /orgs/<nom> (des orgs)
-#   FAKE_ORG_MUTE les noms dont la sonde d'org echoue (000) — ni org, ni perso : illisible
-#   FAKE_TOTAL    X-Total-Count force (defaut : la taille reelle de .data — pas de troncature)
-# Tout autre nom sonde repond 404 : espace perso prouve.
-#
-# ⚠ LE MANIFESTE, ET SON DEFAUT N'EST PAS UNE COMPLAISANCE. Un magasin est une PROJECTION du depot
-# de son catalogue : il porte donc `catalogue.yaml`, avec le `name:` de ce catalogue — c'est-a-dire
-# le nom de son org. La doublure sert cela par defaut parce que c'est ce que la vraie forge sert
-# pour un vrai magasin. Les ecarts se demandent, par PROPRIETAIRE :
-#   FAKE_BAD_MANIFEST   le manifeste declare un AUTRE nom que l'org
-#   FAKE_NO_MANIFEST    pas de manifeste du tout (404 — une reponse : ce n'est pas un magasin)
-#   FAKE_MANIFEST_MUTE  manifeste illisible (curl sort non-zero — une absence de reponse)
-#   FAKE_MANIFEST_INDENTED  200, mais le `name:` est INDENTE (donc invisible en colonne zero)
-fake_forge() {
-  if [[ $# -eq 0 ]]; then
-    printf '#!/usr/bin/env bash\nexit 7\n' > "$BATS_TEST_TMPDIR/bin/curl"
-    chmod +x "$BATS_TEST_TMPDIR/bin/curl"
-    return
-  fi
-  printf '%s' "$1" > "$BATS_TEST_TMPDIR/search.json"
-  cat > "$BATS_TEST_TMPDIR/bin/curl" <<'SH'
+# stub_porte <code de sortie> <stdout de la porte> [stderr de la porte]
+# Note l'argv complet et l'adresse recue : les temoins mesurent COMMENT la porte est appelee, pas
+# seulement ce qu'elle rend.
+stub_porte() {
+  cat > "$LCARS_CLI" <<EOF
 #!/usr/bin/env bash
-hdr="" url=""
-args=("$@")
-for ((i=0; i<$#; i++)); do
-  case "${args[i]}" in
-    -D) hdr="${args[i+1]}" ;;
-    http*) url="${args[i]}" ;;
-  esac
-done
-if [[ "$url" == */api/v1/orgs/* ]]; then
-  name="${url##*/}"
-  for o in ${FAKE_ORG_MUTE:-}; do [[ "$o" == "$name" ]] && { echo 000; exit 0; }; done
-  for o in ${FAKE_ORGS:-};     do [[ "$o" == "$name" ]] && { echo 200; exit 0; }; done
-  echo 404; exit 0
-fi
-if [[ "$url" == */raw/catalogue.yaml ]]; then
-  rest="${url#*/api/v1/repos/}"; owner="${rest%%/*}"
-  # ⚠ EXIT 7, PAS UN CORPS FABRIQUE. Un `curl` qui ne peut pas connecter sort NON-ZERO sans rien
-  # ecrire : c'est le rescue `|| raw=$'\n000'` du module qui produit alors le code. Une doublure qui
-  # imprimerait `\n000` et sortirait 0 atteindrait la meme decision par un autre chemin — et un
-  # refactoring qui supprimerait le rescue en le croyant redondant ne ferait rougir personne.
-  for o in ${FAKE_MANIFEST_MUTE:-}; do [[ "$o" == "$owner" ]] && exit 7; done
-  for o in ${FAKE_NO_MANIFEST:-};   do [[ "$o" == "$owner" ]] && { printf 'Not Found\n404'; exit 0; }; done
-  for o in ${FAKE_MANIFEST_INDENTED:-}; do [[ "$o" == "$owner" ]] && { printf 'api_version: 1\nroles:\n  name: web\n\n200'; exit 0; }; done
-  for o in ${FAKE_BAD_MANIFEST:-};  do [[ "$o" == "$owner" ]] && { printf 'api_version: 1\nname: autre-chose\n\n200'; exit 0; }; done
-  printf 'api_version: 1\nname: %s\n\n200' "$owner"; exit 0
-fi
-body="$(cat "$FAKE_BODY_FILE")"
-if [[ -n "$hdr" ]]; then
-  t="${FAKE_TOTAL:-$(printf '%s' "$body" | jq -r '.data | length')}"
-  printf 'X-Total-Count: %s\r\n' "$t" > "$hdr"
-fi
-printf '%s' "$body"
-SH
-  chmod +x "$BATS_TEST_TMPDIR/bin/curl"
-  export FAKE_BODY_FILE="$BATS_TEST_TMPDIR/search.json"
+printf 'ARGV:%s\n' "\$*" >> "$CALLS"
+printf 'ENVURL:%s\n' "\${FORGE_BASE_URL:-}" >> "$CALLS"
+printf '%s' '${3:-}' >&2
+printf '%s' '$2'
+exit ${1}
+EOF
+  chmod +x "$LCARS_CLI"
 }
+
+# Une ligne signee, dans la forme EXACTE de la porte : trois champs separes par une TABULATION, et
+# le saut de ligne que `IO.puts` pose — le geste tolere son absence, mais le double ne la simule pas.
+signe()  { printf 'OK\t%s\t%s\n' "$1" "$URL"; }
+retient(){ printf 'HOLD\t%s\t%s\n' "$1" "$2"; }
+dit()    { printf 'WARN\t%s\t%s\n' "$1" "$2"; }
 
 # `git` qui trace ce qu'on lui demande sans rien faire. `clone` cree la cible pour que la suite du
 # module trouve ce qu'il attend.
@@ -108,7 +74,7 @@ fake_git() {
 printf '%s\n' "$*" >> "$GIT_TRACE_FILE"
 case "$1" in
   clone) mkdir -p "${@: -1}/.git"; printf 'api_version: 1\nname: x\n' > "${@: -1}/catalogue.yaml"; exit 0 ;;
-  ls-remote) echo "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef	HEAD"; exit 0 ;;
+  ls-remote) [[ -n "${STUB_SANS_TETE:-}" ]] || echo "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef	refs/heads/${*: -1}"; exit 0 ;;
 esac
 # `-C <dir> rev-parse HEAD`
 [[ "$*" == *rev-parse* ]] && { echo "0000000000000000000000000000000000000000"; exit 0; }
@@ -125,272 +91,276 @@ seed_local() {
   printf 'api_version: 1\nname: %s\n' "$1" > "$LCARS_CATALOGUES_DIR/$1/catalogue.yaml"
 }
 
-# `full_name` est porte parce que le module en a besoin pour ALLER LIRE le manifeste : l'adresse du
-# depot vient de la reponse de la forge, jamais d'une recomposition `<owner>/<convention>` ici.
-json_one() {
-  printf '{"data":[{"name":"_catalogue","full_name":"%s/_catalogue","empty":false,"owner":{"login":"%s"},"clone_url":"http://forge.invalid/%s/_catalogue.git"}]}' \
-    "$1" "$1" "$1"
-}
-
 # ─── LA REGLE DE SURETE : on ne supprime QUE sur une lecture reussie ─────────────────────────────
 
-@test "forge DOWN a l'apply : rien n'est supprime, et le refus le DIT" {
-  fake_forge          # down
+@test "porte ILLISIBLE a l'apply : rien n'est supprime, et le refus le DIT" {
+  stub_porte 1 '' 'UNREADABLE lcars/_catalogues {:http, 500, "boom"}'
   fake_git
   seed_local "web"
 
   run bash "$MOD" apply
   [ "$status" -ne 0 ]
   [[ "$output" == *"materiel laisse EN L'ETAT"* ]]
-  # LE TEMOIN CENTRAL DE CE FICHIER : le materiel a survecu a une forge muette.
+  # LE DEPOT EST NOMME, et c'est ce que la porte a DIT, pas la chaine par defaut de ce module :
+  # illisible est le cas ou l'operateur a le plus besoin de savoir ou aller regarder.
+  [[ "$output" == *"lcars/_catalogues"* ]]
+  # LE TEMOIN CENTRAL DE CE FICHIER : le materiel a survecu a une lecture ratee.
   [ -d "$LCARS_CATALOGUES_DIR/web" ]
 }
 
-@test "forge DOWN au check : DRIFT, jamais « rien n'est installe »" {
-  fake_forge
+@test "porte ILLISIBLE au check : DRIFT, jamais « rien n'est installe »" {
+  stub_porte 1 '' 'UNREADABLE lcars/_catalogues :timeout'
   fake_git
   run bash "$MOD" check
   [ "$status" -ne 0 ]
-  [[ "$output" == *"forge injoignable"* ]]
+  [[ "$output" == *"magasin des catalogues ILLISIBLE (lcars/_catalogues)"* ]]
+}
+
+@test "porte ILLISIBLE qui ne nomme RIEN : le refus reste lisible, sans inventer de depot" {
+  # La porte est censee nommer le magasin, mais elle peut mourir avant (BEAM tue, stderr vide).
+  # Le repli est la chaine par defaut de ce module — jamais un nom devine.
+  stub_porte 1 '' ''
+  fake_git
+  run bash "$MOD" check
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"magasin des catalogues ILLISIBLE (le magasin des catalogues)"* ]]
+}
+
+@test "aucun temporaire ne survit a la passe : la garde du protocole les retire" {
+  # Mesure du 2026-09-19 : le fichier des signatures fuyait a chaque passage, donc a chaque
+  # demarrage de conteneur. TMPDIR est a nous : ce qui reste dedans a fui.
+  #
+  # ⚠ LCARS_MODULE_RUN EST CE QUI ARME LA GARDE, et donc le nettoyage : sans lui, le protocole ne
+  # pose aucun trap — c'est le LANCEUR qui l'arme (le boot du conteneur, un module de l'installeur),
+  # pas le geste. Un temoin qui joue le geste nu ne mesurerait pas le chemin reel.
+  export LCARS_MODULE_RUN=1
+  export TMPDIR="$BATS_TEST_TMPDIR/tmp"; mkdir -p "$TMPDIR"
+  stub_porte 0 "$(signe web)"
+  fake_git
+  run bash "$MOD" check
+  [ "$(find "$TMPDIR" -type f | wc -l)" -eq 0 ]
+}
+
+@test "⚠ LA PORTE ABSENTE N'EST PAS UNE FORGE VIDE : refus, materiel intact" {
+  # Sans release posee, `lcars_cli` ne rend rien de lisible. Lu comme « aucun catalogue installe »,
+  # ce cas effacerait le materiel de TOUS les catalogues du conteneur.
+  export LCARS_CLI="$BATS_TEST_TMPDIR/absente"
+  fake_git
+  seed_local "web"
+
+  run bash "$MOD" apply
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"porte catalogue-installed injouable"* ]]
+  [[ "$output" == *"la release n'est pas posée"* ]]
+  [ -d "$LCARS_CATALOGUES_DIR/web" ]
 }
 
 @test "forge JOIGNABLE et vide : le materiel orphelin est retire" {
-  fake_forge '{"data":[]}'
+  # La porte a lu le magasin ENTIER et il n'installe rien : c'est une mesure, pas une panne.
+  stub_porte 0 ''
   fake_git
   seed_local "web"
 
   run bash "$MOD" apply
   [ "$status" -eq 0 ]
-  [[ "$output" == *"la forge ne l'installe plus"* ]]
+  [[ "$output" == *"materiel de web retire"* ]]
   [ ! -d "$LCARS_CATALOGUES_DIR/web" ]
 }
 
-# ─── CE QUI COMPTE COMME CATALOGUE ──────────────────────────────────────────────────────────────
-
-@test "un repo nomme catalogue-perso ne signe RIEN — le filtre est exact, pas une sous-chaine" {
-  # `q=catalogue` est un match de sous-chaine cote Gitea. Sans le filtre exact, le depot personnel
-  # d'un humain ferait installer un catalogue que personne n'a installe.
-  fake_forge '{"data":[{"name":"catalogue-perso","full_name":"alice/catalogue-perso","empty":false,"owner":{"login":"alice"},"clone_url":"http://forge.invalid/alice/catalogue-perso.git"}]}'
+@test "magasin ABSENT (404) et RIEN en local : une REPONSE — la fleet tourne sur le catalogue de la release" {
+  stub_porte 2 '' 'ABSENT lcars/_catalogues'
   fake_git
 
   run bash "$MOD" apply
   [ "$status" -eq 0 ]
-  [ ! -d "$LCARS_CATALOGUES_DIR/alice" ]
-  [[ "$(cat "$GIT_TRACE_FILE")" != *clone* ]]
+  [[ "$output" == *"magasin des catalogues absent de la forge"*"rien d'installe ici"* ]]
+  # le nom lu par la porte est celui que la phrase porte : il n'est pas recopie dans le geste
+  [[ "$output" == *"lcars/_catalogues"* ]]
 }
 
-@test "un depot VIDE ne signe rien — une org creee sans sa source est un install interrompu" {
-  fake_forge '{"data":[{"name":"_catalogue","full_name":"web/_catalogue","empty":true,"owner":{"login":"web"},"clone_url":"http://forge.invalid/web/_catalogue.git"}]}'
+@test "magasin ABSENT (404) avec du materiel en local : DRIFT, et RIEN n'est supprime" {
+  stub_porte 2 '' 'ABSENT lcars/_catalogues'
   fake_git
+  seed_local "web"
 
   run bash "$MOD" apply
-  [ "$status" -eq 0 ]
-  [ ! -d "$LCARS_CATALOGUES_DIR/web" ]
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"magasin des catalogues ABSENT"*"RIEN n'est supprime"* ]]
+  [ -d "$LCARS_CATALOGUES_DIR/web" ]
 }
 
 @test "un repertoire local SANS manifeste n'est pas un catalogue — ni compte, ni supprime" {
-  # Un clone interrompu ou un `lost+found`. Le compter le ferait verifier par le boot ; le supprimer
-  # ferait de ce module le nettoyeur d'un repertoire dont il ne sait rien.
-  fake_forge '{"data":[]}'
+  stub_porte 0 ''
   fake_git
-  mkdir -p "$LCARS_CATALOGUES_DIR/moitie-de-clone"
+  mkdir -p "$LCARS_CATALOGUES_DIR/pas-un-catalogue"
 
   run bash "$MOD" apply
   [ "$status" -eq 0 ]
-  [ -d "$LCARS_CATALOGUES_DIR/moitie-de-clone" ]
+  refute [[ "$output" == *"pas-un-catalogue"* ]]
+  [ -d "$LCARS_CATALOGUES_DIR/pas-un-catalogue" ]
 }
 
-# ─── LA CONVERGENCE ELLE-MEME ───────────────────────────────────────────────────────────────────
+@test "… ET IL N'EST PAS COMPTE NON PLUS : un magasin ABSENT reste une REPONSE" {
+  # Le meme repertoire, sur l'autre chemin. Le comptage se faisait par `find -type d`, donc il
+  # comptait ce dossier-la : « magasin ABSENT alors que 1 catalogue(s) sont installes ici », un
+  # DRIFT sur un catalogue que rien ne peut nommer. Deux enumerations du meme dossier, deux
+  # reponses — `local_installed` est la seule definition d'un catalogue installe.
+  stub_porte 2 '' 'ABSENT lcars/_catalogues'
+  fake_git
+  mkdir -p "$LCARS_CATALOGUES_DIR/pas-un-catalogue"
+
+  run bash "$MOD" check
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"rien d'installe ici"* ]]
+  refute [[ "$output" == *"RIEN n'est supprime"* ]]
+}
+
+# ─── LA CONVERGENCE : ce qui reste au shell, et que rien d'autre ne tiendrait ────────────────────
 
 @test "materiel absent : il est clone, et le clone atterrit a cote avant d'etre renomme" {
-  # Le staging est ce qui empeche un clone interrompu de laisser un demi-catalogue SOUS son nom
-  # definitif — le boot suivant le verifierait comme s'il etait entier.
-  fake_forge "$(json_one web)"
-  export FAKE_ORGS="web"
+  stub_porte 0 "$(signe web)"
   fake_git
 
   run bash "$MOD" apply
   [ "$status" -eq 0 ]
+  [[ "$(cat "$GIT_TRACE_FILE")" == *"clone --quiet --depth 1 --branch web $URL $LCARS_CATALOGUES_DIR/web.tmp"* ]]
   [ -d "$LCARS_CATALOGUES_DIR/web" ]
-  [[ "$(cat "$GIT_TRACE_FILE")" == *"clone --quiet --depth 1 http://forge.invalid/web/_catalogue.git $LCARS_CATALOGUES_DIR/web.tmp"* ]]
-  [ ! -e "$LCARS_CATALOGUES_DIR/web.tmp" ]
+  [ ! -d "$LCARS_CATALOGUES_DIR/web.tmp" ]
 }
 
 @test "materiel present : fetch + reset --hard, JAMAIS pull" {
-  # Le cache n'a pas d'historique a preserver. Un `pull` sur un depot reecrit par son proprietaire
-  # s'arrete sur un conflit de merge que personne ne viendra resoudre dans un provisionnement.
-  fake_forge "$(json_one web)"
-  export FAKE_ORGS="web"
+  stub_porte 0 "$(signe web)"
   fake_git
   seed_local "web"
 
   run bash "$MOD" apply
   [ "$status" -eq 0 ]
-  [[ "$(cat "$GIT_TRACE_FILE")" == *"fetch --quiet --depth 1 origin HEAD"* ]]
+  [[ "$(cat "$GIT_TRACE_FILE")" == *"fetch --quiet --depth 1 origin refs/heads/web"* ]]
   [[ "$(cat "$GIT_TRACE_FILE")" == *"reset --quiet --hard FETCH_HEAD"* ]]
-  [[ "$(cat "$GIT_TRACE_FILE")" != *" pull"* ]]
+  refute [[ "$(cat "$GIT_TRACE_FILE")" == *" pull"* ]]
 }
 
 @test "check : materiel en retard sur sa source = DRIFT nomme" {
-  fake_forge "$(json_one web)"
-  export FAKE_ORGS="web"
-  fake_git   # ls-remote rend deadbeef…, rev-parse rend 0000… : deux shas differents
+  stub_porte 0 "$(signe web)"
+  fake_git
   seed_local "web"
 
   run bash "$MOD" check
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
   [[ "$output" == *"web en retard sur sa source"* ]]
 }
 
-# ─── D1 : le nom reserve vaut aussi pour les STORES ─────────────────────────────────────────────
-
-@test "D1: un depot catalogue dans un espace PERSO ne signe rien — le gate admin ne se pousse pas" {
-  # ⚠ LE TROU DU TROISIEME REGARD : orgs et comptes perso partagent l'espace de noms, et rien ne
-  # verifiait le type du proprietaire. `alice` poussait un depot public `catalogue` chez elle ->
-  # clone de son materiel dans /home/catalogues, roster derive pour le mint. La sonde /orgs/alice
-  # rend 404 (espace perso prouve) : rien n'est clone, et un materiel local sous ce nom est retire
-  # comme tout catalogue que la forge n'installe plus.
-  fake_forge "$(json_one alice)"
-  export FAKE_ORGS=""
+@test "l'adresse de clone vient de la PORTE, elle n'est pas rebatie ici" {
+  # Le geste ne connait plus ni le nom du magasin ni l'org : il clone ce que la porte lui donne.
+  stub_porte 0 "$(printf 'OK\tweb\thttp://ailleurs.test/autre/_cat.git')"
   fake_git
-  seed_local "alice"
 
   run bash "$MOD" apply
   [ "$status" -eq 0 ]
-  [[ "$(cat "$GIT_TRACE_FILE")" != *clone* ]]
-  [ ! -d "$LCARS_CATALOGUES_DIR/alice" ]
+  [[ "$(cat "$GIT_TRACE_FILE")" == *"http://ailleurs.test/autre/_cat.git"* ]]
 }
 
-@test "D1: type du proprietaire ILLISIBLE — ni converge, ni supprime, et c'est DIT" {
-  # `{:error}` n'est pas « pas une org » : conclure de l'absence de reponse retrograderait un
-  # catalogue installe sur un hoquet — ou, dans l'autre sens, clonerait un depot non signe.
-  fake_forge "$(json_one web)"
-  export FAKE_ORGS="" FAKE_ORG_MUTE="web"
+@test "la porte est appelee UNE fois, avec l'adresse de la forge dans son environnement" {
+  stub_porte 0 "$(signe web)"
+  fake_git
+
+  run bash "$MOD" apply
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^ARGV:tool catalogue-installed$' "$CALLS")" -eq 1 ]
+  [[ "$(grep '^ENVURL:' "$CALLS")" == "ENVURL:http://forge.invalid" ]]
+}
+
+# ─── HOLD : la lecture n'a pas conclu — ni converge, ni supprime ─────────────────────────────────
+
+@test "HOLD proprietaire : materiel laisse EN L'ETAT, et le balayage ne l'emporte pas" {
+  stub_porte 0 "$(retient web proprietaire)"
   fake_git
   seed_local "web"
 
   run bash "$MOD" apply
-  [ "$status" -ne 0 ]
-  # ⚠ LA CAUSE EST NOMMEE, et le temoin jumeau (manifeste ILLISIBLE) attend l'AUTRE mot. Deux facons
-  # de ne pas savoir sous un seul message enverraient l'operateur regarder le mauvais objet.
-  [[ "$output" == *"proprietaire illisible"* ]]
-  [[ "$output" != *"manifeste illisible"* ]]
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"web : proprietaire illisible"*"EN L'ETAT"* ]]
   [ -d "$LCARS_CATALOGUES_DIR/web" ]
-  [[ "$(cat "$GIT_TRACE_FILE")" != *clone* ]]
+  refute [[ "$(cat "$GIT_TRACE_FILE")" == *clone* ]]
 }
 
-# ─── L'IDENTITE : un depot ne signe QUE le catalogue qu'il DECLARE ──────────────────────────────
-#
-# L'adresse dit ou regarder, le manifeste dit ce que c'est. Sans ce garde, tout depot pose a
-# l'adresse d'un magasin dans une org quelconque etait clone et SERVI sous le nom de cette org — et
-# ses roles descendaient dans le roster du mint.
+@test "HOLD manifeste : la MOITIE qui n'a pas conclu est nommee — pas l'autre" {
+  # Deux facons de ne pas savoir, et un refus qui nomme la mauvaise envoie l'operateur
+  # regarder le mauvais objet.
+  stub_porte 0 "$(retient web manifeste)"
+  fake_git
+  seed_local "web"
 
-@test "IDENTITE: un depot a l'adresse d'un magasin qui declare un AUTRE nom ne signe rien" {
-  # `web/_catalogue` est exactement la ou un magasin se pose, dans une vraie org. Ce qui le disqualifie
-  # est son manifeste : il ne declare pas `web`, donc il n'est pas le magasin de `web`.
-  fake_forge "$(json_one web)"
-  export FAKE_ORGS="web" FAKE_BAD_MANIFEST="web"
+  run bash "$MOD" check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"web : manifeste illisible"* ]]
+  refute [[ "$output" == *proprietaire* ]]
+}
+
+# ─── WARN : la branche a repondu et n'est PAS un magasin ─────────────────────────────────────────
+
+@test "WARN : la phrase de la porte est rendue telle quelle, et rien n'est clone" {
+  stub_porte 0 "$(dit web 'lcars/_catalogues:web se déclare « autre » — ce n est pas le magasin de web')"
+  fake_git
+
+  run bash "$MOD" apply
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"se déclare « autre »"* ]]
+  [ ! -d "$LCARS_CATALOGUES_DIR/web" ]
+  refute [[ "$(cat "$GIT_TRACE_FILE")" == *clone* ]]
+}
+
+@test "⚠ UN WARN NE RETIENT RIEN : du materiel local de ce nom est un reliquat, et il est retire" {
+  # La branche existe mais n'est pas le magasin de `web` : garder son materiel servirait un
+  # catalogue sous un nom que la forge ne lui reconnait pas.
+  stub_porte 0 "$(dit web 'non signe')"
   fake_git
   seed_local "web"
 
   run bash "$MOD" apply
   [ "$status" -eq 0 ]
-  [[ "$(cat "$GIT_TRACE_FILE")" != *clone* ]]
-  # Non signe = non vu : le materiel local part au balayage, comme pour tout catalogue desinstalle.
-  # Et ca SE DIT — ce module supprime, il ne le fait pas en silence.
-  [[ "$output" == *"se declare"* ]]
+  [[ "$output" == *"materiel de web retire"* ]]
   [ ! -d "$LCARS_CATALOGUES_DIR/web" ]
 }
 
-@test "IDENTITE: un depot SANS manifeste ne signe rien — 404 est une reponse" {
-  fake_forge "$(json_one web)"
-  export FAKE_ORGS="web" FAKE_NO_MANIFEST="web"
-  fake_git
-  # ⚠ LE MATERIEL EST POSE AVANT, et sans lui ce temoin ne mesurait rien : `[ ! -d ... ]` passait
-  # parce que le repertoire n'avait jamais existe. Ce qu'il faut tenir est que le 404 est une
-  # REPONSE, donc qu'il autorise la SUPPRESSION — pas seulement qu'il n'autorise pas le clone.
-  seed_local "web"
+# ─── FORGE INCONNUE : le verbe depend de ce que la machine porte deja ────────────────────────────
 
-  run bash "$MOD" apply
+@test "FORGE INCONNUE : sans catalogue installe, c est un WARN — il n y a rien a comparer" {
+  export FORGE_BASE_URL=""
+  run bash "$MOD" check
   [ "$status" -eq 0 ]
-  [[ "$(cat "$GIT_TRACE_FILE")" != *clone* ]]
-  [ ! -d "$LCARS_CATALOGUES_DIR/web" ]
-}
-
-@test "IDENTITE: un 200 qui ne declare RIEN en colonne zero ne signe pas, et le DIT" {
-  # ⚠ LE SEUL CHEMIN QUI SUPPRIMAIT SANS UN MOT. Le manifeste repond 200, `awk` ne trouve pas de
-  # `name:` en colonne zero, `declared` est vide : ni HOLD, ni signature, et le balayage efface le
-  # materiel. La seule sortie etait « materiel de web retire » — l'operateur ne savait pas quelle
-  # couche avait dit non. Un espace d'indentation devant `name:` suffisait a le declencher.
-  fake_forge "$(json_one web)"
-  export FAKE_ORGS="web" FAKE_BAD_MANIFEST="web" FAKE_MANIFEST_INDENTED="web"
-  fake_git
-  seed_local "web"
-
-  run bash "$MOD" apply
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"COLONNE ZERO"* ]]
-  [[ "$(cat "$GIT_TRACE_FILE")" != *clone* ]]
-  [ ! -d "$LCARS_CATALOGUES_DIR/web" ]
-}
-
-@test "IDENTITE: manifeste ILLISIBLE — ni converge, ni supprime, et c'est DIT" {
-  # ⚠ LA DIFFERENCE QUI COUTE. 404 est une reponse (« pas un magasin ») et autorise la suppression ;
-  # une forge muette est une ABSENCE de reponse et n'autorise rien. Les confondre effacerait le
-  # materiel d'un catalogue bien installe sur un hoquet reseau — la faute que ce fichier entier
-  # existe pour empecher, un endpoint plus loin.
-  fake_forge "$(json_one web)"
-  export FAKE_ORGS="web" FAKE_MANIFEST_MUTE="web"
-  fake_git
-  seed_local "web"
-
-  run bash "$MOD" apply
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"manifeste illisible"* ]]
-  [[ "$output" != *"proprietaire illisible"* ]]
-  [ -d "$LCARS_CATALOGUES_DIR/web" ]
-  [[ "$(cat "$GIT_TRACE_FILE")" != *clone* ]]
-}
-
-@test "D4: une liste TRONQUEE refuse — jamais une convergence sur une liste partielle" {
-  # Le serveur borne la page a SA limite. Une page lue comme la totalite ferait SUPPRIMER le
-  # materiel des catalogues au-dela de la borne — la meme classe que la forge muette, en pire :
-  # la reponse a l'air entiere.
-  fake_forge "$(json_one web)"
-  export FAKE_ORGS="web" FAKE_TOTAL=7
-  fake_git
-  seed_local "web"
-
-  run bash "$MOD" apply
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"TRONQUEE"* ]]
-  [ -d "$LCARS_CATALOGUES_DIR/web" ]
-  [[ "$(cat "$GIT_TRACE_FILE")" != *clone* ]]
-}
-
-# ─── LE ROSTER DERIVE ───────────────────────────────────────────────────────────────────────────
-
-@test "FORGE INCONNUE : sans catalogue installe, c est un WARN — l ordre des rangs est normal" {
-  FORGE_BASE_URL="" run bash "$MOD" check
-  [ "$status" -eq 0 ] || { echo "un WARN ne doit pas colorer le verdict : $output"; return 1; }
-  [[ "$output" == *"AUCUN catalogue installe"* ]]
+  [[ "$output" == *"AUCUN catalogue installé ici"* ]]
 }
 
 @test "FORGE INCONNUE : avec du materiel LOCAL, c est un DRIFT — un etat-cible cesse d etre tenu" {
-  mkdir -p "$LCARS_CATALOGUES_DIR/web-demo"
-  FORGE_BASE_URL="" run bash "$MOD" check
-  # ⚠ 1, PAS 2 : les deux verbes n ont pas le meme bareme. `verdict_check` rend 1 sur drift et 2 sur
-  # echec ; `verdict_apply` l inverse — un apply qui n a pas converge est un ECHEC, un check qui
-  # constate un ecart ne l est pas. Les deux temoins voisins le montrent en s opposant.
-  [ "$status" -eq 1 ] || { echo "le drift n a pas colore le verdict (rc=$status) : $output"; return 1; }
-  [[ "$output" == *"1 catalogue(s) sont deja installes"* ]]
-  # et le refus NOMME la sortie : c est un rail, pas un constat
-  [[ "$output" == *"48-forge-host"* ]]
+  export FORGE_BASE_URL=""
+  seed_local "web"
+  run bash "$MOD" check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"adresse de forge inconnue alors que 1 catalogue(s)"* ]]
+  [ -d "$LCARS_CATALOGUES_DIR/web" ]
 }
 
 @test "FORGE INCONNUE : l apply distingue les deux cas comme le check — meme fonction" {
-  mkdir -p "$LCARS_CATALOGUES_DIR/web-demo"
-  FORGE_BASE_URL="" run bash "$MOD" apply
+  export FORGE_BASE_URL=""
+  seed_local "web"
+  run bash "$MOD" apply
   [ "$status" -eq 2 ]
-  [[ "$output" == *"deja installes"* ]]
+  [[ "$output" == *"adresse de forge inconnue alors que 1 catalogue(s)"* ]]
+  [ -d "$LCARS_CATALOGUES_DIR/web" ]
+}
+
+# ─── LE RELIQUAT DE L'ANCIEN CACHE ───────────────────────────────────────────────────────────────
+
+@test "l ancien cache sous /home est DIT aux deux verbes, et il n est jamais touche" {
+  export LCARS_LEGACY_CATALOGUES_DIR="$BATS_TEST_TMPDIR/ancien"
+  mkdir -p "$LCARS_LEGACY_CATALOGUES_DIR/web"
+  stub_porte 0 ''
+  fake_git
+
+  run bash "$MOD" check
+  [[ "$output" == *"$LCARS_LEGACY_CATALOGUES_DIR subsiste"* ]]
+  run bash "$MOD" apply
+  [[ "$output" == *"$LCARS_LEGACY_CATALOGUES_DIR subsiste"* ]]
+  [ -d "$LCARS_LEGACY_CATALOGUES_DIR/web" ]
 }

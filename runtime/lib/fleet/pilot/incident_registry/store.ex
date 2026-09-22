@@ -1,6 +1,7 @@
 defmodule Fleet.Pilot.IncidentRegistry.Store do
   @moduledoc """
-  Incident persistence through a local WAL and an ops-branch forge file. Both use
+  Incident persistence through a local WAL and a forge file on the system repository's
+  `incidents` branch. Both use
   one encoder and merge rule; recurrence policy belongs to IncidentRegistry.
 
   WAL writes replace a temporary file by rename, without fsync. Failed or corrupt
@@ -92,6 +93,9 @@ defmodule Fleet.Pilot.IncidentRegistry.Store do
 
     case putter.(repo(opts), path(opts), encoded, put_opts) do
       {:ok, _} -> {:ok, merged}
+      # The branch does not exist: the recipe lays it, the runtime never does. Named, so the
+      # registry does not count it as "forge unreachable" for hours (380 times on the beta bench).
+      {:error, {:http, 404, _}} -> {:error, {:registry_branch_missing, repo(opts), branch(opts)}}
       {:error, _} = err -> err
     end
   end
@@ -286,8 +290,20 @@ defmodule Fleet.Pilot.IncidentRegistry.Store do
       opts[:repo] || Application.get_env(:lcars_fleet, :pilot_incident_registry_repo) ||
         Fleet.Pilot.IncidentRegistry.Escalation.ops_repo()
 
+  @doc """
+  Branch this store writes the registry to (`:pilot_incident_registry_branch`, default
+  `incidents`).
+
+  Public because the gesture that VERIFIES the system repository must name the same branch:
+  a second writing of that name is a branch the registry writes and nothing checks.
+  """
+  @spec branch() :: String.t()
+  def branch, do: branch([])
+
   defp branch(opts),
-    do: opts[:branch] || Application.get_env(:lcars_fleet, :pilot_incident_registry_branch, "ops")
+    do:
+      opts[:branch] ||
+        Application.get_env(:lcars_fleet, :pilot_incident_registry_branch, "incidents")
 
   defp path(opts),
     do:

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SOURCE: deploy/modules.d/00-preflight.sh
 # AUTHOR: DrDree
-# STARDATE: 2026-07-05
+# STARDATE: 2026-09-14
 # STATUS: le préflight des deux terrains : système, substrat, docker, forge, ports, instance
 # APPLY-ON: any
 # CHECK-ON: any
@@ -10,6 +10,12 @@
 # Ce module mesure et ne pose rien. Il parle deux fois : des lignes OK/WARN/DRIFT/FAIL pour un humain,
 # et des faits `nom=valeur` (`p_fact`, dans PROV_FACTS_FILE) pour l'installeur, qui décide dessus.
 # Chaque fait se pose au point de mesure, jamais dans un récapitulatif.
+#
+# Deux phases, que « provision mesure » choisit (PROV_PHASE). Sans privilège, ce que le compte de
+# l'opérateur lit, avant sudo : de quoi montrer la grille et refuser tôt. En root, les refus qui
+# protègent la machine se décident sans rien reprendre de la première : la déclaration d'un Linux
+# dédié, le canal, chaque port de ce projet et les projets compose présents, plus l'écriture sous la
+# racine. Joué par apply ou doctor, le préflight prend les deux phases à la suite.
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
@@ -19,7 +25,7 @@ set -euo pipefail
 # jour et dépendances automatiques, sous la forme « nom (date) », une par ligne.
 apt_installs_depuis() {
   local depuis="$1" f
-  for f in "${LCARS_APT_HISTORY:-/var/log/apt/history.log}"*; do
+  for f in "$(prov_decor /var/log/apt/history.log)"*; do
     [[ -r "$f" ]] || continue
     case "$f" in *.gz) zcat "$f" ;; *) cat "$f" ;; esac
   done 2>/dev/null | awk -v depuis="$depuis" '
@@ -39,13 +45,53 @@ apt_installs_depuis() {
     }'
 }
 
-check() {
+ancetre_existant() { # ancetre_existant <chemin> → le chemin s'il existe, sinon son ancêtre le plus proche qui existe
+  local p="$1"
+  while [[ ! -e "$p" ]]; do p="$(dirname "$p")"; done
+  printf '%s\n' "$p"
+}
+
+# hors de l'installeur, PROV_FACTS_FILE est vide : un fait qui ne sert qu'à lui ne se calcule pas
+faits_attendus() { [[ -n "${PROV_FACTS_FILE:-}" ]]; }
+
+port_de() { # port_de <deck|forge|ssh> → le port que ce projet publie sous ce nom
+  case "$1" in deck) echo "$PROV_DECK_PORT" ;; forge) echo "$PROV_FORGE_HOST_PORT" ;; ssh) echo "$PROV_SSH_PORT" ;; esac
+}
+
+# le processus principal que ce systemd donne à lcars-landing : sous WSL, un processus d'une autre
+# distribution n'est pas nommé par ss, et un pid de cette machine ne le confond pas
+landing_tient() { # landing_tient <processus nommé par port_process> → 0 si c'est le processus principal de lcars-landing
+  local pid
+  pid="$(systemctl show -p MainPID --value lcars-landing.service 2>/dev/null)" || return 1
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
+  [[ "$1" =~ \(pid\ ([0-9]+) && "${BASH_REMATCH[1]}" == "$pid" ]]
+}
+
+# Dans le conteneur, le deck de l'instance tourne sous le compte système et root n'a pas CAP_SYS_PTRACE :
+# /proc/<pid>/fd lui est fermé, ni ss ni rien ne nomme le processus. La table des sockets du noyau porte
+# l'uid de chaque écoute, lisible sans privilège, et le réseau d'un conteneur n'appartient qu'à lui : une
+# écoute du port du deck sous le compte système est le deck de cette instance.
+deck_de_l_instance() { # deck_de_l_instance <port> → 0 si, sous docker, une écoute de ce port appartient au compte système
+  local uid hex f
+  local -a tables=()
+  [[ "$PROV_SUBSTRATE" == docker ]] || return 1
+  uid="$(awk -F: -v n="$PROV_SYSTEM_USER" '$1 == n {print $3; exit}' "$(prov_decor /etc/passwd)" 2>/dev/null)" || return 1
+  [[ "$uid" =~ ^[0-9]+$ ]] || return 1
+  for f in /proc/net/tcp /proc/net/tcp6; do [[ ! -r "$(prov_decor "$f")" ]] || tables+=("$(prov_decor "$f")"); done
+  [[ "${#tables[@]}" -gt 0 ]] || return 1
+  printf -v hex '%04X' "$1"
+  # colonnes : sl, adresse locale, distante, état (0A : LISTEN), files, minuterie, retransmissions, uid
+  awk -v p=":$hex" -v u="$uid" '$4 == "0A" && substr($2, length($2) - 4) == p && $8 == u { t = 1 } END { exit !t }' "${tables[@]}"
+}
+
+MIENS=("$PROV_FORGE_PROJECT" "$PROV_FORGE_BASE-fleet" "$PROV_RUNNER_PROJECT")
+DOCKER_REPOND=0
+
+mesure_sans_privilege() {
   # ─── Le système ───────────────────────────────────────────────────────────────────────────────
   if command -v dpkg >/dev/null && command -v apt-get >/dev/null; then
-    p_fact os debian
     p_ok "OS de la famille Debian (dpkg et apt présents)"
   else
-    p_fact os autre
     p_drift "OS hors famille Debian : dpkg ou apt absent — ce provisionnement cible Debian et Ubuntu"
   fi
 
@@ -58,22 +104,13 @@ check() {
   p_fact distro_version "$distro_version"
   p_fact noyau "$(uname -r)"
   p_fact cpu "$(nproc 2>/dev/null || echo 1)"
-  if [[ -d "${LCARS_SYSTEMD_RUN:-/run/systemd/system}" ]]; then p_fact systemd oui; else p_fact systemd non; fi
+  if [[ -d "$(prov_decor /run/systemd/system)" ]]; then p_fact systemd oui; else p_fact systemd non; fi
 
-  p_fact bash "$BASH_VERSION"
-  if [[ "${BASH_VERSINFO[0]}" -gt 4 || ( "${BASH_VERSINFO[0]}" -eq 4 && "${BASH_VERSINFO[1]}" -ge 4 ) ]]; then
-    p_ok "bash ${BASH_VERSION} (plancher 4.4)"
-  else
-    p_drift "bash ${BASH_VERSION} < 4.4 — un bash récent est requis"
-  fi
-  local echange; echange="$(mktemp -d "${TMPDIR:-/tmp}/prov-echange.XXXXXX")"
-  mkdir -p "$echange/a" "$echange/b"
-  if mv --exchange -T -- "$echange/a" "$echange/b" 2>/dev/null; then
-    p_ok "« mv --exchange » joué : les bascules de dossiers ont une forme atomique (coreutils 9.5)"
-  else
-    p_fail "« mv --exchange » refusé (coreutils 9.5 requis) — les bascules de dossiers n'ont pas de forme atomique"
-  fi
-  rm -rf -- "$echange"
+  # des faits sans verdict : l'installeur choisit ceux qu'il exige, 10-packages les pose dans ce système
+  local tool
+  for tool in curl git jq; do
+    if command -v "$tool" >/dev/null; then p_fact "$tool" oui; else p_fact "$tool" absent; fi
+  done
 
   local arch; arch="$(uname -m)"
   p_fact arch "$arch"
@@ -83,117 +120,88 @@ check() {
   esac
 
   local ram_mb
-  ram_mb="$(awk '/^MemTotal:/ {printf "%d", $2/1024}' /proc/meminfo 2>/dev/null || echo 0)"
+  ram_mb="$(awk '/^MemTotal:/ {printf "%d", $2/1024}' "$(prov_decor /proc/meminfo)" 2>/dev/null || echo 0)"
   p_fact ram_mb "$ram_mb"
   if [[ "$ram_mb" -lt 1536 ]]; then
     p_drift "RAM ${ram_mb} Mo < 1536 Mo — la release ne se construira pas (WSL : .wslconfig, [wsl2] memory=)"
   elif [[ "$ram_mb" -lt 3072 ]]; then
     p_warn "RAM ${ram_mb} Mo < 3072 Mo — construction lente possible"
-    p_ok "RAM ${ram_mb} Mo (plancher 1536 Mo)"
   else
     p_ok "RAM ${ram_mb} Mo"
   fi
 
-  local disk_mb probe_dir
-  probe_dir="$(dirname "$PROV_PREFIX")"
-  [[ -d "$probe_dir" ]] || probe_dir="/"
-  disk_mb="$(df -Pm "$probe_dir" | awk 'NR==2 {print $4}')"
+  # la racine se pose sur le système de fichiers de son ancêtre existant : l'espace se mesure là
+  local sous disk_mb
+  sous="$(ancetre_existant "$PROV_ROOT")"
+  disk_mb="$(df -Pm "$sous" | awk 'NR==2 {print $4}')"
+  p_fact racine "$(prov_canon "$PROV_ROOT")"
   p_fact disque_mb "$disk_mb"
   if [[ "$disk_mb" -lt 2048 ]]; then
-    p_drift "disque ${disk_mb} Mo libres sur $probe_dir < 2048 Mo — libérer de l'espace avant l'installation"
+    p_drift "disque ${disk_mb} Mo libres sur $sous < 2048 Mo — libérer de l'espace avant l'installation"
   elif [[ "$disk_mb" -lt 5120 ]]; then
-    p_warn "disque ${disk_mb} Mo libres sur $probe_dir < 5120 Mo — juste"
-    p_ok "disque ${disk_mb} Mo libres ($probe_dir)"
+    p_warn "disque ${disk_mb} Mo libres sur $sous < 5120 Mo — juste"
   else
-    p_ok "disque ${disk_mb} Mo libres ($probe_dir)"
+    p_ok "disque ${disk_mb} Mo libres ($sous)"
   fi
 
-  local humain; humain="${SUDO_USER:-$(id -un)}"
-  p_fact utilisateur "$humain"
-  p_fact groupes "$(id -Gn "$humain" 2>/dev/null | tr ' ' ',')"
+  # les groupes que la base donne à l'humain servi : c'est root qui travaille, pas la session qui mesure
+  p_fact utilisateur "$PROV_HUMAN"
+  p_fact groupes "$(id -Gn -- "$PROV_HUMAN" 2>/dev/null | tr ' ' ',')"
 
   # ─── Le substrat ──────────────────────────────────────────────────────────────────────────────
   p_fact substrat "$PROV_SUBSTRATE"
-
-  if [[ "$PROV_SUBSTRATE" == "linux" ]]; then
-    if [[ -n "${LCARS_ALLOW_ANY_HOST:-}" ]]; then
-      p_fact consent env
-      p_warn "Linux natif déclaré dédié (LCARS_ALLOW_ANY_HOST) — ce provisionnement possède la machine et n'a pas de désinstalleur"
-    else
-      p_fact consent none
-      p_fail "Linux natif sans déclaration : LCARS s'installe sur un terrain dédié, qu'il possède (/etc, /opt/lcars, groupes, comptes) et qui se refait plutôt qu'il ne se désinstalle. Pour déclarer cette machine dédiée : LCARS_ALLOW_ANY_HOST=1. Sinon : une distribution WSL2, ou le conteneur (bash install.sh)"
-    fi
-  else
-    p_fact consent sans-objet
+  local noyau_wsl=""
+  [[ "$PROV_SUBSTRATE" != wsl ]] || noyau_wsl="$(cat "$(prov_decor /proc/version)" 2>/dev/null || true)"
+  if [[ -n "$noyau_wsl" && ! "${noyau_wsl,,}" =~ wsl2|microsoft-standard ]]; then
+    p_drift "WSL1 ($(uname -r)) — bwrap exige WSL2 : « wsl --set-version <distro> 2 » côté Windows"
   fi
-
-  if [[ "$PROV_SUBSTRATE" == "wsl" ]]; then
-    if grep -qi 'WSL2\|microsoft-standard' /proc/version 2>/dev/null; then
-      p_fact wsl2 oui
-      p_ok "WSL2 (noyau $(uname -r))"
-    else
-      p_fact wsl2 non
-      p_drift "WSL1 ($(uname -r)) — bwrap exige WSL2 : « wsl --set-version <distro> 2 » côté Windows"
-    fi
-  else
-    p_fact wsl2 sans-objet
-  fi
-
-  local knob
-  knob="$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || echo absent)"
-  p_fact userns_knob "$knob"
-  case "$knob" in
-    0)      p_ok "kernel.apparmor_restrict_unprivileged_userns=0" ;;
-    absent) p_ok "pas de restriction AppArmor sur les user namespaces" ;;
-    *)      p_warn "kernel.apparmor_restrict_unprivileged_userns=$knob — bwrap peut être bloqué ; la sonde réelle est dans 10-packages" ;;
-  esac
 
   # ─── Docker, sur tout substrat ────────────────────────────────────────────────────────────────
   # Le fait est mesuré partout ; le refus ne vaut que sous WSL, où la forge n'a pas d'autre forme.
-  # Les faits de ce bloc sont tous posés dans les deux états, vides quand ils n'ont pas d'objet.
-  local docker_repond=0 serveur=""
+  local docker=absent serveur="" saveur=""
   if docker_endpoint; then
-    docker_repond=1
+    docker=oui DOCKER_REPOND=1
     serveur="$("$PROV_DOCKER_BIN" version --format '{{.Server.Version}}|{{.Server.Platform.Name}}' 2>/dev/null || true)"
+    saveur="${serveur#*|}"
     # le paquet docker.io ne nomme pas sa plateforme : le paquet propriétaire d'un dockerd local la donne
-    local saveur="${serveur#*|}" dockerd
-    dockerd="$(command -v dockerd || true)"
-    if [[ -z "$saveur" && -n "$dockerd" ]]; then
+    local dockerd; dockerd="$(command -v dockerd || true)"
+    if [[ -z "$saveur" && -n "$dockerd" ]] && faits_attendus; then
       saveur="$(dpkg-query -S "$(readlink -f "$dockerd")" 2>/dev/null | head -n1 | cut -d: -f1 || true)"
     fi
-    p_fact docker oui
-    p_fact docker_bin "$PROV_DOCKER_BIN"
-    p_fact docker_host "${PROV_DOCKER_HOST:-${DOCKER_HOST:-}}"
-    p_fact docker_server "${serveur%%|*}"
-    p_fact docker_flavor "$saveur"
-    p_fact docker_why ""
-    p_ok "docker répond (serveur ${serveur%%|*}, ${PROV_DOCKER_HOST:-${DOCKER_HOST:-endpoint par défaut}})"
+    p_ok "docker répond (serveur ${serveur%%|*}, $PROV_DOCKER_HOST)"
+    [[ -z "$PROV_DOCKER_ECARTE" ]] \
+      || p_warn "DOCKER_HOST=$PROV_DOCKER_ECARTE ne répond pas : le daemon retenu est celui de la socket par défaut, $PROV_DOCKER_HOST"
   else
-    if [[ "${PROV_DOCKER_DENIED:-0}" == "1" ]]; then p_fact docker refuse; else p_fact docker absent; fi
-    p_fact docker_bin ""
-    p_fact docker_host ""
-    p_fact docker_server ""
-    p_fact docker_flavor ""
-    p_fact docker_why "$PROV_DOCKER_WHY"
+    [[ "$PROV_DOCKER_DENIED" != "1" ]] || docker=refuse
     if [[ "$PROV_SUBSTRATE" == "wsl" ]]; then
       p_fail "$PROV_DOCKER_WHY — sans docker la forge de LCARS n'a aucune forme : 63-forge-tokens et 66-deck-oidc ne convergeront pas"
+    elif [[ "$PROV_SUBSTRATE" == "docker" ]]; then
+      # l'image ne porte pas de CLI docker : la forge, le runner et l'instance se pilotent depuis l'hôte
+      p_ok "docker ne sert pas dans ce conteneur ($PROV_DOCKER_WHY) — la norme : forge, runner et instance se pilotent depuis l'hôte"
     else
       p_warn "$PROV_DOCKER_WHY"
     fi
   fi
+  p_fact docker "$docker"
+  p_fact docker_bin "$PROV_DOCKER_BIN"
+  p_fact docker_host "$PROV_DOCKER_HOST"
+  p_fact docker_host_ecarte "$PROV_DOCKER_ECARTE"
+  p_fact docker_server "${serveur%%|*}"
+  p_fact docker_flavor "$saveur"
+  p_fact docker_why "$PROV_DOCKER_WHY"
 
-  if [[ "$docker_repond" -eq 0 ]]; then
-    p_fact compose sans-objet
-    p_fact compose_why ""
-  elif docker_compose_cmd "$PROV_DOCKER_BIN"; then
-    p_fact compose oui
-    p_fact compose_why ""
-    p_ok "docker compose répond ($PROV_COMPOSE_CMD)"
-  else
-    p_fact compose non
-    p_fact compose_why "$PROV_COMPOSE_WHY"
-    p_warn "$PROV_COMPOSE_WHY"
+  local compose=sans-objet
+  if [[ "$docker" == oui ]]; then
+    if docker_compose_cmd "$PROV_DOCKER_BIN"; then
+      compose=oui
+      p_ok "docker compose répond ($PROV_COMPOSE_CMD)"
+    else
+      compose=non
+      p_warn "$PROV_COMPOSE_WHY"
+    fi
   fi
+  p_fact compose "$compose"
+  p_fact compose_why "$PROV_COMPOSE_WHY"
 
   # ─── La forge : fournie, ou montée par l'installeur ───────────────────────────────────────────
   if [[ -n "${FORGE_BASE_URL:-}" && "${PROV_FORGE_MONTEE:-}" == "1" ]]; then
@@ -214,39 +222,23 @@ check() {
     p_fact forge_joignable sans-objet
   fi
 
-  # ─── Les ports et le projet compose ───────────────────────────────────────────────────────────
-  local base="$PROV_FORGE_BASE" nom port etat landing
-  local -a miens=("$PROV_FORGE_PROJECT" "$base-fleet" "$PROV_RUNNER_PROJECT")
-  landing="$(env_field "${LCARS_SERVICES_ENV:-/etc/lcars/services.env}" LCARS_LANDING_PORT)"
-  for nom in forge:"$PROV_FORGE_HOST_PORT" deck:"$PROV_DECK_PORT" ssh:"$PROV_SSH_PORT"; do
-    port="${nom#*:}"
-    etat="$(port_state "$port" "${miens[@]}")"
-    [[ "$etat" != pris* || "$nom" != deck:* || "$port" != "$landing" ]] || etat="nous lcars-landing (service)"
-    p_fact "port_${nom%%:*}" "$port $etat"
-    [[ "$etat" != pris* ]] || p_warn "port $port (${nom%%:*}) $etat"
-  done
-  p_fact projet "$base"
-  local pris=""
-  if [[ "$docker_repond" -eq 1 ]]; then
-    for nom in "${miens[@]}"; do
-      [[ -z "$("$PROV_DOCKER_BIN" ps -a --filter "label=com.docker.compose.project=$nom" -q 2>/dev/null)" ]] || pris="${pris:+$pris,}$nom"
-    done
-  fi
-  p_fact projet_pris "$pris"
-  [[ -z "$pris" ]] || p_warn "projet compose déjà présent sur ce daemon : $pris"
-
   # ─── L'instance : ce qu'elle porte déjà ───────────────────────────────────────────────────────
   if [[ "$PROV_SUBSTRATE" == "docker" ]]; then
     p_fact apt_installs sans-objet
-  else
-    local naissance; naissance="${LCARS_INSTANCE_BIRTH:-$(stat -c %W / 2>/dev/null || true)}"
+  elif faits_attendus; then
+    local naissance; naissance="$(stat -c %W / 2>/dev/null || true)"
     if [[ "$naissance" =~ ^[1-9][0-9]*$ ]]; then
       p_fact apt_installs "$(apt_installs_depuis "$naissance" | paste -sd, -)"
     else
       p_fact apt_installs inconnu
     fi
   fi
-  p_fact comptes_humains "$(awk -F: '$3 >= 1000 && $3 < 60000 && $1 != "nobody" {print $1}' "${LCARS_PASSWD_FILE:-/etc/passwd}" 2>/dev/null | paste -sd, -)"
+  # la frontière système/humain est celle de la lib : login.defs, bornes comprises ; illisible, le fait reste vide
+  local humains=""
+  if prov_uid_bounds; then
+    humains="$(awk -F: -v m="$PROV_UID_MIN" -v M="$PROV_UID_MAX" '$3+0 >= m && $3+0 <= M {print $1}' "$(prov_decor /etc/passwd)" 2>/dev/null | paste -sd, -)"
+  fi
+  p_fact comptes_humains "$humains"
 
   # ─── sudo ─────────────────────────────────────────────────────────────────────────────────────
   if [[ "$EUID" -eq 0 ]]; then
@@ -256,40 +248,189 @@ check() {
   else
     p_fact sudo absent
   fi
+}
 
-  # ─── Le canal : qui a posé le produit, et ce que cet arbre poserait ───────────────────────────
-  p_fact channel_tree "$(prov_channel_here)"
-  # appel nu : le p_fail d'un canal illisible doit compter dans le verdict
-  if prov_channel >/dev/null; then
-    p_fact channel "$PROV_CHANNEL"
-    if [[ "$PROV_CHANNEL" == "aucun" ]]; then
-      p_ok "aucun canal d'installation ($PROV_CHANNEL_FILE absent) — machine jamais posée ; cet arbre poserait « $(prov_channel_here) »"
-    elif [[ "$PROV_CHANNEL" == "inconnu" ]]; then
-      p_warn "canal d'installation inconnu : un produit est posé ($PROV_PREFIX) sans tampon ($PROV_CHANNEL_FILE) ; un kit ou une source le reprend et l'écrit"
-    else
-      p_ok "canal d'installation : $PROV_CHANNEL ($PROV_CHANNEL_FILE) — cet arbre poserait « $(prov_channel_here) »"
-    fi
+# ─── La déclaration d'un Linux dédié ────────────────────────────────────────────────────────────
+mesure_declaration() {
+  if [[ "$PROV_SUBSTRATE" != "linux" ]]; then
+    p_fact consent sans-objet
+  elif [[ -n "${LCARS_ALLOW_ANY_HOST:-}" ]]; then
+    p_fact consent env
+    p_warn "Linux natif déclaré dédié (LCARS_ALLOW_ANY_HOST) — ce provisionnement possède la machine et n'a pas de désinstalleur"
+  elif [[ -e "$PROV_CHANNEL_FILE" ]]; then
+    # la déclaration a été faite à la pose : une machine posée est dédiée
+    p_fact consent posee
+    p_ok "Linux natif posé par LCARS ($PROV_CHANNEL_FILE) — la machine a été déclarée dédiée à sa pose"
   else
-    p_fact channel invalide
+    p_fact consent none
+    p_fail "Linux natif sans déclaration : LCARS s'installe sur un terrain dédié, qu'il possède (/etc, $PROV_ROOT, groupes, comptes) et qui se refait plutôt qu'il ne se désinstalle. Pour déclarer cette machine dédiée : LCARS_ALLOW_ANY_HOST=1. Sinon : une distribution WSL2, ou le conteneur (bash install.sh)"
   fi
+}
 
-  # ─── Les outils d'amorçage ────────────────────────────────────────────────────────────────────
-  local tool
-  for tool in curl git; do
-    if command -v "$tool" >/dev/null; then
-      p_fact "$tool" oui
-      p_ok "$tool présent"
+# ─── Le canal : qui a posé le produit, et ce que cet arbre poserait ─────────────────────────────
+# le fichier de canal est 0644 dans /etc/lcars 0755 (system.manifest) : le compte de l'opérateur le lit
+
+# la machine ne retient pas le chemin du checkout ou du kit qui l'a posée ; son journal (0644) en retient la
+# révision et la date
+pose_retenue() { # pose_retenue → « révision R, le AAAA-MM-JJ » lu dans le journal, ou rien
+  local rev quand
+  rev="$(sed -n 's/^source_rev  *//p' "$PROV_JOURNAL_FILE" 2>/dev/null | head -n1)"
+  quand="$(sed -n 's/^posed_at  *//p' "$PROV_JOURNAL_FILE" 2>/dev/null | head -n1)"
+  [[ -z "$rev" ]] || printf 'révision %s%s' "$rev" "${quand:+, le ${quand%%T*}}"
+}
+
+refus_de_canal() { # refus_de_canal <canal de la machine> <canal de cet arbre> — le FAIL, avec les deux gestes jouables
+  local canal="$1" ici="$2" pose meme refaire
+  pose="$(pose_retenue)"
+  if [[ "$canal" == kit ]]; then
+    meme="deploy/workstation up --from <kit.tar.gz>, avec le kit de la version voulue"
+  else
+    meme="deploy/workstation up, depuis le checkout qui l'a posée ou un autre clone du dépôt"
+  fi
+  [[ -z "$pose" ]] || pose=" (pose retenue par la machine : $pose)"
+  # la phase sans privilège connaît la distribution par WSL_DISTRO_NAME, que sudo ne transmet pas
+  local distro='<distro>'
+  [[ -z "${WSL_DISTRO_NAME:-}" ]] || distro="\"$WSL_DISTRO_NAME\""
+  case "$PROV_SUBSTRATE" in
+    wsl) refaire="la distribution se recrée (côté Windows : wsl --unregister $distro, puis une distribution neuve), et cet installeur s'y joue" ;;
+    *)   refaire="la machine se réinstalle, et cet installeur s'y joue" ;;
+  esac
+  p_fail "cette machine est installée par « $canal », et cet arbre poserait « $ici » — un canal ne se pose pas sur un autre$pose. Mise à jour par le même canal : $meme. Ou refaire le terrain, sans désinstalleur : $refaire"
+}
+
+mesure_canal() {
+  local ici; ici="$(prov_channel_here)"
+  p_fact channel_tree "$ici"
+  p_fact revision "$PROV_SOURCE_REV"
+  # appel nu : le p_fail d'un canal illisible doit compter dans le verdict
+  local canal=invalide
+  if prov_channel >/dev/null; then canal="$PROV_CHANNEL"; fi
+  p_fact channel "$canal"
+  case "$canal" in
+    aucun)    p_ok "aucun canal d'installation ($PROV_CHANNEL_FILE absent) — machine jamais posée ; cet arbre poserait « $ici »" ;;
+    "$ici")   p_ok "canal d'installation : $canal ($PROV_CHANNEL_FILE)" ;;
+    invalide) ;;
+    *)        refus_de_canal "$canal" "$ici" ;;
+  esac
+}
+
+# ─── Les ports ──────────────────────────────────────────────────────────────────────────────────
+# le deck est toujours à ce projet, la forge quand elle est celle du poste ; le port SSH n'est publié que par le conteneur
+port_du_projet() { [[ "$1" == deck || ( "$1" == forge && "$PROV_FORGE_DU_POSTE" -eq 1 ) ]]; }
+
+# en root, seul ce projet tient ses ports : ses conteneurs, que docker dit « nous », et le deck par la
+# landing de cette machine
+ETAT_VERIFIE=""
+verifier_port() { # verifier_port <nom> <port> → ETAT_VERIFIE ; un FAIL si un autre que ce projet tient le port
+  local nom="$1" port="$2" tenant
+  ETAT_VERIFIE="$(port_state "$port" "${MIENS[@]}")"
+  if [[ "$nom" == deck && "$ETAT_VERIFIE" == pris* ]] && deck_de_l_instance "$port"; then
+    ETAT_VERIFIE="nous deck de l'instance (compte $PROV_SYSTEM_USER)"
+    return 0
+  fi
+  case "$ETAT_VERIFIE" in
+    libre|nous*) return 0 ;;
+    pris)
+      ETAT_VERIFIE="pris sans processus visible"
+      if [[ "$PROV_SUBSTRATE" == wsl ]]; then
+        p_fail "port $port ($nom) écouté sans processus visible, même pour root : sous WSL2 le réseau est partagé, une autre distribution ou Windows le tient — relancer avec --port-$nom <autre port>, ou arrêter ce qui l'écoute dans l'autre distribution"
+      else
+        p_fail "port $port ($nom) écouté sans processus visible, même pour root — relancer avec --port-$nom <autre port>"
+      fi
+      return 0 ;;
+  esac
+  tenant="${ETAT_VERIFIE#pris par }"
+  if [[ "$nom" == deck ]] && landing_tient "$tenant"; then
+    ETAT_VERIFIE="nous lcars-landing (service)"
+    return 0
+  fi
+  p_fail "port $port ($nom) tenu par $tenant — ce projet doit être seul à le tenir : relancer avec --port-$nom <autre port>, ou arrêter ce qui le tient"
+}
+
+# en phase sans privilège, un port tenu par un processus est « tenu » : qui le tient, notre landing ou un autre, la
+# phase root le décide — même quand cette phase se joue en root pour la grille d'un installeur lancé à la main
+mesure_ports() {
+  local nom port etat
+  for nom in forge deck ssh; do
+    port="$(port_de "$nom")"
+    if [[ "$PROV_PHASE" != sans-privilege ]] && port_du_projet "$nom"; then
+      verifier_port "$nom" "$port"; etat="$ETAT_VERIFIE"
+    elif [[ "$PROV_PHASE" == root ]]; then
+      continue
     else
-      p_fact "$tool" absent
-      p_drift "$tool absent — apt-get install -y $tool"
+      etat="$(port_state "$port" "${MIENS[@]}")"
+      if [[ "$PROV_PHASE" == sans-privilege && ( "$etat" == pris || ( "$etat" == "pris par "* && "$etat" != *"(projet "* ) ) ]]; then
+        etat=tenu
+      elif [[ "$etat" == pris* ]]; then
+        p_warn "port $port ($nom) $etat"
+      fi
     fi
+    p_fact "port_$nom" "$port $etat"
   done
+}
 
+# ─── Les projets compose ────────────────────────────────────────────────────────────────────────
+# la forge et le runner que 48 et 49 ont montés pour ce poste ne sont pas ceux d'un autre déploiement ;
+# le mode de la forge vit sous le dossier des jetons, que root seul traverse
+mesure_projets() {
+  local nom pris="" etrangers=""
+  if [[ "$DOCKER_REPOND" -eq 1 ]]; then
+    for nom in "${MIENS[@]}"; do
+      [[ -z "$("$PROV_DOCKER_BIN" ps -a --filter "label=com.docker.compose.project=$nom" -q 2>/dev/null)" ]] || pris="${pris:+$pris,}$nom"
+    done
+  fi
+  p_fact projet "$PROV_FORGE_BASE"
+  p_fact projet_pris "$pris"
+  [[ "$PROV_PHASE" != sans-privilege ]] || return 0
+  for nom in ${pris//,/ }; do
+    [[ "$(head -n1 "$PROV_FORGE_MODE_FILE" 2>/dev/null)" == poste \
+       && ( "$nom" == "$PROV_FORGE_PROJECT" || "$nom" == "$PROV_RUNNER_PROJECT" ) ]] || etrangers="${etrangers:+$etrangers,}$nom"
+  done
+  p_fact projet_etranger "$etrangers"
+  if [[ -n "$etrangers" ]]; then
+    p_warn "projet compose déjà présent sur ce daemon, d'un autre déploiement : $etrangers"
+  elif [[ -n "$pris" ]]; then
+    p_ok "projet compose de la forge de ce poste présent : $pris"
+  fi
+}
+
+# ─── L'écriture sous la racine ──────────────────────────────────────────────────────────────────
+# les bascules de dossiers ont lieu sous PROV_ROOT : root écrit et échange deux dossiers sur son système
+# de fichiers, sous son parent quand il est le même, pour que la date de la racine posée ne bouge pas
+mesure_echange() {
+  local sous echange="" ou
+  sous="$(ancetre_existant "$PROV_ROOT")"
+  if [[ "$sous" == "$PROV_ROOT" && "$(stat -c %d "$PROV_ROOT")" == "$(stat -c %d "$(dirname "$PROV_ROOT")")" ]]; then
+    sous="$(dirname "$PROV_ROOT")"
+  fi
+  ou="$sous"; [[ "$sous" != "$PROV_ROOT" ]] || ou="$sous (point de montage : la sonde y écrit, sa date change)"
+  if ! echange="$(mktemp -d "$sous/.prov-echange.XXXXXX" 2>/dev/null)"; then
+    p_fact echange "$sous non-inscriptible"
+    p_fail "$ou n'est pas inscriptible par root — la racine de LCARS ne s'y pose pas (système de fichiers en lecture seule ?)"
+  elif mkdir "$echange/a" "$echange/b" && mv --exchange -T -- "$echange/a" "$echange/b" 2>/dev/null; then
+    p_fact echange "$sous oui"
+    p_ok "« mv --exchange » joué sous $ou : les bascules de dossiers ont une forme atomique"
+  else
+    p_fact echange "$sous non"
+    p_fail "« mv --exchange » refusé sous $ou (coreutils 9.5, sur un système de fichiers qui sait échanger) — les bascules de dossiers n'ont pas de forme atomique"
+  fi
+  [[ -z "$echange" ]] || rm -rf -- "$echange"
+}
+
+check() {
+  PROV_PHASE="${PROV_PHASE:-entier}"
+  p_fact phase "$PROV_PHASE"
+  if [[ "$PROV_PHASE" != root ]]; then
+    mesure_sans_privilege
+  elif docker_endpoint; then
+    DOCKER_REPOND=1
+  fi
+  mesure_declaration
+  mesure_canal
+  mesure_ports
+  mesure_projets
+  [[ "$PROV_PHASE" == sans-privilege ]] || mesure_echange
 }
 
 # le préflight ne pose rien : les deux verbes sondent, chacun rend le verdict de son contrat
-case "${1:?usage: 00-preflight.sh <check|apply>}" in
-  check) check; verdict_check ;;
-  apply) check; verdict_apply ;;
-  *) p_die "mode inconnu: $1 (check|apply)" ;;
-esac
+case "${1:-}" in check|apply) check; "verdict_$1" ;; *) p_die "mode inconnu: ${1:-} (check|apply)" ;; esac

@@ -144,7 +144,7 @@ defmodule Fleet.MCP.ToolchainRequestTest do
 
       expected = Fleet.Toolchain.branch_for_pod(pod)
       assert_received {:create_branch, _repo, ^expected, _base}
-      assert String.starts_with?(expected, "lcars/toolchain-pod-")
+      assert String.starts_with?(expected, "tool_request-pod-")
 
       # Le préfixe SÉPARE : deux clés d'espaces de noms indépendants ne peuvent pas atterrir sur
       # une même branche et s'écraser l'une l'autre.
@@ -210,6 +210,22 @@ defmodule Fleet.MCP.ToolchainRequestTest do
       assert {:error, {:toolchain_form, _}} = Toolchain.request_toolchain(bad, pod)
       refute_received {:create_branch, _, _, _}
       refute_received {:put_file, _, _, _, _}
+    end
+
+    # ⚠ UN REFUS NE LAISSE PLUS DE BRANCHE DERRIERE LUI. Mesure du 2026-09-19 sur le banc 2005 : la
+    # branche etait creee AVANT que l'adresse du work-item ne soit resolue, et un pod sans depot
+    # lie laissait un `tool_request-<id>` sans manifeste ni PR — les `lcars/toolchain-*` orphelines
+    # de LCARS-beta. L'adresse ne demande rien a la forge : la resoudre d'abord ne coute rien.
+    test "depot du pod NON lie : refus typé, et AUCUNE branche n'est creee" do
+      pod = "pod-sans-depot-#{System.unique_integer([:positive])}"
+      enqueue!(pod)
+      Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _ -> {:ok, %{role: "engineer"}} end)
+
+      assert {:error, :pod_repo_unbound} = Toolchain.request_toolchain(req(), pod)
+
+      refute_received {:create_branch, _, _, _}
+      refute_received {:put_file, _, _, _, _}
+      refute_received {:open_pr, _, _, _, _, _}
     end
 
     test "la séquence est branche -> fichier -> PR, et le fichier va sur la BRANCHE" do

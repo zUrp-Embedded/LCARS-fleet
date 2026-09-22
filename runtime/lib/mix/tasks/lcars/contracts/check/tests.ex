@@ -85,7 +85,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
   end
 
   # Runtime omits the ubiquitous lib prefix in test paths; deploy retains lib alongside
-  # modules.d/docker/deps. Named zones need no corresponding source directory.
+  # modules.d and docker. Named zones need no corresponding source directory.
   @test_zones %{
     "test" => ~w(support fixtures integration crosscutting probes),
     "../deploy/tests" => ~w(transverse)
@@ -182,17 +182,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
 
     files =
       Enum.flat_map(["test", "../deploy/tests"], fn troot ->
-        Path.join([root, troot, "**", "*"])
+        base = Path.expand(troot, root)
+
+        Path.join([base, "**", "*"])
         |> Path.wildcard()
-        # Python execution creates __pycache__ artifacts that are not witnesses.
-        |> Enum.reject(&(File.dir?(&1) or &1 =~ ~r"/__pycache__/"))
-        |> Enum.map(&Path.relative_to(&1, root))
-      end)
-      |> Enum.reject(fn f ->
-        case Path.split(f) do
-          [_, zone | _] when zone in ~w(support fixtures probes integration) -> true
-          _ -> Path.basename(f) in service
-        end
+        |> Enum.filter(&witness_candidate?(&1, base, service))
+        |> Enum.map(&Path.join(troot, Path.relative_to(&1, base)))
       end)
       |> Enum.sort()
 
@@ -219,6 +214,15 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
       note:
         "#{length(files)} temoins dans les deux arbres, #{length(files) - length(misnamed)} nommes selon la regle"
     })
+  end
+
+  # La zone est le premier segment sous la racine du corpus, quelle que soit la profondeur de cette
+  # racine vue du runtime. Python execution creates __pycache__ artifacts that are not witnesses.
+  defp witness_candidate?(path, base, service) do
+    case Path.split(Path.relative_to(path, base)) do
+      [zone | _] when zone in ~w(support fixtures probes integration) -> false
+      _ -> not (File.dir?(path) or path =~ ~r"/__pycache__/" or Path.basename(path) in service)
+    end
   end
 
   @doc false
@@ -518,5 +522,84 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
           ["#{corpus}: its door `#{script}` does NOT list it (it plays #{inspect(lignes)})"]
         end
     end
+  end
+
+  # ⚠ UN TEMOIN ASYNC QUI POSE UNE CLEF DE L'ENV DE L'APPLICATION FAIT ROUGIR LE VOISIN, et jamais
+  # lui-meme. L'env est GLOBAL : pendant sa fenetre, tout temoin concurrent qui lit cette clef prend
+  # la valeur de l'autre, et echoue sur un sujet sans rapport. Restaurer a la sortie n'y change
+  # rien — c'est la fenetre qui nuit, pas l'oubli. Trois fois en une soiree le 2026-09-19 :
+  # `role_token_unavailable` dans la chaine du pilote, `forge_auth_malformed` dans WorktreeSync.
+  # `test/test_helper.exs` le disait deja en prose ; ceci le tient.
+  @env_mutants [
+    ~r/Application\.(put|delete)_env\(\s*:lcars_fleet/,
+    ~r/TestEnv\.put_env_restoring\(/,
+    ~r/TestEnv\.restore_env_on_exit\(/
+  ]
+
+  # ⚠ LE TEMOIN DES MURS PORTE LES MOTIFS QU'ILS CHERCHENT, dans les decors qu'il fabrique — il se
+  # denoncerait lui-meme. Meme exemption que `Support.checker_source?` cote `lib/`, et de meme
+  # nature : elle est fondee sur l'EMPLACEMENT, pas sur le sens du fichier. Prix assume : si ce
+  # fichier-la mutait vraiment l'env en async, ce mur ne le dirait pas.
+  @temoin_des_murs "test/mix/lcars_contracts_check_test.exs"
+
+  @doc """
+  Checks no `async: true` ExUnit module mutates the `:lcars_fleet` application environment.
+
+  Reads the module's `use ExUnit.Case` line and the file's code (comments stripped). It does not
+  follow helpers that hide the call behind another module, and it says nothing about other global
+  state — `:persistent_term`, ETS, the file system.
+  """
+  @spec check_async_no_global_env(String.t()) :: Support.result()
+  def check_async_no_global_env(root) do
+    fichiers =
+      [root, "test", "**", "*_test.exs"] |> Path.join() |> Path.wildcard() |> Enum.sort()
+
+    async =
+      fichiers
+      |> Enum.reject(&(Path.relative_to(&1, root) == @temoin_des_murs))
+      |> Enum.filter(&async_module?/1)
+
+    coupables =
+      for f <- async,
+          ligne <- mutations_env(f),
+          do: "#{Path.relative_to(f, root)}:#{ligne} — async ET pose une clef de l'env global"
+
+    measured_verdict("tests.async_no_global_env", %{
+      remediation:
+        "passer le module en `async: false` avec le pourquoi ecrit dessus, ou cesser de poser la " <>
+          "clef globale — restaurer a la sortie ne ferme pas la fenetre, elle fait rougir un " <>
+          "voisin sur un sujet sans rapport",
+      broken: async_broken(fichiers, async),
+      findings: Enum.sort(coupables),
+      note: "#{length(async)} module(s) async sur #{length(fichiers)} temoin(s) lus"
+    })
+  end
+
+  # Deux gardes : un corpus jamais ouvert, et un lecteur qui ne reconnait plus la forme `async:`.
+  defp async_broken(fichiers, async) do
+    cond do
+      Support.measured_nothing?(fichiers) -> "no *_test.exs found under test/"
+      Support.measured_nothing?(async) -> "no async module recognised — the reader lost the form"
+      true -> nil
+    end
+  end
+
+  defp async_module?(path) do
+    path
+    |> File.read!()
+    |> String.split("\n")
+    |> Enum.any?(&Regex.match?(~r/use\s+ExUnit\.Case.*async:\s*true/, Support.strip_comment(&1)))
+  end
+
+  defp mutations_env(path) do
+    path
+    |> File.read!()
+    |> String.split("\n")
+    |> Enum.with_index(1)
+    |> Enum.filter(fn {ligne, _} ->
+      code = Support.strip_comment(ligne)
+      Enum.any?(@env_mutants, &Regex.match?(&1, code))
+    end)
+    |> Enum.map(&elem(&1, 1))
   end
 end

@@ -2,7 +2,7 @@
 # SOURCE: runtime/test/services/forge.d/tokens_ci_runner.bats
 # AUTHOR: bob
 # STARDATE: 2026-08-22
-# STATUS: bats tests for 63-forge-tokens — la sonde du runner CI, et sa distinction entre ZERO et INCONNU
+# STATUS: bats tests for forge.d/tokens.sh — la sonde du runner CI, et sa distinction entre ZERO et INCONNU
 #
 # POURQUOI CE FICHIER. Un conteneur peut sortir sans aucun runner CI. La fleet accepte alors un ticket,
 # depense un producteur, ouvre une PR, et la CI attend une machine qui n'existe pas. MESURE DU
@@ -32,7 +32,7 @@ setup() {
   export LCARS_MODULE_PROTOCOL="$BATS_TEST_DIRNAME/../../../services/lib/module-protocol.sh"
   export LCARS_MODULE_TAG=63-forge-tokens
   # le roster vient du release par « lcars tool » : ici, une CLI de doublure qui rend un roster fixe
-  mkdir -p "$BIN"; printf '%s\n' '#!/usr/bin/env bash' '[[ "$1" == tool ]] && shift' '[[ "$1" == roles-tfvars ]] && echo "{\"roles\":[\"fleet_engineer\"],\"system_roles\":[\"system_architect\"]}"' 'exit 0' > "$BIN/lcars"; chmod +x "$BIN/lcars"; export LCARS_CLI="$BIN/lcars"
+  mkdir -p "$BIN"; printf '%s\n' '#!/usr/bin/env bash' '[[ "$1" == tool ]] && shift' '[[ "$1" == roles-tfvars ]] && echo "{\"org\":\"fleet\",\"roles\":[\"fleet_engineer\"],\"system_roles\":[\"system_architect\"]}"' 'exit 0' > "$BIN/lcars"; chmod +x "$BIN/lcars"; export LCARS_CLI="$BIN/lcars"
   export FORGE_BASE_URL="http://forge.test"
   export LCARS_LOGIN="zoe"
   export LCARS_PRIVATE_DIR="$BATS_TEST_TMPDIR/tokens"
@@ -59,40 +59,20 @@ EOF
   chmod +x "$BIN/curl"
 }
 
-# ⚠ CE TEMOIN EPINGLAIT `48-forge-host`, ET CE N'EST PLUS LUI QUI ENROLE. Le decoupage
-# `48 -> 49` (534a46ce3) a sorti le runner CI dans `49-forge-runner` ; le message de `63-forge-tokens` a
-# garde l'ancien nom, et ce temoin l'a VERROUILLE — il exigeait precisement le mauvais diagnostic.
-# Un operateur qui suit la phrase rejoue le module qui ne fait plus le geste, et conclut que le rail
-# est casse. Le sens de la ligne se derive maintenant du module qui porte l'enrolement.
-
-@test "zero runner -> DRIFT qui nomme la CONSEQUENCE et le module qui l'enrole" {
+@test "zero runner -> DRIFT qui nomme la CONSEQUENCE et le geste qui l'enrole, sur les deux rails" {
   # Le runner est un etat-cible sur TOUS les rails : le banc monte le sien, `49-forge-runner` monte
-  # celui du poste. Le verdict est donc le meme partout, et le substrat n'y entre pas.
+  # celui du poste. Le verdict est donc le meme partout, et le substrat n'y entre pas ; le remede,
+  # lui, nomme le geste de chacun, parce que ce geste tourne au boot du conteneur comme sur le poste.
   stub_curl '{"runners":[],"total_count":0}'
   run bash "$MODULE" check
 
   [[ "$output" == *"AUCUN runner CI"* ]]
   [[ "$output" == *"DRIFT"* ]]
   # Un drift qui dit « 0 runner » et s'arrete laisse l'operateur deviner que ca bloque tout. La
-  # consequence MESUREE est ce qui rend le message actionnable, et le module NOMME est la sortie.
+  # consequence MESUREE est ce qui rend le message actionnable, et le geste NOMME est la sortie.
   [[ "$output" == *"aucune PR ne fusionne"* ]]
-  [[ "$output" == *"49-forge-runner"* ]]
-}
-
-@test "le module NOMME dans le drift est celui qui ENROLE vraiment" {
-  # ⚠ LA PROPRIETE, ET PAS LE NOM. Epingler `49-forge-runner` en dur referait le defaut au prochain
-  # decoupage. Ce qui est vrai est : le module cite doit exister ET porter l'enrolement.
-  local cite
-  # Le nom est entoure d'accents graves ECHAPPES dans la source (`\``), d'ou le `[^ ]*` qui les
-  # traverse sans les nommer — un motif qui compte les antislashs se casserait au prochain reformat.
-  cite="$(sed -n 's/.*\([0-9][0-9]-[a-z-]*\)[^ ]* l.enrole.*/\1/p' "$MODULE" | head -1)"
-  [ -n "$cite" ]
-  local f="$BATS_TEST_DIRNAME/../../../../deploy/modules.d/${cite}.sh"
-  [ -f "$f" ]
-  # ⚠ « contient le mot runner » NE SUFFIT PAS : `48-forge-host` le porte encore (il nomme le projet
-  # compose du runner) et le temoin restait vert sur le mauvais module — mesure par mutation.
-  # Ce qui distingue le module qui ENROLE est la fonction qui le fait.
-  grep -q 'converge_ci_runner' "$f"
+  [[ "$output" == *"deploy/workstation up"* ]]
+  [[ "$output" == *"deploy/container runner-token"* ]]
 }
 
 @test "le verdict ne depend PAS du substrat — un etat-cible n'a pas deux valeurs" {
@@ -146,8 +126,8 @@ EOF
 }
 
 @test "l'APPLY la joue aussi — le boot ne joue jamais le check" {
-  # ⚠ SANS CA LA SONDE EST MUETTE LA OU ELLE SERT. `entrypoint.sh` joue `provision apply`, jamais
-  # `check` : une sonde qui ne vivrait que dans le check ne parlerait a personne au demarrage,
+  # ⚠ SANS CA LA SONDE EST MUETTE LA OU ELLE SERT. Le boot du conteneur et l'installeur du poste
+  # jouent `apply`, jamais `check` : une sonde qui ne vivrait que dans le check ne parlerait a personne au demarrage,
   # c'est-a-dire au seul moment ou l'operateur peut encore enroler un runner AVANT que la fleet ne
   # depense un producteur sur un rail mort.
   stub_curl '{"runners":[],"total_count":0}'

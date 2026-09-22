@@ -2,8 +2,8 @@
 # bats file_tags=structure
 # SOURCE: deploy/tests/racine_prefixe.bats
 # AUTHOR: alice
-# STARDATE: (posee par /push-github)
-# STATUS: mur — le prefixe d'install RO a UNE valeur, et onze sites la disent
+# STARDATE: 2026-08-28
+# STATUS: mur — le prefixe d'install RO a une valeur, celle des constantes de l'installeur, et le runtime la dit
 
 load refute
 
@@ -13,10 +13,23 @@ setup() {
 
   ATTENDU="$(env -i PATH="$PATH" bash -c ". '$LIB' >/dev/null 2>&1; printf '%s' \"\$PROV_PREFIX\"")"
   BIN_REL="$ATTENDU/rel/lcars_fleet/bin/lcars_fleet"
+  # ⚖ décision 3 : le produit ne recopie plus le préfixe, il le LIT (`runtime/etc/facts.env`). Le
+  # fait se résout donc avant la lecture des chemins — sinon `$LCARS_PREFIX/rel/…` se lirait
+  # « /rel/… » et ce mur accuserait une dérivation correcte. L'égalité des deux est mesurée à part.
+  FAIT_PREFIXE="$(sed -n 's/^LCARS_PREFIX=//p' "$R/runtime/etc/facts.env")"
 }
 
-# Tout chemin absolu du fichier qui se termine par le binaire de release.
-bins_de() { grep -ohE '/[A-Za-z0-9_./-]*/rel/lcars_fleet/bin/lcars_fleet' "$1" 2>/dev/null; }
+@test "le préfixe que le produit LIT est celui que l'installeur DÉCLARE" {
+  [ -n "$FAIT_PREFIXE" ]
+  [ "$FAIT_PREFIXE" = "$ATTENDU" ] \
+    || { echo "le fait LCARS_PREFIX « $FAIT_PREFIXE » ≠ la constante « $ATTENDU »" >&2; return 1; }
+}
+
+# Tout chemin absolu du fichier qui se termine par le binaire de release, le fait résolu.
+bins_de() {
+  sed "s#\\\$LCARS_PREFIX#$FAIT_PREFIXE#g" "$1" 2>/dev/null \
+    | grep -ohE '/[A-Za-z0-9_./-]*/rel/lcars_fleet/bin/lcars_fleet'
+}
 porteurs_de_release() {
   grep -rlE '/rel/lcars_fleet/bin/lcars_fleet' "$R/deploy" "$R/runtime" \
     --exclude-dir=tests --exclude-dir=test --exclude-dir=_build --exclude-dir=deps \
@@ -25,14 +38,12 @@ porteurs_de_release() {
 }
 
 @test "GARDE D'INSTRUMENT : la SSoT rend un prefixe absolu de profondeur >= 2" {
-  # `deploy/lib/deploy-release.sh` REFUSE lui-meme un prefixe de profondeur 1 (il y effacerait une racine
-  # systeme). Un mur qui accepterait moins que ce que le produit exige mesurerait autre chose.
   [[ "$ATTENDU" == /*/* ]] || { echo "prefixe inexploitable : « $ATTENDU »" >&2; return 1; }
   [ -n "$BIN_REL" ]
 }
 
 
-@test "LES DEUX chemins de binaire de release sont le MEME, derive du prefixe" {
+@test "le seul chemin de binaire de release posée vit dans runtime/bin/lcars et dérive du préfixe ; aucun ne vise une release bâtie" {
   local f n=0 nb=0 b porteur=""
   while IFS= read -r f; do
     while read -r b; do
@@ -67,15 +78,4 @@ porteurs_de_release() {
 @test "LA TABLE declare ce prefixe, et c'est le meme" {
   grep -qE "^prefix[[:space:]]+${ATTENDU}[[:space:]]" "$R/deploy/system.manifest" \
     || { echo "« $ATTENDU » n'est pas declare en classe \`prefix\` dans le manifeste" >&2; return 1; }
-}
-
-@test "M4 : aucune prose de deploy/ ne nomme plus fleet/ comme arbre frere, ni un convergeur qui rejouerait provision" {
-  local hits
-  hits="$(grep -rnE 'deploy/. et .fleet/. y sont FRERES|GESTE NOMINAL DU CONVERGEUR|human-converger\.sh:[0-9]+|fleet/\{deploy' \
-            "$BATS_TEST_DIRNAME/.." --include='*.sh' --include='*.bats' --include='*.md' --include=provision --include=gate.sh \
-          | grep -v 'racine_prefixe.bats' || true)"
-  [ -z "$hits" ] || { echo "prose perimee :" >&2; printf '%s\n' "$hits" >&2; return 1; }
-  # GARDE D INSTRUMENT : le motif voit bien la forme qu il interdit
-  grep -qE 'deploy/. et .fleet/. y sont FRERES' <<<'  R="$(pwd)"  # la RACINE du depot — `deploy/` et `fleet/` y sont FRERES'
-  grep -qE 'human-converger\.sh:[0-9]+' <<<'# (`runtime/services/human-converger.sh:132`), rend'
 }

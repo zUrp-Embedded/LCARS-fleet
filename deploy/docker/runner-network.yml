@@ -1,0 +1,10 @@
+# SOURCE: deploy/docker/runner-network.yml
+# AUTHOR: bob
+# STARDATE: 2026-09-14
+# STATUS: surcouche de runner-compose.yml — le runner rejoint le réseau compose de sa forge, posé par forge-runner.sh
+
+networks:
+  # externe : le réseau appartient au projet de la forge
+  default:
+    name: "${LCARS_RUNNER_NETWORK:?LCARS_RUNNER_NETWORK absent — le réseau compose de la forge, posé par forge-runner.sh}"
+    external: true

@@ -85,7 +85,7 @@ html, body {
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: 64px minmax(0, 1fr) 36px;
   gap: 0;
-  /* 100% et non 100vh : embarque dans un cadre (le deck de la boite montre cette page dans un
+  /* 100% et non 100vh : embarque dans un cadre (le deck montre cette page dans un
      onglet), `vh` mesure la fenetre du navigateur et non le cadre — le contenu deborde ou se
      replie. `100%` mesure ce qui contient reellement. */
   height: 100%;

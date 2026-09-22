@@ -139,18 +139,6 @@ defmodule Fleet.Spawner.Pod.EgressTest do
       :gen_tcp.close(listen)
     end
 
-    test "an allowed host that does not resolve fails CLOSED, never open", %{tmp_dir: tmp} do
-      path = sock(tmp)
-      {:ok, listen} = Egress.start(path, ["nx.invalid"], pod_id: "test")
-
-      c = connect(path)
-      :ok = :gen_tcp.send(c, "CONNECT nx.invalid:443 HTTP/1.1\r\n\r\n")
-
-      assert {:ok, answer} = :gen_tcp.recv(c, 0, 5_000)
-      assert answer =~ "403 Forbidden"
-      :gen_tcp.close(listen)
-    end
-
     test "a path over the AF_UNIX limit is REFUSED by name, not by :einval", %{tmp_dir: tmp} do
       long = Path.join(tmp, String.duplicate("x", 120) <> ".sock")
 
@@ -166,6 +154,86 @@ defmodule Fleet.Spawner.Pod.EgressTest do
       :gen_tcp.close(listen)
     end
   end
+
+  # The node resolver is doubled: a hosts table, and a DNS on loopback that answers every name
+  # under the search suffix, as a provider DNS that resolves any name under its own domain.
+  describe "start/3 — the upstream name, under a doubled resolver" do
+    setup do
+      saved =
+        for opt <- [:resolv_conf, :lookup, :nameservers, :search],
+            do: {opt, :inet_db.res_option(opt)}
+
+      {:ok, upstream} = :gen_tcp.listen(0, [:binary, ip: {127, 0, 0, 1}, active: false])
+      {:ok, port} = :inet.port(upstream)
+      dns = dns_answering_suffix(".search.invalid", {127, 0, 0, 1})
+
+      :inet_db.res_option(:resolv_conf, ~c"")
+      :inet_db.res_option(:nameservers, [{{127, 0, 0, 1}, dns}])
+      :inet_db.res_option(:search, [~c"search.invalid"])
+      :inet_db.res_option(:lookup, [:file, :dns])
+
+      on_exit(fn ->
+        :inet_db.del_host({127, 0, 0, 1})
+        for {opt, value} <- saved, do: :inet_db.res_option(opt, value)
+      end)
+
+      %{port: port}
+    end
+
+    test "an allowed name the DNS does not know stays CLOSED, though the search list would answer it",
+         %{tmp_dir: tmp, port: port} do
+      assert tunnel(tmp, "nx.invalid", port) =~ "403 Forbidden"
+    end
+
+    test "an allowed name the hosts file declares is served", %{tmp_dir: tmp, port: port} do
+      :inet_db.add_host({127, 0, 0, 1}, [~c"forge-host.invalid"])
+
+      assert tunnel(tmp, "forge-host.invalid", port) =~ "200 Connection Established"
+    end
+  end
+
+  # The first answer of the proxy to a CONNECT for `host`, allowed, on `port`.
+  defp tunnel(tmp, host, port) do
+    path = sock(tmp)
+    {:ok, listen} = Egress.start(path, [host], pod_id: "test")
+    on_exit(fn -> :gen_tcp.close(listen) end)
+    c = connect(path)
+    :ok = :gen_tcp.send(c, "CONNECT #{host}:#{port} HTTP/1.1\r\n\r\n")
+    {:ok, answer} = :gen_tcp.recv(c, 0, 5_000)
+    answer
+  end
+
+  # A DNS server on loopback: an A record for names under `suffix`, NXDOMAIN for any other.
+  defp dns_answering_suffix(suffix, {a, b, c, d}) do
+    {:ok, udp} = :gen_udp.open(0, [:binary, ip: {127, 0, 0, 1}, active: false])
+    {:ok, port} = :inet.port(udp)
+
+    serve = fn serve ->
+      {:ok, {peer, peer_port, <<id::16, _::80, query::binary>>}} = :gen_udp.recv(udp, 0)
+      {labels, tail} = dns_labels(query, [])
+      question = binary_part(query, 0, byte_size(query) - byte_size(tail) + 4)
+
+      reply =
+        if String.ends_with?(Enum.join(labels, "."), suffix),
+          do:
+            <<id::16, 0x8180::16, 1::16, 1::16, 0::32>> <>
+              question <> <<0xC00C::16, 1::16, 1::16, 0::32, 4::16, a, b, c, d>>,
+          else: <<id::16, 0x8183::16, 1::16, 0::16, 0::32>> <> question
+
+      :ok = :gen_udp.send(udp, peer, peer_port, reply)
+      serve.(serve)
+    end
+
+    pid = spawn(fn -> serve.(serve) end)
+    :ok = :gen_udp.controlling_process(udp, pid)
+    on_exit(fn -> Process.exit(pid, :kill) end)
+    port
+  end
+
+  defp dns_labels(<<0, rest::binary>>, acc), do: {Enum.reverse(acc), rest}
+
+  defp dns_labels(<<len, label::binary-size(len), rest::binary>>, acc),
+    do: dns_labels(rest, [label | acc])
 
   describe "Vendor.hosts/1 — the declaration lives beside its launcher" do
     alias Fleet.Spawner.Pod.Egress.Vendor
@@ -265,6 +333,54 @@ defmodule Fleet.Spawner.Pod.EgressTest do
 
     test "release/1 is idempotent — a pod that never had one is a no-op" do
       assert :ok = Egress.release("never-provisioned")
+    end
+  end
+
+  # ⚠ CE QUE LA DECISION DU 2026-09-17 A CHANGE, ET CE QU'ELLE N'A PAS TOUCHE. Tous les roles
+  # declarent `open` ; la mecanique reste entiere, et le DEFAUT du moteur reste ferme. Ces temoins
+  # tiennent les deux moities : ce que les profils disent, et ce que le code ferait sans eux.
+  describe "la politique reseau des roles — declaree par profil, jamais deduite" do
+    @profils_spawnables Path.wildcard("priv/catalogue*/cap_profile/cap-profiles/*.yaml")
+
+    test "tout profil SPAWNABLE declare `network: open` — et un siege reserve n'en declare aucune" do
+      {spawnables, sieges} =
+        Enum.split_with(@profils_spawnables, &(File.read!(&1) =~ ~r/^kind: CapabilityProfile$/m))
+
+      assert length(spawnables) >= 9,
+             "#{length(spawnables)} profils spawnables lus — l'instrument ne voit plus son sujet"
+
+      for f <- spawnables do
+        assert File.read!(f) =~ ~r/^  network: open$/m,
+               "#{Path.basename(f)} ne declare pas `network: open` : la decision est prise par " <>
+                 "PROFIL, et un role muet retomberait au defaut ferme sans que personne le dise"
+      end
+
+      for f <- sieges do
+        refute File.read!(f) =~ ~r/^  network:/m,
+               "#{Path.basename(f)} est un siege reserve : il ne tourne jamais, une politique " <>
+                 "reseau y decrirait un pod qui n'existe pas"
+      end
+    end
+
+    test "le DEFAUT du moteur reste ferme — c'est le profil qui ouvre, pas le code" do
+      assert Fleet.CapProfile.default_network() == "vendor-only"
+
+      # un profil qui ne dit rien ne recoit que les hotes de son vendor
+      muet = %Fleet.CapProfile{
+        kind: "CapabilityProfile",
+        metadata: %{"name" => "r", "containment" => "bwrap"},
+        spec: %{}
+      }
+
+      assert Fleet.CapProfile.network(muet) == "vendor-only"
+    end
+
+    test "REFERMER est une ligne : un role qui declare `egress` retrouve son mur", %{tmp_dir: tmp} do
+      launcher = Path.join(tmp, "claude_launch.sh")
+      File.write!(Path.join(tmp, "claude_launch.egress"), "api.vendor.test\n")
+
+      assert Egress.allowlist(profile("egress"), launcher) == ["api.vendor.test"]
+      assert Egress.allowlist(profile("open"), launcher) == :open
     end
   end
 

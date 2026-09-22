@@ -28,10 +28,11 @@
 #
 # USAGE :
 #   provision-role-tokens.sh --forge URL --passwords-file /root/forge/roles.json \
-#                                                            # les 6 roles + le systeme = A4 complet
+#                                                            # les roles du defaut + le systeme
 #   provision-role-tokens.sh --forge URL --check             # sonde seule (nuke-drill)
 #   provision-role-tokens.sh --help                          # cette aide
-# Options : --tokens-dir DIR (defaut /opt/lcars/var/tokens) · --roles "a b c" (defaut : les 6) ·
+# Options : --tokens-dir DIR (defaut /opt/lcars/var/tokens) · --roles "a b c" (defaut : la liste
+#           de `ROLES` plus bas ; l'appelant passe celle de la machine, catalogues installes compris) ·
 #           --extra-token COMPTE:FICHIER (repetable — pour un token dont le compte n'est pas le nom de
 #             fichier ; aucun usager dans la recette) · --owner USER (defaut lcars-authority) ·
 #           --token-name NAME (defaut lcars-fleet) · -h|--help
@@ -52,11 +53,15 @@
 set -euo pipefail
 
 FORGE="${FORGE_BASE_URL:-}"
-# ⚠ LA RACINE SE DEMANDE, ELLE NE SE RECOPIE PAS. `LCARS_PRIVATE_DIR` est la SSoT
-# (`provision-lib.sh`) ; un litteral ici serait un SECOND endroit qui decide ou vivent les jetons,
-# et celui qui derive est toujours celui qu'on ne relit pas. Le defaut reste, pour un script qu'un
-# operateur lance a la main hors du rail.
-TOKENS_DIR="${LCARS_PRIVATE_DIR:-/opt/lcars/var/tokens}"
+# ⚠ LA RACINE SE DEMANDE, ELLE NE SE RECOPIE PAS. `LCARS_PRIVATE_DIR` est un FAIT de la machine
+# (`etc/facts.env`, ⚖ decision 3) ; un litteral ici serait un SECOND endroit qui decide ou vivent
+# les jetons, et celui qui derive est toujours celui qu'on ne relit pas. Le fait se lit meme quand
+# un operateur lance ce script a la main, hors du rail — c'est justement pour ce cas-la qu'il existe.
+FACTS_SH="${LCARS_FACTS_SH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/facts.sh}"
+[[ -r "$FACTS_SH" ]] || FACTS_SH=/opt/lcars/services/lib/facts.sh
+# shellcheck source=lib/facts.sh
+. "$FACTS_SH"
+TOKENS_DIR="$LCARS_PRIVATE_DIR"
 #
 # This list is locked FOUR ways by `roles.provisioning_locked` (strict equality: canon
 # catalogue == forge.tf local.roles == this ROLES == provision-lib.sh LCARS_ROLES) — a partial
@@ -64,8 +69,8 @@ TOKENS_DIR="${LCARS_PRIVATE_DIR:-/opt/lcars/var/tokens}"
 # check misses exactly that).
 ROLES="system_architect system_chief system_gatekeeper fleet_engineer fleet_scribe fleet_qualifier fleet_reviewer fleet_scoper fleet_vulcan"
 #
-OWNER="${LCARS_AUTHORITY_USER:-lcars-authority}"
-DIR_GROUP="${LCARS_FLEET_GROUP:-fleet}"
+OWNER="$LCARS_AUTHORITY_USER"
+DIR_GROUP="$LCARS_FLEET_GROUP"
 TOKEN_NAME="lcars-fleet"
 SCOPES="write:repository,write:issue"
 # ⚠ THE SYSTEM ACCOUNT'S SCOPES ARE WIDER THAN A ROLE'S, AND EACH ADDITION IS MEASURED:
@@ -79,7 +84,7 @@ SCOPES="write:repository,write:issue"
 #
 # Listing `read:user` too would be noise, not belt-and-braces: Gitea NORMALISES the pair and mints
 # `write:user` alone, which subsumes the read.
-SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-system_starfleet}"
+SYSTEM_ACCOUNT="$LCARS_SYSTEM_ACCOUNT"
 SYSTEM_SCOPES="$SCOPES,write:organization,write:user"
 PASSWORDS_FILE=""
 MASTER_TOKEN_FILE=""
@@ -163,16 +168,18 @@ CURL_AUTH_CFG=""
 # quel que soit le privilege. Ici le jeton sert a un `PATCH
 # /admin/users/<u>` ; le mint qui suit est une basic-auth de la CIBLE, seule forme jamais acceptee.
 force_password_for() { # $1=compte — pose un password neuf, le rend sur stdout
-  local account="$1" admin_tok pw
+  local account="$1" admin_tok pw code
   admin_tok="$(tr -d '[:space:]' < "$MASTER_TOKEN_FILE" 2>/dev/null)" || return 1
   [[ -n "$admin_tok" ]] || return 1
-  # MUR I4 (deploy/tests/idiom_walls) : la source est bornee EN TETE, la longueur par `cut`, qui
+  # MUR I4 (runtime/test/services/idiom_walls.bats) : la source est bornee EN TETE, la longueur par `cut`, qui
   # lit tout et ne ferme rien — un `head -c` en aval peut fermer le tuyau avant le dernier write.
   pw="$(head -c 18 /dev/urandom | base64 | tr -d '/+=' | cut -c1-20)"
-  printf 'header = "Authorization: token %s"\nheader = "Content-Type: application/json"\nrequest = "PATCH"\ndata = "{\\"login_name\\":\\"%s\\",\\"source_id\\":0,\\"password\\":\\"%s\\",\\"must_change_password\\":false}"\n' \
+  # capturer puis tester : `| grep -q` sort au premier match, ferme le tuyau, et sous `pipefail` le
+  # SIGPIPE du producteur rend 141 — « refuse » sur une forge qui a dit 200
+  code="$(printf 'header = "Authorization: token %s"\nheader = "Content-Type: application/json"\nrequest = "PATCH"\ndata = "{\\"login_name\\":\\"%s\\",\\"source_id\\":0,\\"password\\":\\"%s\\",\\"must_change_password\\":false}"\n' \
     "$admin_tok" "$account" "$pw" \
-    | curl -K - -s -o /dev/null -m 15 -w '%{http_code}' "$FORGE/api/v1/admin/users/$account" \
-    | grep -q '^200$' || return 1
+    | curl -K - -s -o /dev/null -m 15 -w '%{http_code}' "$FORGE/api/v1/admin/users/$account")"
+  [[ "$code" == 200 ]] || return 1
   printf '%s' "$pw"
 }
 

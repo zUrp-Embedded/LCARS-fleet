@@ -41,7 +41,9 @@ setup() {
   BIN="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$BIN"
   export PUT_LOG="$BATS_TEST_TMPDIR/put.log"
-  : > "$PUT_LOG"
+  export ARGV_LOG="$BATS_TEST_TMPDIR/argv.log"
+  export STDIN_LOG="$BATS_TEST_TMPDIR/stdin.log"
+  : > "$PUT_LOG"; : > "$ARGV_LOG"; : > "$STDIN_LOG"
   export PATH="$BIN:$PATH"
   export FORGE_BASE_URL="http://forge.test"
 }
@@ -54,6 +56,7 @@ setup() {
 stub_curl() {
   cat > "$BIN/curl" <<EOF
 #!/usr/bin/env bash
+printf '%s\n' "\$*" >> "\$ARGV_LOG"
 url=""; method="GET"; user=""
 prev=""
 for a in "\$@"; do
@@ -61,6 +64,12 @@ for a in "\$@"; do
   case "\$a" in http*) url="\$a" ;; esac
   prev="\$a"
 done
+# l'identite peut aussi arriver par la config de curl sur stdin (« -K - », ligne « user = "<compte>:<secret>" »)
+if [[ " \$* " == *" -K - "* ]]; then
+  cfg="\$(cat)"
+  printf '%s\n' "\$cfg" >> "\$STDIN_LOG"
+  if [[ "\$cfg" =~ user\ =\ \"([^:\"]*): ]]; then user="\${BASH_REMATCH[1]}"; fi
+fi
 case "\$url" in
   */orgs/*/members)
     for m in $1; do printf '{"login":"%s"}\n' "\$m"; done | jq -s .
@@ -115,6 +124,18 @@ EOF
   # Le jeton de lecture ne doit JAMAIS servir a poser : il rendrait 403 sur autrui, et un geste qui
   # l'utiliserait echouerait partout en ayant l'air d'essayer.
   refute grep -q "as=TOK" "$PUT_LOG"
+}
+
+@test "le seed ne passe jamais par argv : il part dans la config de curl, sur stdin (A-118)" {
+  stub_curl "bot_a bot_b" "" ""
+  source "$SCRIPT"
+  run publicize_org_members "fleet" "TOK" 'SEED-SECRET"x\y'
+
+  [[ "$output" == *"2 adhesion(s) rendue(s) visible(s)"* ]]
+  refute grep -qF 'SEED-SECRET' "$ARGV_LOG"
+  # temoin : le seed est bien presente, echappe pour le format cite de la config
+  grep -qF 'user = "bot_a:SEED-SECRET\"x\\y"' "$STDIN_LOG"
+  grep -qF 'user = "bot_b:SEED-SECRET\"x\\y"' "$STDIN_LOG"
 }
 
 @test "org dont les membres ne se lisent pas -> on ne pose RIEN et on le DIT" {

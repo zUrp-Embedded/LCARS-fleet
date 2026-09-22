@@ -11,43 +11,10 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
   alias Mix.Tasks.Lcars.Contracts.Check.Boot
   alias Mix.Tasks.Lcars.Contracts.Check.Catalogue
   alias Mix.Tasks.Lcars.Contracts.Check.Runtime
+  alias Mix.Tasks.Lcars.Contracts.Check.SingleSource
   alias Mix.Tasks.Lcars.Contracts.Check.Support
+  alias Mix.Tasks.Lcars.Contracts.Check.Tests
   alias Mix.Tasks.Lcars.Contracts.Check.Types
-
-  # UNE DECLARATION DERIVEE EST UNE DECLARATION (lot 0, terrain-controle). `provision-lib.sh` ecrit
-  # sa racine UNE fois (`PROV_ROOT_CANON`) et compose ses defauts dessus ; trois contrats les
-  # comparaient au litteral des autres porteurs et rougissaient sur un corpus d'accord (2026-09-09).
-  # Le resolveur partage ferme ce faux rouge sans recopier le litteral.
-  describe "Support.shell_defaults/1 + resolve_shell/2 — une declaration DERIVEE se resout" do
-    test "la racine ecrite une fois (affectation nue) se propage a travers deux etages de defauts" do
-      src = """
-      PROV_ROOT_CANON=/opt/lcars
-      : "${PROV_ROOT:=$PROV_ROOT_CANON}"
-      : "${PROV_TOKENS_DIR:=$PROV_ROOT/var/tokens}"  # le store partage
-      : "${PROV_CATALOGUES_DIR:=$PROV_ROOT/var/catalogues}"
-      """
-
-      d = Support.shell_defaults(src)
-      assert Support.resolve_shell(d, "$PROV_TOKENS_DIR") == "/opt/lcars/var/tokens"
-
-      assert Support.shell_default_resolved(src, "PROV_CATALOGUES_DIR") ==
-               {"$PROV_ROOT/var/catalogues", "/opt/lcars/var/catalogues"}
-    end
-
-    test "une variable inconnue reste telle quelle — le desaccord se voit, il ne se devine pas" do
-      d = Support.shell_defaults(": \"${PROV_X:=$AILLEURS/x}\"\n")
-      assert Support.resolve_shell(d, "$PROV_X") == "$AILLEURS/x"
-      assert Support.shell_default_resolved("rien ici", "PROV_X") == nil
-    end
-
-    test "une affectation nue en COMMENTAIRE, indentee, ou quotee ne compte pas" do
-      src =
-        "# PROV_ROOT_CANON=/faux\n  PROV_LOCAL=/dans/une/fonction\n" <>
-          "PROV_QUOTE=\"$AUTRE\"\nPROV_ROOT_CANON=/opt/lcars\n"
-
-      assert Support.shell_defaults(src) == %{"PROV_ROOT_CANON" => "/opt/lcars"}
-    end
-  end
 
   # JG-097 — LE PERIMETRE ETAIT GARDE, LA POPULATION NON. La population vient de DEUX racines
   # (`deploy/modules.d` et `etc`), une seule etait scopee, et `Path.wildcard` sur un chemin absent
@@ -89,6 +56,337 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
 
       assert result.status == :pass
       assert result.note =~ "1 shell file(s) scanned"
+    end
+  end
+
+  # Les trois faces sont trois branches ORPHELINES d'un seul depot : rien ne traverse par le graphe,
+  # mais un refspec LARGE rapatrie les objets des deux autres au premier fetch nu. Le defaut ne
+  # casse rien — il fait juste grossir la face que les pods clonent. D'ou un mur.
+  describe "project.faces_single_branch — une face ne ramene QUE sa branche" do
+    defp faces_root!(nom, corps) do
+      root = Fleet.TestEnv.tmp_path("faces-#{nom}")
+      dir = Path.join([root, "lib", "fleet", "project", "onboard"])
+      File.mkdir_p!(dir)
+      if corps, do: File.write!(Path.join(dir, "faces.ex"), corps)
+      on_exit(fn -> File.rm_rf(root) end)
+      root
+    end
+
+    defp faces_source(clone_args) do
+      """
+      defmodule Fleet.Project.Onboard.Faces do
+        def clone_main(url, dir), do: GitOps.run(#{clone_args}, auth: true)
+
+        def init_face(dir, url, branch) do
+          GitOps.run(["-C", dir, "remote", "add", "-t", branch, "origin", url], auth: false)
+        end
+
+        def set_origin(dir, url, branch \\\\ nil) do
+          GitOps.run(["-C", dir, "config", "remote.origin.fetch", refspec(branch)], auth: false)
+        end
+      end
+      """
+    end
+
+    test "les trois gardes en place → pass" do
+      root =
+        faces_root!(
+          "ok",
+          faces_source(~s(["clone", "--single-branch", "--branch", "main", url, dir]))
+        )
+
+      result = Runtime.check_faces_single_branch(root)
+
+      assert result.status == :pass
+      assert result.evidence == []
+    end
+
+    test "un clone SANS --single-branch → fail qui nomme l'argv" do
+      root = faces_root!("large", faces_source(~s(["clone", "--branch", "main", url, dir])))
+
+      result = Runtime.check_faces_single_branch(root)
+
+      assert result.status == :fail
+      assert Enum.any?(result.evidence, &(&1 =~ "WIDE refspec"))
+    end
+
+    test "init_face qui ne suit plus une seule branche → fail nomme" do
+      corps =
+        faces_source(~s(["clone", "--single-branch", "--branch", "main", url, dir]))
+        |> String.replace(~s("add", "-t", branch, "origin"), ~s("add", "origin"))
+
+      root = faces_root!("remote-large", corps)
+
+      result = Runtime.check_faces_single_branch(root)
+
+      assert result.status == :fail
+      assert Enum.any?(result.evidence, &(&1 =~ "init_face does not track a single branch"))
+    end
+
+    test "la fonction disparue → INSTRUMENT BROKEN, jamais un vert par absence" do
+      corps =
+        faces_source(~s(["clone", "--single-branch", "--branch", "main", url, dir]))
+        |> String.replace("def set_origin", "def point_origin")
+
+      root = faces_root!("disparue", corps)
+
+      result = Runtime.check_faces_single_branch(root)
+
+      assert result.status == :fail
+      assert Enum.any?(result.evidence, &(&1 =~ "set_origin NOT FOUND"))
+    end
+
+    # La règle vise le FICHIER, pas le découpage : elle a rougi le 2026-09-19 sur un refactor demandé
+    # par credo, alors que le contrat n'avait pas bougé. Ce qu'elle exige, c'est que quelqu'un écrive
+    # le refspec — peu importe quelle fonction privée le fait.
+    test "le resserrage sorti dans une fonction privée reste conforme" do
+      corps = """
+      defmodule Fleet.Project.Onboard.Faces do
+        def clone_main(url, dir) do
+          GitOps.run(["clone", "--single-branch", "--branch", "main", url, dir], auth: true)
+        end
+
+        def init_face(dir, url, branch) do
+          GitOps.run(["-C", dir, "remote", "add", "-t", branch, "origin", url], auth: false)
+        end
+
+        def set_origin(dir, url, branch), do: narrow_to(dir, branch)
+
+        defp narrow_to(dir, b) do
+          GitOps.run(["-C", dir, "config", "remote.origin.fetch", b], auth: false)
+        end
+      end
+      """
+
+      root = faces_root!("extrait", corps)
+
+      result = Runtime.check_faces_single_branch(root)
+
+      assert result.status == :pass, "evidence: #{inspect(result.evidence)}"
+    end
+
+    test "PERSONNE n'écrit le refspec → fail nommé" do
+      corps =
+        faces_source(~s(["clone", "--single-branch", "--branch", "main", url, dir]))
+        |> String.replace("remote.origin.fetch", "remote.origin.url")
+
+      root = faces_root!("sans-refspec", corps)
+
+      result = Runtime.check_faces_single_branch(root)
+
+      assert result.status == :fail
+      assert Enum.any?(result.evidence, &(&1 =~ "nothing narrows the face refspec"))
+    end
+
+    test "source ABSENTE → INSTRUMENT BROKEN, pas un pass" do
+      root = faces_root!("vide", nil)
+
+      result = Runtime.check_faces_single_branch(root)
+
+      assert result.status == :fail
+      assert Enum.any?(result.evidence, &(&1 =~ "INSTRUMENT BROKEN"))
+    end
+  end
+
+  # Sans mode explicite une face d'écriture naît sous l'umask du BEAM : l'atelier cesse d'être
+  # écrivable par le groupe et un dépôt humain s'y refuse, sans message. Deux des trois chemins qui
+  # bâtissent une face l'oubliaient ; un littéral recopié est la forme que reprendrait ce défaut.
+  describe "layout.face_mode_single_source — le mode d'une face se déclare UNE fois" do
+    defp modes_root!(nom, declaration, autre) do
+      root = Fleet.TestEnv.tmp_path("modes-#{nom}")
+      File.mkdir_p!(Path.join([root, "lib", "fleet", "project"]))
+      if declaration, do: File.write!(Path.join([root, "lib", "fleet", "layout.ex"]), declaration)
+      if autre, do: File.write!(Path.join([root, "lib", "fleet", "project", "faces.ex"]), autre)
+      on_exit(fn -> File.rm_rf(root) end)
+      root
+    end
+
+    defp declaration_conforme,
+      do: """
+      defmodule Fleet.Layout do
+        @writer_face_modes %{"workshop" => 0o2775, "ops" => 0o2755}
+        def writer_face_mode(face), do: Map.get(@writer_face_modes, face)
+      end
+      """
+
+    test "le mode lu de Layout, aucune copie → pass" do
+      root =
+        modes_root!("ok", declaration_conforme(), """
+        defmodule Fleet.Project.Onboard.Faces do
+          def mode(branch), do: Fleet.Layout.writer_face_mode(Fleet.Layout.face_of(branch))
+        end
+        """)
+
+      result = SingleSource.check_face_mode_single_source(root)
+
+      assert result.status == :pass
+      assert result.evidence == []
+    end
+
+    test "un littéral recopié ailleurs → fail qui nomme le fichier et la ligne" do
+      root =
+        modes_root!("copie", declaration_conforme(), """
+        defmodule Fleet.Project.Onboard.Faces do
+          def mode(_branch), do: 0o2775
+        end
+        """)
+
+      result = SingleSource.check_face_mode_single_source(root)
+
+      assert result.status == :fail
+      assert Enum.any?(result.evidence, &(&1 =~ "lib/fleet/project/faces.ex:2"))
+    end
+
+    test "le même littéral dans un COMMENTAIRE n'est pas une copie" do
+      root =
+        modes_root!("commentaire", declaration_conforme(), """
+        defmodule Fleet.Project.Onboard.Faces do
+          # l'atelier vaut 0o2775, l'ops 0o2755 — dit ici, décidé dans Layout
+          def mode(branch), do: Fleet.Layout.writer_face_mode(branch)
+        end
+        """)
+
+      result = SingleSource.check_face_mode_single_source(root)
+
+      assert result.status == :pass, "evidence: #{inspect(result.evidence)}"
+    end
+
+    test "la déclaration réduite à un seul mode → INSTRUMENT BROKEN, pas un vert" do
+      root =
+        modes_root!(
+          "declaration",
+          """
+          defmodule Fleet.Layout do
+            @writer_face_modes %{"workshop" => 0o2775}
+          end
+          """,
+          "defmodule A do\nend\n"
+        )
+
+      result = SingleSource.check_face_mode_single_source(root)
+
+      assert result.status == :fail
+      assert Enum.any?(result.evidence, &(&1 =~ "INSTRUMENT BROKEN"))
+    end
+
+    test "aucune source lue → INSTRUMENT BROKEN, jamais un vert par corpus vide" do
+      root = modes_root!("vide", declaration_conforme(), nil)
+
+      result = SingleSource.check_face_mode_single_source(root)
+
+      assert result.status == :fail
+      assert Enum.any?(result.evidence, &(&1 =~ "INSTRUMENT BROKEN"))
+    end
+  end
+
+  # ⚠ UN TÉMOIN ASYNC QUI POSE UNE CLEF GLOBALE FAIT ROUGIR LE VOISIN, ET JAMAIS LUI-MÊME. Trois
+  # fois en une soirée le 2026-09-19 : `role_token_unavailable` dans la chaîne du pilote,
+  # `forge_auth_malformed` dans WorktreeSync. `test_helper.exs` le disait en prose ; ceci le tient.
+  describe "tests.async_no_global_env — l'env de l'application est GLOBAL" do
+    defp temoins_root!(nom, fichiers) do
+      root = Fleet.TestEnv.tmp_path("async-env-#{nom}")
+      File.mkdir_p!(Path.join(root, "test"))
+
+      for {rel, corps} <- fichiers do
+        chemin = Path.join([root, "test", rel])
+        File.mkdir_p!(Path.dirname(chemin))
+        File.write!(chemin, corps)
+      end
+
+      on_exit(fn -> File.rm_rf(root) end)
+      root
+    end
+
+    defp module_async(corps),
+      do: "defmodule A do\n  use ExUnit.Case, async: true\n#{corps}end\n"
+
+    defp module_serial(corps),
+      do: "defmodule B do\n  use ExUnit.Case, async: false\n#{corps}end\n"
+
+    test "async et sans clef globale → pass" do
+      root =
+        temoins_root!("ok", [
+          {"a_test.exs", module_async("  test \"x\" do\n    assert 1 == 1\n  end\n")}
+        ])
+
+      result = Tests.check_async_no_global_env(root)
+
+      assert result.status == :pass
+      assert result.evidence == []
+    end
+
+    test "async ET Application.put_env(:lcars_fleet, …) → fail qui nomme le fichier et la ligne" do
+      root =
+        temoins_root!("coupable", [
+          {"a_test.exs",
+           module_async("  setup do\n    Application.put_env(:lcars_fleet, :x, 1)\n  end\n")}
+        ])
+
+      result = Tests.check_async_no_global_env(root)
+
+      assert result.status == :fail
+      assert Enum.any?(result.evidence, &(&1 =~ "a_test.exs:4"))
+    end
+
+    test "la MÊME mutation dans un module serial → pass (c'est la fenêtre qui nuit)" do
+      root =
+        temoins_root!("serial", [
+          {"a_test.exs", module_async("  test \"x\" do\n    assert 1 == 1\n  end\n")},
+          {"b_test.exs",
+           module_serial("  setup do\n    Application.put_env(:lcars_fleet, :x, 1)\n  end\n")}
+        ])
+
+      result = Tests.check_async_no_global_env(root)
+
+      assert result.status == :pass, "evidence: #{inspect(result.evidence)}"
+    end
+
+    test "la couture de test compte aussi : TestEnv.put_env_restoring est une mutation" do
+      root =
+        temoins_root!("testenv", [
+          {"a_test.exs",
+           module_async("  setup do\n    TestEnv.put_env_restoring(:lcars_fleet, :x, 1)\n  end\n")}
+        ])
+
+      result = Tests.check_async_no_global_env(root)
+
+      assert result.status == :fail
+      assert Enum.any?(result.evidence, &(&1 =~ "a_test.exs:4"))
+    end
+
+    test "la mutation en COMMENTAIRE n'en est pas une" do
+      root =
+        temoins_root!("commentaire", [
+          {"a_test.exs",
+           module_async(
+             "  # jadis : Application.put_env(:lcars_fleet, :x, 1)\n  test \"x\" do\n    assert 1 == 1\n  end\n"
+           )}
+        ])
+
+      result = Tests.check_async_no_global_env(root)
+
+      assert result.status == :pass, "evidence: #{inspect(result.evidence)}"
+    end
+
+    test "aucun témoin lu → INSTRUMENT BROKEN" do
+      root = temoins_root!("vide", [])
+
+      result = Tests.check_async_no_global_env(root)
+
+      assert result.status == :fail
+      assert Enum.any?(result.evidence, &(&1 =~ "INSTRUMENT BROKEN"))
+    end
+
+    test "des témoins mais AUCUN async → INSTRUMENT BROKEN, le lecteur a perdu la forme" do
+      root =
+        temoins_root!("forme", [
+          {"b_test.exs", module_serial("  test \"x\" do\n    assert 1 == 1\n  end\n")}
+        ])
+
+      result = Tests.check_async_no_global_env(root)
+
+      assert result.status == :fail
+      assert Enum.any?(result.evidence, &(&1 =~ "lost the form"))
     end
   end
 
@@ -352,30 +650,83 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       %{root: root}
     end
 
-    defp write_mirrors!(root, entrypoint_zones, module_zones) do
+    # 25-directories lists paths only; modes and owners live in deploy/system.manifest.
+    defp write_mirrors!(root, entrypoint_zones, module_zones, manifest_rows \\ nil) do
       File.write!(
         Path.join([root, "services", "container", "init.sh"]),
         "install -d -m 2775 -g fleet #{Enum.join(entrypoint_zones, " ")}\n"
       )
 
-      rows = Enum.map_join(module_zones, " \\\n", &~s(    "#{&1} 2775 root:$PROV_FLEET_GROUP"))
+      rows = Enum.map_join(module_zones, " \\\n", &~s|    "$(prov_decor #{&1})"|)
 
       File.write!(Path.join([root, "..", "deploy", "modules.d", "25-directories.sh"]), """
       prov_dirs() {
         printf '%s\\n' \\
-          "/opt/lcars 0755 root:root" \\
+          "$PROV_ROOT" \\
+          "$(prov_decor '/run/lcars/console/<human>')" \\
       #{rows}
       }
       """)
+
+      manifest_rows =
+        manifest_rows ||
+          Enum.map(
+            Enum.uniq(entrypoint_zones ++ module_zones),
+            &"dir       #{&1}                               2775  root:fleet          any"
+          )
+
+      File.write!(Path.join([root, "..", "deploy", "system.manifest"]), """
+      # <classe>[:<trait>]  <objet>  <mode>  <propriétaire>  <substrat>
+      dir       /opt/lcars                                   0755  root:root           any
+      #{Enum.join(manifest_rows, "\n")}
+      """)
     end
 
-    test "les deux miroirs complets → pass", %{root: root} do
+    test "les deux miroirs complets, déclarés 2775 root:fleet → pass", %{root: root} do
       zones = ["/home/projects", "/home/projects.ops"]
       write_mirrors!(root, zones, zones)
 
       result = Catalogue.check_face_roots_provisioned(root)
 
       assert result.status == :pass, "evidence: #{inspect(result.evidence)}"
+    end
+
+    test "une racine de face déclarée avec un mode faux, ou sans ligne, dans le manifeste → fail",
+         %{
+           root: root
+         } do
+      zones = ["/home/projects", "/home/projects.ops"]
+
+      write_mirrors!(root, zones, zones, [
+        "dir       /home/projects      0755  root:fleet   any",
+        "dir       /home/projects.ops  2775  root:root    any"
+      ])
+
+      result = Catalogue.check_face_roots_provisioned(root)
+
+      assert result.status == :fail
+
+      assert result.evidence == [
+               "/home/projects: 0755 root:fleet dans deploy/system.manifest, attendu 2775 root:fleet",
+               "/home/projects.ops: 2775 root:root dans deploy/system.manifest, attendu 2775 root:fleet"
+             ]
+
+      write_mirrors!(root, zones, zones, ["dir       /home/projects  2775  root:fleet  any"])
+
+      assert Catalogue.check_face_roots_provisioned(root).evidence == [
+               "/home/projects.ops: aucune ligne dir dans deploy/system.manifest"
+             ]
+    end
+
+    test "manifeste sans ligne dir lisible → fail-closed", %{root: root} do
+      zones = ["/home/projects", "/home/projects.ops"]
+      write_mirrors!(root, zones, zones)
+      File.write!(Path.join([root, "..", "deploy", "system.manifest"]), "# vide\n")
+
+      result = Catalogue.check_face_roots_provisioned(root)
+
+      assert result.status == :fail
+      assert result.note =~ "deploy/system.manifest has no readable `dir` row"
     end
 
     test "face absente du MODULE provision → fail nommant wsl et linux", %{root: root} do
@@ -387,6 +738,29 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
              "une face absente du seul createur commun aux trois substrats est passee au vert"
 
       assert result.evidence == [
+               "/home/projects.ops: absent du module provision (donc absent sur wsl et linux)"
+             ]
+    end
+
+    test "face citée hors de prov_dirs() → fail : seul le corps de la liste pose une zone", %{
+      root: root
+    } do
+      write_mirrors!(root, ["/home/projects", "/home/projects.ops"], ["/home/projects"])
+
+      zone_elsewhere = """
+      prov_runtime_dirs() {
+        printf '%s\\n' \\
+          "$(prov_decor /home/projects.ops)"
+      }
+      """
+
+      File.write!(
+        Path.join([root, "..", "deploy", "modules.d", "25-directories.sh"]),
+        zone_elsewhere,
+        [:append]
+      )
+
+      assert Catalogue.check_face_roots_provisioned(root).evidence == [
                "/home/projects.ops: absent du module provision (donc absent sur wsl et linux)"
              ]
     end
@@ -408,7 +782,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
 
       assert result.status == :fail
       assert result.note =~ "unreadable"
-      assert result.note =~ "the entrypoint only covers docker"
+      assert result.note =~ "container/init.sh only covers the container volumes"
     end
   end
 
@@ -712,6 +1086,28 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
 
       assert res.note =~ "placement defaults SKIPPED",
              "une couverture bornee qui ne se dit pas se lit comme une couverture complete"
+    end
+  end
+
+  describe "Support.strip_comment/1 — le `#` du shell n'est pas toujours un commentaire" do
+    test "⚠ `${x#/opt}` EST UNE EXPANSION : la ligne n'est plus coupee en deux" do
+      # Le defaut mesure : tout ce qui suivait ce `#` etait invisible a TOUS les murs batis sur
+      # cette fonction. Soixante-dix-neuf lignes du depot portent cette forme.
+      assert Support.strip_comment(~s[R="${p#/opt/lcars}"; T="$LCARS_PRIVATE_DIR"]) ==
+               ~s[R="${p#/opt/lcars}"; T="$LCARS_PRIVATE_DIR"]
+    end
+
+    test "les expansions IMBRIQUEES se referment une par une, pas d'un coup" do
+      assert Support.strip_comment(~s[A="${a:-${b#x}}" # ici seulement]) == ~s[A="${a:-${b#x}}" ]
+    end
+
+    test "un VRAI commentaire est toujours coupe, en debut comme en fin de ligne" do
+      assert Support.strip_comment("  # tout le reste") == "  "
+      assert Support.strip_comment(~s[A=1 # la suite]) == "A=1 "
+    end
+
+    test "un `#` dans une chaine reste dans le code" do
+      assert Support.strip_comment(~s[A="rouge #ff0000"]) == ~s[A="rouge #ff0000"]
     end
   end
 end

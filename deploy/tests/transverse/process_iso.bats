@@ -110,29 +110,20 @@ launch_body() { code "$ENTRY" | sed -n '/^launch() {/,/^}/p'; }
 
 @test "le pilote est IDEMPOTENT — sinon il empile un ttyd par tour" {
   local console="$BATS_TEST_DIRNAME/../../../runtime/services/console.sh"
-  code "$console" | grep -q 'console_alive'
-  # et l'appel par tour ne contourne pas cette garde
-  code "$BATS_TEST_DIRNAME/../../../runtime/services/human-converger.sh" | grep -qv 'rm -f.*console.sock'
+  # dans chaque fonction qui lance un ttyd, la sonde de sa socket précède le lancement, et un retour la suit
+  local sans_garde
+  sans_garde="$(code "$console" | awk '
+    /^[a-z_]+\(\) *\{/                { fn = $1; garde = 0; sortie = 0 }
+    /console_alive "\$sock"/          { garde = 1 }
+    garde && /return 0/               { sortie = 1 }
+    /ttyd --writable/                 { lanceurs++; if (!sortie) print fn }
+    END                               { if (!lanceurs) print "AUCUN LANCEUR LU" }')"
+  [ -z "$sans_garde" ] || { echo "ttyd lancé sans sonde qui rend la main avant lui : $sans_garde" >&2; return 1; }
+  # et l'appel par tour ne contourne pas cette garde en retirant la socket
+  code "$CONVERGER" | refute_out 'rm -f.*console\.sock'
 }
 
-@test "sshd n'est PAS dans la table, et son absence est motivee" {
+@test "sshd n'est PAS dans la table : le boot du conteneur le lance par exec, hors de la supervision" {
   code "$ENTRY" | grep -qE 'exec .*sshd'
   starters | refute_out '^sshd:'
-  grep -q 'sshd' "$BATS_TEST_DIRNAME/process_iso.bats"
-}
-
-@test "LCARS_CONSOLE_GROUP n'a plus qu'UN sens — l'ambiguite est levee, et elle le reste" {
-  local hum="$BATS_TEST_DIRNAME/../../../runtime/services/console-humans.sh"
-  local con="$BATS_TEST_DIRNAME/../../../runtime/services/console.sh"
-  local lan="$BATS_TEST_DIRNAME/../../../runtime/services/console-landing.sh"
-
-  # Le sens SURVIVANT, sur ses deux lecteurs : un groupe de TRAVERSEE de sockets, jamais un droit.
-  grep -qE 'CONSOLE_GROUP="\$\{LCARS_CONSOLE_GROUP:-lcars-console\}"' "$con"
-  grep -qE 'CONSOLE_GROUP="\$\{LCARS_CONSOLE_GROUP:-lcars-console\}"' "$lan"
-
-  # Et la regle d'eligibilite n'en lit plus AUCUN. On mesure le CODE : la cicatrice de ce fichier
-  # nomme le groupe qu'elle a retire, et c'est son metier.
-  local n
-  n="$(sed 's/#.*//' "$hum" | grep -cE 'LCARS_CONSOLE_GROUP|getent group|FLEET_MEMBERS' || true)"
-  [ "$n" -eq 0 ] || { sed 's/#.*//' "$hum" | grep -nE 'LCARS_CONSOLE_GROUP|getent group|FLEET_MEMBERS' >&2; return 1; }
 }

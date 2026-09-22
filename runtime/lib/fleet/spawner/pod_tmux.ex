@@ -23,7 +23,7 @@ defmodule Fleet.Spawner.PodTmux do
   @doc """
   Socket root, configured by `:spawner_tmux_sock_base` (default `~/.lcars/run/tmux-sock`).
   `Pod.LaunchEnv` exports it as `LCARS_TMUX_SOCK_BASE` so launchers use the same path;
-  their direct-invocation fallback need not match this default.
+  the launchers carry no default of their own and refuse to start without it.
   """
   @spec sock_base() :: String.t()
   def sock_base,

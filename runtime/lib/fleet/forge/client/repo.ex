@@ -51,7 +51,8 @@ defmodule Fleet.Forge.Client.Repo do
   end
 
   @doc """
-  Requests template generation with git content, labels and topics; owner defaults to `fleet`.
+  Requests template generation with git content, labels and topics; `opts[:org]` names the owner
+  and is required (a catalogue names the org of its projects; this client has no default).
   The 2026-07-18 forge bench copied those fields but not branch protection.
   Maps HTTP 404 to `:template_missing`, 409 to `:already_exists`, without checking existing state.
   """
@@ -61,7 +62,8 @@ defmodule Fleet.Forge.Client.Repo do
       when is_binary(template_repo) and is_binary(name) do
     with {:ok, config} <- resolve_config(opts) do
       body = %{
-        owner: Keyword.get(opts, :org, "fleet"),
+        # No default owner: the caller names the org, a catalogue does (Forge cannot read Catalogue).
+        owner: Keyword.fetch!(opts, :org),
         name: name,
         description: Keyword.get(opts, :description, ""),
         private: Keyword.get(opts, :private, false),
@@ -132,35 +134,6 @@ defmodule Fleet.Forge.Client.Repo do
   end
 
   @doc """
-  Returns `%{sha, message}` for callers tracking a catalogue projection's source.
-  The store is a fresh commit, so different HEADs need not mean different content.
-  On the 2026-08-16 Gitea 1.26.1 bench, `/git/trees/{sha}` echoed the input SHA and
-  `/git/commits/{sha}` reported the commit SHA as tree.sha; neither supplied the needed tree hash.
-  `push_store` therefore writes `Source-Commit:` in the message. Parsing that trailer and
-  treating its absence as unknown belong to the caller; this function returns the raw message.
-  A missing message defaults to "", but present values are unchecked. HTTP 404 becomes :not_found.
-  """
-  @spec branch_commit(String.t(), String.t(), Keyword.t()) ::
-          {:ok, %{sha: String.t(), message: String.t()}} | {:error, term()}
-  def branch_commit(repo, branch, opts \\ []) when is_binary(repo) and is_binary(branch) do
-    with {:ok, config} <- resolve_config(opts) do
-      case http_get(config, "/repos/#{encode_repo(repo)}/branches/#{encode_seg(branch)}") do
-        {:ok, %{"commit" => %{"id" => sha} = c}} when is_binary(sha) ->
-          {:ok, %{sha: sha, message: Map.get(c, "message", "")}}
-
-        {:ok, _} ->
-          {:error, :no_branch_sha}
-
-        {:error, {:http, 404, _}} ->
-          {:error, :not_found}
-
-        {:error, _} = err ->
-          err
-      end
-    end
-  end
-
-  @doc """
   Returns a binary default branch, including an empty string; no main-branch policy is enforced here.
   """
   @spec default_branch(String.t(), Keyword.t()) :: {:ok, String.t()} | {:error, term()}
@@ -177,7 +150,7 @@ defmodule Fleet.Forge.Client.Repo do
 
   @doc """
   Returns a binary branch tip for the seal's provenance check, without SHA format validation.
-  Unlike branch_commit/3, HTTP 404 retains the transport error shape.
+  HTTP 404 retains the transport error shape, unlike the readers that map it to `:not_found`.
   """
   @spec branch_head(String.t(), String.t(), Keyword.t()) :: {:ok, String.t()} | {:error, term()}
   def branch_head(repo, branch, opts \\ []) when is_binary(repo) and is_binary(branch) do
@@ -190,6 +163,41 @@ defmodule Fleet.Forge.Client.Repo do
       other -> {:error, {:branch_head_unexpected, other}}
     end
   end
+
+  @doc """
+  Lists every branch as `%{name, sha, message}`, paginated. HTTP 404 (no such repository) becomes
+  `:not_found`, which a caller distinguishes from a repository that simply holds no branch.
+
+  This is what answers "which catalogues are installed": one question about one repository,
+  instead of a search across every visible repository. The head's commit message travels with it
+  (measured on the 1.26.1 bench: the listing carries `commit.message`), so a catalogue store's
+  `Source-Commit:` trailer needs no second read. A missing message is `""`.
+
+  ⚠ WHY A TRAILER AND NOT A CONTENT HASH: a catalogue store is a FRESH commit at every projection,
+  so two HEADs differ even when their trees are identical. On the 2026-08-16 Gitea 1.26.1 bench,
+  `/git/trees/{sha}` echoed the input SHA and `/git/commits/{sha}` reported the commit SHA as
+  tree.sha; neither supplied a usable tree hash. `push_store` therefore writes `Source-Commit:` in
+  the message, and freshness compares that.
+  Entries without a readable name or head are dropped — a listing that cannot be believed in part
+  is not a reason to refuse the rest.
+  """
+  @spec list_branches(String.t(), Keyword.t()) ::
+          {:ok, [%{name: String.t(), sha: String.t(), message: String.t()}]} | {:error, term()}
+  def list_branches(repo, opts \\ []) when is_binary(repo) do
+    with {:ok, config} <- resolve_config(opts) do
+      case paginate(config, "/repos/#{encode_repo(repo)}/branches", "") do
+        {:ok, items} -> {:ok, Enum.flat_map(items, &branch_entry/1)}
+        {:error, {:http, 404, _}} -> {:error, :not_found}
+        {:error, _} = err -> err
+      end
+    end
+  end
+
+  defp branch_entry(%{"name" => name, "commit" => %{"id" => sha} = commit})
+       when is_binary(name) and is_binary(sha),
+       do: [%{name: name, sha: sha, message: Map.get(commit, "message", "")}]
+
+  defp branch_entry(_), do: []
 
   @doc """
   HTTP success => true, HTTP 404 => false; other errors propagate.
@@ -255,6 +263,46 @@ defmodule Fleet.Forge.Client.Repo do
   end
 
   @doc """
+  Tests `/repos/{owner}/{name}` with the same HTTP mapping as user_exists?/2.
+
+  ⚠ A transport failure is NOT an absence: it propagates, because a gesture that cannot read
+  the forge must conclude nothing rather than report a repository as missing.
+  """
+  @spec repo_exists?(String.t(), Keyword.t()) :: {:ok, boolean()} | {:error, term()}
+  def repo_exists?(repo, opts \\ []) when is_binary(repo) do
+    with {:ok, config} <- resolve_config(opts) do
+      case http_get(config, "/repos/#{encode_repo(repo)}") do
+        {:ok, _} -> {:ok, true}
+        {:error, {:http, 404, _}} -> {:ok, false}
+        {:error, _} = err -> err
+      end
+    end
+  end
+
+  @doc """
+  Reads one branch-protection rule: the rule map, or `:absent` on HTTP 404.
+
+  ⚠ THE FORGE ANSWERS JSON ON 404 TOO ("The target couldn't be found"), so the STATUS decides,
+  never the body: a body alone would make an ABSENT protection look like a different one.
+  Reading a protection needs admin rights on the repository; a 403 propagates as an error.
+  """
+  @spec branch_protection(String.t(), String.t(), Keyword.t()) ::
+          {:ok, map() | :absent} | {:error, term()}
+  def branch_protection(repo, rule_name, opts \\ [])
+      when is_binary(repo) and is_binary(rule_name) do
+    with {:ok, config} <- resolve_config(opts) do
+      path = "/repos/#{encode_repo(repo)}/branch_protections/#{encode_seg(rule_name)}"
+
+      case http_get(config, path) do
+        {:ok, rule} when is_map(rule) -> {:ok, rule}
+        {:ok, other} -> {:error, {:unexpected_protection_shape, other}}
+        {:error, {:http, 404, _}} -> {:ok, :absent}
+        {:error, _} = err -> err
+      end
+    end
+  end
+
+  @doc """
   Paginates teams and selects the first matching name, then maps membership HTTP status
   as user_exists?/2 does. No matching team returns false; a matching team must carry an id.
   """
@@ -267,6 +315,64 @@ defmodule Fleet.Forge.Client.Repo do
       teams
       |> Enum.find(&(is_map(&1) and &1["name"] == team))
       |> member_of_team(config, username)
+    end
+  end
+
+  @doc """
+  Logins of a named team of an org, sorted; an unknown team returns `{:ok, []}`.
+
+  ⚠ A whitelist naming a team with NO member refuses every signature, so an empty list is an
+  answer, never an absence: the caller decides what it means. Paginated like `team_member?/4`;
+  entries without a `login` string are dropped rather than guessed.
+  """
+  @spec team_members(String.t(), String.t(), Keyword.t()) ::
+          {:ok, [String.t()]} | {:error, term()}
+  def team_members(org, team, opts \\ []) when is_binary(org) and is_binary(team) do
+    with {:ok, config} <- resolve_config(opts),
+         {:ok, teams} <- paginated_teams(config, org) do
+      teams
+      |> Enum.find(&(is_map(&1) and &1["name"] == team))
+      |> members_of_team(config)
+    end
+  end
+
+  defp members_of_team(nil, _config), do: {:ok, []}
+
+  defp members_of_team(%{"id" => id}, config) do
+    case paginate(config, "/teams/#{id}/members", "") do
+      {:ok, membres} ->
+        {:ok,
+         membres
+         |> Enum.flat_map(fn
+           %{"login" => login} when is_binary(login) and login != "" -> [login]
+           _ -> []
+         end)
+         |> Enum.sort()}
+
+      {:error, {:unexpected_page_shape, _p, _page, body}} ->
+        {:error, {:unexpected_team_members_shape, body}}
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  defp members_of_team(_no_id, _config), do: {:error, :team_without_id}
+
+  @doc """
+  The forge's own version string, and the only probe that answers "is it reachable at all".
+
+  ⚠ REACHABILITY IS NOT AN OPINION: a gesture that cannot read this concludes NOTHING about
+  what lives on the forge. A missing `version` key is a refusal, never a blank version.
+  """
+  @spec server_version(Keyword.t()) :: {:ok, String.t()} | {:error, term()}
+  def server_version(opts \\ []) do
+    with {:ok, config} <- resolve_config(opts) do
+      case http_get(config, "/version") do
+        {:ok, %{"version" => v}} when is_binary(v) and v != "" -> {:ok, v}
+        {:ok, body} -> {:error, {:unexpected_version_shape, body}}
+        {:error, _} = err -> err
+      end
     end
   end
 

@@ -21,8 +21,7 @@ defmodule Fleet.Layout do
   # Image seeds and installed catalogue cache are distinct; Fleet.Catalogue owns their inner layout.
   @platform_root "/opt/lcars"
   @catalogues_dirname "catalogues"
-  # The installed cache shares the persistent var volume with forge tokens. Keep it outside /home,
-  # which uninstall must never remove: user work is outside the product's deletion perimeter.
+  # The installed cache shares the persistent var volume with forge tokens.
   @installed_catalogues_root "/opt/lcars/var/catalogues"
 
   # Deployment mounts /run as ephemeral state; boot markers must not survive with the image/cache.
@@ -52,9 +51,33 @@ defmodule Fleet.Layout do
   # Project faces include ops; the narrower producer-card enum excludes it.
   @face_branches %{"code" => "main", "workshop" => "workshop", "ops" => "ops"}
 
+  # ⚠ LE MODE D'UNE FACE D'ECRITURE EST DECLARE ICI, ET NULLE PART AILLEURS. Sans mode explicite le
+  # repertoire nait sous l'umask du processus, qui depend de qui a lance le BEAM : la face atelier
+  # cesse d'etre ecrivable par le groupe et un depot humain s'y refuse, sans qu'aucun message ne le
+  # dise. Le setgid porte le groupe aux fichiers qui y naissent ; l'atelier est partage (g+w),
+  # l'ops ne l'est pas. La face de CODE n'en a pas : c'est un clone ordinaire sous sa racine
+  # declaree, et lui inventer un mode ici serait declarer une regle que personne n'a mesuree.
+  @writer_face_modes %{"workshop" => 0o2775, "ops" => 0o2755}
+
+  # ⚠ LCARS IS A PROJECT OF THE FLEET IT INSTALLS (⚖ user 2026-09-16). The tree a machine was
+  # installed from is not a loose checkout beside the projects: it is the CODE FACE of a project
+  # like any other, adopted onto the forge with its ops and workshop faces. Naming it here is what
+  # keeps the container's clone, the installer's adoption and the forge repository at one address —
+  # they used to be `/home/projects/LCARS` on disk and `<org>/lcars` on the forge, two names for
+  # one thing, and nothing held them together.
+  @system_project "lcars-fleet"
+
   @doc "Root of the CODE face (`/home/projects`) — imposed container layout."
   @spec code_root() :: Path.t()
   def code_root, do: @code_root
+
+  @doc """
+  Name of the fleet's own project (`#{@system_project}`): the source a machine was installed from,
+  carried as a project of the catalogue that installs it. Its code face is `project_dir/1` of this
+  name, and its forge repository is that name in the standard catalogue's org.
+  """
+  @spec system_project() :: String.t()
+  def system_project, do: @system_project
 
   @doc "Branch of the CODE face (`main`) — pairs with `code_root/0`."
   @spec code_branch() :: String.t()
@@ -80,6 +103,16 @@ defmodule Fleet.Layout do
           "Fleet.Layout.face_branch/1: unknown face #{inspect(other)} — the schema enum allows " <>
             "#{inspect(Map.keys(@face_branches))}; an unknown value here bypassed it. Fix the caller."
   end
+
+  @doc """
+  Directory mode of a WRITER face (`workshop`, `ops`), or nil for any other face.
+
+  Nil is the answer for the code face and for anything that is not a face: those directories take
+  the process umask under their declared root. A caller that receives nil applies no mode; it must
+  not substitute one.
+  """
+  @spec writer_face_mode(String.t() | nil) :: non_neg_integer() | nil
+  def writer_face_mode(face), do: Map.get(@writer_face_modes, face)
 
   @doc """
   Names the face for a structural branch, or nil for feature branches and other inputs.

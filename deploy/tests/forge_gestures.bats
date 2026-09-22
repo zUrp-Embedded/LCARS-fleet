@@ -14,7 +14,8 @@
   [ -n "$body" ]
   # Les deux chemins, et la condition qui les separe.
   grep -q 'compose ps -q lcars' <<<"$body"
-  grep -q '/opt/lcars/forge-gestures.sh' <<<"$body"
+  grep -qF '"$RACINE_CONTENEUR/forge-gestures.sh"' <<<"$body"
+  grep -qF '[[ -x "$PROV_ROOT/forge-gestures.sh" ]]' <<<"$body"
   # ⚠ ET AUCUN `sudo` : la promesse auditee de ce rail est de n'en jamais demander. Un operateur
   # sans droit sur le fichier doit se faire REFUSER par eux, pas les contourner.
   refute grep -q 'sudo' <<<"$body"
@@ -25,6 +26,11 @@ load refute
 setup() {
   SCRIPT="$BATS_TEST_DIRNAME/../../runtime/services/forge-gestures.sh"
   [ -f "$SCRIPT" ]
+  # ⚖ decision 3 : le geste SOURCE le lecteur des faits, qu'il cherche a cote de lui puis sous la
+  # racine du produit (`/opt/lcars/services/lib`) — aucune des deux sous un decor, et les copies A
+  # PLAT de `_flat_copy` en sont le cas limite. On le NOMME ici : la resolution des deux mondes est
+  # tenue par son propre temoin (`runtime/test/services/faits.bats`), pas par ce fichier.
+  export LCARS_FACTS_SH="$BATS_TEST_DIRNAME/../../runtime/services/lib/facts.sh"
 
   BIN="$BATS_TEST_TMPDIR/bin"
   PRIV="$BATS_TEST_TMPDIR/private"
@@ -43,6 +49,15 @@ if [[ " $* " == *" registration-token"* || "$*" == *registration-token* ]]; then
   printf '{"token":"REG-TOKEN-42"}'
   exit 0
 fi
+# La team des approbateurs, dérivée du drapeau site-admin par `derive_admins` : trois lectures et
+# une écriture. Sans elles, le geste refuse — à raison : une protection qui nomme une team vide ne
+# débloque personne (mesure du 2026-09-18, banc vierge 2004).
+case "$*" in
+  */api/v1/teams/9/members/*) printf '204'; exit 0 ;;
+  */api/v1/teams/9/members)   printf '[]'; exit 0 ;;
+  */api/v1/orgs/*/teams)      printf '[{"id":9,"name":"admins"}]'; exit 0 ;;
+  */api/v1/admin/users*)      printf '[{"login":"le-siege","is_admin":true,"active":true}]'; exit 0 ;;
+esac
 printf '%s' "${FAKE_AUTH_CODE:-200}"
 FAKE
   chmod +x "$BIN/curl"
@@ -59,9 +74,17 @@ FAKE
   cat > "$BIN/jq" <<FAKE
 #!/usr/bin/env bash
 # Assez de jq pour les DEUX questions posees : le jeton d'enregistrement, et le login de l'id 1.
-body="\$(cat)"
+# « jq -n » ne lit pas son entree : sous un terminal, un « cat » inconditionnel attendrait une ligne tapee
+body=""; [[ " \$* " == *" -n "* || " \$* " == *" -cn "* ]] || body="\$(cat)"
 case "\$*" in
   *'.id == 1'*) cat "$BATS_TEST_TMPDIR/master.out" 2>/dev/null || true ;;
+  # la team des approbateurs et sa composition, derivee du drapeau site-admin (\`derive_admins\`) :
+  # l'ID de la team, la liste des site-admins actifs, et les membres actuels
+  *'select(.name==\$n)'*) echo "\${FAKE_TEAM_ID:-9}" ;;
+  *'.is_admin == true'*)  printf '%s\n' \${FAKE_ADMINS-le-siege} ;;
+  *'.[].login'*)          printf '%s' "\${FAKE_MEMBRES:-}" ;;
+  *'.login'*)   echo "le-siege" ;;
+  *'[\$s]'*)    echo '["le-siege"]' ;;
   *) [[ "\$body" =~ \"token\":\"([^\"]*)\" ]] && printf '%s\n' "\${BASH_REMATCH[1]}" ;;
 esac
 FAKE
@@ -72,21 +95,26 @@ FAKE
   export LCARS_PRIVATE_DIR="$PRIV"
   export LCARS_RECIPE_DIR="$RECIPE"
   export FORGE_BASE_URL="http://forge.test"
-  # Le verrou d'apply vit dans le tmpdir du test : `/run/lock` n'est pas ecrivable par le temoin,
-  # et un verrou PARTAGE entre les cas ferait echouer le second sur le premier.
-  export LCARS_APPLY_LOCK="$BATS_TEST_TMPDIR/apply.lock"
-  export LCARS_CATALOGUE_WORK="$BATS_TEST_TMPDIR/tofu"
+  # le dossier de travail, qui est aussi le verrou d'apply, propre à chaque cas
+  export LCARS_CATALOGUES_WORK="$BATS_TEST_TMPDIR/tofu"
+  mkdir -p "$LCARS_CATALOGUES_WORK"
   # Le CACHE local du materiel. Pointe dans le tmpdir : sans ca le temoin ecrirait dans
   # `/home/catalogues`, c'est-a-dire dans le conteneur de celui qui lance la suite.
   export LCARS_CATALOGUES_DIR="$BATS_TEST_TMPDIR/catalogues"
 
   # La porte outil du release, doublee : elle journalise SON verbe et rend ce que le cas veut.
   ENTRY_LOG="$BATS_TEST_TMPDIR/entry.log"
+  # le catalogue que la release embarque : `apply` l'installe comme n'importe quel catalogue, et sa
+  # source est cet arbre-ci ; un cas qui nomme LCARS_REFERENCE_CATALOGUE l'emporte sur cette porte
+  REFERENCE="$BATS_TEST_TMPDIR/release-catalogue"; mkdir -p "$REFERENCE"
+  printf 'api_version: 1\nname: fleet\n' > "$REFERENCE/catalogue.yaml"
+  export REFERENCE
   cat > "$BIN/entrypoint" <<FAKE
 #!/usr/bin/env bash
 [[ "\$1" == tool ]] && shift   # la porte est « lcars tool <verbe> » (lot 6)
 printf '%s\n' "\$*" >> "$ENTRY_LOG"
 case "\$1" in
+  catalogue-root) printf '%s\n' "$REFERENCE" ;;
   catalogue-source)
     rc="\$(cat "$BATS_TEST_TMPDIR/src.rc" 2>/dev/null || echo 0)"
     [[ "\$rc" -eq 0 ]] || { echo "ABSENT \$2" >&2; exit "\$rc"; }
@@ -174,8 +202,10 @@ FAKE
   run env -u FORGE_BASE_URL bash -c "'$SCRIPT' apply < /dev/null"
   [ "$status" -eq 1 ]
   [[ "$output" == *"l'URL de la forge"* ]]
-  [[ "$output" == *"l'autorite"* ]]
+  [[ "$output" == *"l'autorité"* ]]
   [[ "$output" == *"le seed des comptes"* ]]
+  [[ "$output" == *"deploy/workstation up"* ]]
+  [[ "$output" == *"deploy/container config"* ]]
 }
 
 @test "apply: avec l'URL mais rien d'autre, il ne nomme QUE ce qui manque" {
@@ -184,7 +214,7 @@ FAKE
   run bash -c "'$SCRIPT' apply < /dev/null"
   [ "$status" -eq 1 ]
   [[ "$output" != *"l'URL de la forge"* ]]
-  [[ "$output" == *"l'autorite"* ]]
+  [[ "$output" == *"l'autorité"* ]]
 }
 
 @test "apply: l'ORDRE des deux modules est instance PUIS catalogue" {
@@ -219,12 +249,22 @@ FAKE
   [ "$(cat "$PRIV/forge-master.token")" = "TOK-CONTENEUR" ]
 }
 
+@test "apply depuis un terminal : il n'attend aucune ligne tapée" {
+  command -v script >/dev/null || skip "script (util-linux) absent"
+  printf 'TOK-FICHIER\n' > "$PRIV/forge-master.token"
+  printf 'SEED\n' > "$PRIV/forge-seed.pass"
+  # un terminal ouvert qui ne tape rien : sans la garde, le geste attendrait jusqu'au timeout (124)
+  run bash -c "(sleep 30) | timeout 15 script -qec \"'$SCRIPT' apply\" /dev/null"
+  [ "$status" -eq 0 ]
+  [ "$(sed -n '1p' "$TOFU_LOG")" = "init $RECIPE/instance" ]
+}
+
 @test "apply: DEUX applys concurrents — le second REFUSE, il n'attend pas" {
   printf 'TOK\n' > "$PRIV/forge-master.token"
   printf 'SEED\n' > "$PRIV/forge-seed.pass"
 
   # Un tiers tient le verrou pendant que l'apply tente sa chance.
-  ( flock 9 && sleep 5 ) 9>"$LCARS_APPLY_LOCK" &
+  ( flock 9 && sleep 5 ) 9<"$LCARS_CATALOGUES_WORK" &
   holder=$!
   sleep 0.3
   run bash -c "'$SCRIPT' apply < /dev/null"
@@ -293,8 +333,11 @@ FAKE
   run bash -c "'$SCRIPT' install cat < /dev/null"
   [ "$status" -ne 0 ]
   [[ "$output" == *"system_starfleet.gitea_token"* ]]
-  [[ "$output" == *"provision apply"* ]]
-  [ ! -s "$ENTRY_LOG" ]
+  [[ "$output" == *"deploy/workstation up"* ]]
+  [[ "$output" == *"deploy/container up"* ]]
+  # la seule porte jouee est la question « est-ce le catalogue de la release ? » ; aucune resolution
+  refute grep -q '^catalogue-source' "$ENTRY_LOG"
+  refute grep -q '^verify' "$ENTRY_LOG"
 }
 
 @test "install: sans autorite, il REFUSE avant de toucher quoi que ce soit" {
@@ -331,11 +374,14 @@ FAKE
   setup_install
   run bash -c "'$SCRIPT' install cat < /dev/null"
   [ "$status" -eq 0 ]
-  [ "$(sed -n '1p' "$ENTRY_LOG" | cut -d' ' -f1)" = "catalogue-source" ]
-  [ "$(sed -n '2p' "$ENTRY_LOG" | cut -d' ' -f1)" = "verify" ]
-  [ "$(sed -n '3p' "$ENTRY_LOG" | cut -d' ' -f1)" = "roles-tfvars" ]
-  grep -q "$LCARS_CATALOGUE_WORK/cat" "$TOFU_LOG"
-  grep -q 'push .*cat/_catalogue' "$GIT_LOG"
+  # d'abord « est-ce le catalogue de la release ? » (son nom, demande a la release), puis la voie de la forge
+  [ "$(sed -n '1p' "$ENTRY_LOG" | cut -d' ' -f1)" = "catalogue-root" ]
+  [ "$(sed -n '2p' "$ENTRY_LOG" | cut -d' ' -f1)" = "catalogue-source" ]
+  [ "$(sed -n '3p' "$ENTRY_LOG" | cut -d' ' -f1)" = "verify" ]
+  [ "$(sed -n '4p' "$ENTRY_LOG" | cut -d' ' -f1)" = "roles-tfvars" ]
+  grep -q "$LCARS_CATALOGUES_WORK/cat" "$TOFU_LOG"
+  # le magasin : SA branche du depot du systeme, jamais un depot par catalogue
+  grep -q 'push -q --force http://forge.test/lcars/_catalogues.git HEAD:refs/heads/cat' "$GIT_LOG"
 }
 
 @test "install: le MATERIEL local est pose dans le meme geste, clone depuis le store" {
@@ -343,23 +389,26 @@ FAKE
   run bash -c "'$SCRIPT' install cat < /dev/null"
   [ "$status" -eq 0 ]
   [ -f "$LCARS_CATALOGUES_DIR/cat/catalogue.yaml" ]
-  grep -q "clone .*http://forge.test/cat/_catalogue.git" "$GIT_LOG"
+  grep -q "clone --quiet --depth 1 --branch cat http://forge.test/lcars/_catalogues.git" "$GIT_LOG"
   [[ "$output" == *"materiel pose"* ]]
 }
 
 
-@test "install: materiel local en echec — le dire, ne pas defaire ce qui est bon" {
+@test "install: materiel local en echec — le dire en echec, ne pas defaire ce qui est bon" {
   # L'org et la source sont posees avant lui. Defaire ce qui est bon parce que le cache a rate
-  # serait perdre le travail utile pour une moitie rattrapable au prochain boot.
+  # serait perdre le travail utile pour une moitie rattrapable au prochain boot. Rendre 0 ferait
+  # dire « installe » a une machine qui ne sert pas le catalogue (banc beta3, deux rails).
   setup_install
   # Un cache impossible a ecrire : le parent est un FICHIER.
   export LCARS_CATALOGUES_DIR="$BATS_TEST_TMPDIR/pas-un-dossier/sub"
   : > "$BATS_TEST_TMPDIR/pas-un-dossier"
 
   run bash -c "'$SCRIPT' install cat < /dev/null"
-  [[ "$output" == *"INSTALLE sur la forge"* ]]
-  [[ "$output" == *"redemarrage"* ]]
-  grep -q 'push .*cat/_catalogue' "$GIT_LOG"
+  [ "$status" -eq 1 ] || { echo "rc=$status"; echo "$output"; return 1; }
+  [[ "$output" == *"est posé sur la forge (org, comptes, source sur lcars/_catalogues:cat), mais son matériel local n'a pas pu être posé"* ]]
+  [[ "$output" == *"prochain démarrage du conteneur"* ]]
+  [[ "$output" == *"deploy/workstation up"* ]]
+  grep -q 'push -q --force http://forge.test/lcars/_catalogues.git HEAD:refs/heads/cat' "$GIT_LOG"
 }
 
 @test "install: L'ETAT DE TOFU N'EST JAMAIS COPIE — installer un catalogue ne desinstalle pas l'autre" {
@@ -371,23 +420,23 @@ FAKE
 
   run bash -c "'$SCRIPT' install cat < /dev/null"
   [ "$status" -eq 0 ]
-  [ ! -e "$LCARS_CATALOGUE_WORK/cat/terraform.tfstate" ]
-  [ ! -e "$LCARS_CATALOGUE_WORK/cat/terraform.tfstate.backup" ]
-  [ ! -e "$LCARS_CATALOGUE_WORK/cat/.terraform" ]
-  [ ! -e "$LCARS_CATALOGUE_WORK/cat/instance/terraform.tfstate" ]
+  [ ! -e "$LCARS_CATALOGUES_WORK/cat/terraform.tfstate" ]
+  [ ! -e "$LCARS_CATALOGUES_WORK/cat/terraform.tfstate.backup" ]
+  [ ! -e "$LCARS_CATALOGUES_WORK/cat/.terraform" ]
+  [ ! -e "$LCARS_CATALOGUES_WORK/cat/instance/terraform.tfstate" ]
   # TEMOIN DE NON-VACUITE : la recette ELLE-MEME est bien arrivee.
-  [ -f "$LCARS_CATALOGUE_WORK/cat/roles.auto.tfvars.json" ]
+  [ -f "$LCARS_CATALOGUES_WORK/cat/roles.auto.tfvars.json" ]
 }
 
 @test "install: l'etat DE CE CATALOGUE-CI survit au rejeu — sinon tout se re-importe a chaque fois" {
   setup_install
   printf '{"version":4,"resources":[{"name":"role"}]}\n' > "$RECIPE/terraform.tfstate"
-  mkdir -p "$LCARS_CATALOGUE_WORK/cat"
-  printf 'ETAT-DE-CAT\n' > "$LCARS_CATALOGUE_WORK/cat/terraform.tfstate"
+  mkdir -p "$LCARS_CATALOGUES_WORK/cat"
+  printf 'ETAT-DE-CAT\n' > "$LCARS_CATALOGUES_WORK/cat/terraform.tfstate"
 
   run bash -c "'$SCRIPT' install cat < /dev/null"
   [ "$status" -eq 0 ]
-  run cat "$LCARS_CATALOGUE_WORK/cat/terraform.tfstate"
+  run cat "$LCARS_CATALOGUES_WORK/cat/terraform.tfstate"
   [ "$output" = "ETAT-DE-CAT" ]
 }
 
@@ -395,7 +444,7 @@ FAKE
   setup_install
   run bash -c "'$SCRIPT' install cat < /dev/null"
   [ "$status" -eq 0 ]
-  [ -f "$LCARS_CATALOGUE_WORK/cat/roles.auto.tfvars.json" ]
+  [ -f "$LCARS_CATALOGUES_WORK/cat/roles.auto.tfvars.json" ]
   [ ! -f "$RECIPE/roles.auto.tfvars.json" ]
 }
 
@@ -451,9 +500,10 @@ FAKE
   LCARS_DEMO_CATALOGUE="$demo" run bash -c "'$SCRIPT' apply < /dev/null"
   [ "$status" -eq 0 ]
   [[ "$output" == *"web-demo NON depose"* ]]
-  # Aucun push : `git` n'a meme pas ete appele, donc son journal n'existe pas. Tester le CONTENU
-  # d'un fichier absent ferait echouer le temoin sur sa propre mise en scene et pas sur le sujet.
-  [ ! -s "$GIT_LOG" ]
+  # Aucun push de la demo. Le magasin du catalogue de la release, lui, EST pousse : c'est une
+  # installation, pas un depot chez le master.
+  refute grep -q 'push .*web-demo' "$GIT_LOG"
+  grep -q 'push -q --force http://forge.test/lcars/_catalogues.git HEAD:refs/heads/fleet' "$GIT_LOG"
 }
 
 @test "apply: SANS catalogue de demonstration dans l'image, l'apply ne dit rien" {
@@ -492,7 +542,9 @@ FAKE
   [[ "$(cat "$GIT_LOG")" != *un-repertoire-mal-nomme* ]]
 }
 
-@test "apply: un arbre SANS \`name:\` en colonne zero n'est pas depose, et le refus le DIT" {
+@test "apply: un catalogue de release SANS \`name:\` en colonne zero ne s'installe pas — echec NOMME apres la structure, rien n'est pousse" {
+  # Le nom est l'org des projets : sans lui, l'installation n'a pas d'org a poser, et une forge sans
+  # org de projets n'accueille rien. Ce n'est plus « non depose », c'est un echec.
   setup_install
   ref="$BATS_TEST_TMPDIR/reference"
   mkdir -p "$ref"
@@ -501,8 +553,9 @@ FAKE
 
   LCARS_REFERENCE_CATALOGUE="$ref" LCARS_DEMO_CATALOGUE="$BATS_TEST_TMPDIR/rien" \
     run bash -c "'$SCRIPT' apply < /dev/null"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"ne declare pas de"* ]]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"la release ne nomme pas son catalogue — la structure est posee, mais AUCUNE org de projets ne l'est"* ]]
+  grep -q "^apply $RECIPE\$" "$TOFU_LOG"
   [ ! -s "$GIT_LOG" ]
 }
 
@@ -529,34 +582,96 @@ FAKE
 }
 
 
-@test "le verrou vit dans le repertoire de travail, pas dans /run/lock" {
-  unset LCARS_APPLY_LOCK
-  export LCARS_CATALOGUE_WORK="$BATS_TEST_TMPDIR/tofu-work"
-  mkdir -p "$LCARS_CATALOGUE_WORK"
+@test "le verrou est le dossier de travail lui-même : un apply n'y crée que le dossier du catalogue de la release, comme un install" {
   printf 'TOK\n' > "$PRIV/forge-master.token"
   printf 'SEED\n' > "$PRIV/forge-seed.pass"
-
   run bash -c "'$SCRIPT' apply < /dev/null"
-  [ "$status" -eq 0 ]
-
-  LOCK="$LCARS_CATALOGUE_WORK/.apply.lock"
-  [ -e "$LOCK" ]
-  run bash -c "sed 's/#.*//' '$SCRIPT' | grep -c '/run/lock' || true"
-  [ "$output" -eq 0 ]
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(ls -A "$LCARS_CATALOGUES_WORK")" = fleet ]
+  [ -f "$LCARS_CATALOGUES_WORK/fleet/roles.auto.tfvars.json" ]
 }
 
-@test "un verrou DEJA pose garde son mode — un durcissement d'operateur n'est pas contredit" {
-  unset LCARS_APPLY_LOCK
-  export LCARS_CATALOGUE_WORK="$BATS_TEST_TMPDIR/tofu-work2"
-  mkdir -p "$LCARS_CATALOGUE_WORK"
-  : > "$LCARS_CATALOGUE_WORK/.apply.lock"
-  chmod 0600 "$LCARS_CATALOGUE_WORK/.apply.lock"
+# `apply` en root, `install` sous le compte d'autorité : un seul uid ne voit pas le passage. Le décor :
+# root de namespace, un compte d'autorité doublé dont l'uid est un sous-uid (`--map-auto`), /etc/passwd
+# et /etc/group doublés par un montage privé, /opt en tmpfs au chemin et au mode de la machine.
+AUTORITE_UID=4242
+
+_deux_identites() { # <scenario bash, joue en root de namespace dans le decor> -> run
+  unshare --map-auto -r -m true 2>/dev/null \
+    || skip "sous-uids indisponibles pour ce compte (unshare --map-auto) : le passage de root au compte d'autorité ne se joue pas ici"
+  unset LCARS_CATALOGUES_WORK
   printf 'TOK\n' > "$PRIV/forge-master.token"
   printf 'SEED\n' > "$PRIV/forge-seed.pass"
+  { cat /etc/passwd; printf 'autorite-double:x:%s:%s::/nonexistent:/usr/sbin/nologin\n' "$AUTORITE_UID" "$AUTORITE_UID"; } > "$BATS_TEST_TMPDIR/passwd"
+  { cat /etc/group; printf 'autorite-double:x:%s:\n' "$AUTORITE_UID"; } > "$BATS_TEST_TMPDIR/group"
+  chmod 0644 "$BATS_TEST_TMPDIR/passwd" "$BATS_TEST_TMPDIR/group"
+  cat > "$BATS_TEST_TMPDIR/scenario.sh" <<EOF
+set -euo pipefail
+mount --bind "$BATS_TEST_TMPDIR/passwd" /etc/passwd
+mount --bind "$BATS_TEST_TMPDIR/group" /etc/group
+mount -t tmpfs tmpfs /opt
+mkdir -p /opt/lcars/var
+install -d -m 0700 -o autorite-double -g autorite-double /opt/lcars/var/tofu
+# le compte d'autorite ne traverse pas l'arbre du depot : il joue la copie posee, comme sur la machine
+install -m 0755 "$SCRIPT" /opt/lcars/forge-gestures.sh
+# ⚖ decision 3 : une machine porte ses FAITS et leur lecteur sous la racine du produit. Ce decor
+# EST une machine (tmpfs sur /opt) : il les pose la ou 62-runtime-helpers les pose, et la
+# surcharge de l'arbre est retiree — c'est la resolution reelle qui doit jouer ici.
+unset LCARS_FACTS_SH
+install -d -m 0755 /opt/lcars/services/lib /opt/lcars/etc
+install -m 0644 "$(dirname "$SCRIPT")/lib/facts.sh" /opt/lcars/services/lib/facts.sh
+install -m 0644 "$(dirname "$SCRIPT")/../etc/facts.env" /opt/lcars/etc/facts.env
+export LCARS_AUTHORITY_USER=autorite-double
+SCRIPT="$SCRIPT"
+sous_autorite() { # sous_autorite <scenario> — joue le verrou comme install le prend, sous le compte d'autorite
+  setpriv --reuid "$AUTORITE_UID" --regid "$AUTORITE_UID" --clear-groups bash -c "\$1"
+}
+$1
+EOF
+  run unshare --map-auto -r -m bash "$BATS_TEST_TMPDIR/scenario.sh"
+}
 
-  run bash -c "'$SCRIPT' apply < /dev/null"
+@test "un apply joué en root ne laisse rien à root sous le dossier de travail : l'installation, sous le compte d'autorité, tient le verrou" {
+  _deux_identites '
+bash "$SCRIPT" apply </dev/null >/dev/null
+printf "a-root:[%s]\n" "$(find /opt/lcars/var/tofu -mindepth 1 -uid 0 | tr "\n" " ")"
+printf "catalogue-de-la-release:[%s]\n" "$(stat -c "%U:%G" /opt/lcars/var/tofu/fleet /opt/lcars/var/tofu/fleet/roles.auto.tfvars.json | sort -u | tr "\n" " ")"
+sous_autorite "source /opt/lcars/forge-gestures.sh; with_apply_lock echo verrou-tenu"'
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"a-root:[]"* ]] || { echo "$output"; return 1; }
+  # l'apply en root a installe le catalogue de la release, et l'a RENDU au compte d'autorite
+  [[ "$output" == *"catalogue-de-la-release:[autorite-double:autorite-double ]"* ]] || { echo "$output"; return 1; }
+  [[ "$output" == *"verrou-tenu"* ]]
+}
+
+@test "le compte d'autorité tient le verrou : un apply en root est refusé sans rien tenter, et l'inverse" {
+  _deux_identites '
+sous_autorite "exec 9</opt/lcars/var/tofu; flock 9; sleep 3" &
+tenu=$!
+sleep 0.5
+bash "$SCRIPT" apply </dev/null || echo "apply-root rc=$?"
+wait "$tenu"
+( exec 9</opt/lcars/var/tofu; flock 9; sleep 3 ) &
+tenu=$!
+sleep 0.5
+sous_autorite "source /opt/lcars/forge-gestures.sh; with_apply_lock echo verrou-tenu" || echo "autorite rc=$?"
+wait "$tenu"'
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"apply-root rc=1"*"autorite rc=1"* ]]
+  [ "$(grep -c "un autre apply de structure est en cours" <<<"$output")" -eq 2 ]
+  refute grep -q verrou-tenu <<<"$output"
+  refute grep -q "^init " "$TOFU_LOG"
+}
+
+@test "sous le compte d'autorité, un dossier de travail qui ne lui revient pas se dit, et nomme qui pose ce dossier" {
+  _deux_identites '
+chown root:root /opt/lcars/var/tofu
+chmod 0700 /opt/lcars/var/tofu
+sous_autorite "source /opt/lcars/forge-gestures.sh; with_apply_lock echo verrou-tenu" || echo "rc=$?"'
   [ "$status" -eq 0 ]
-  [ "$(stat -c '%a' "$LCARS_CATALOGUE_WORK/.apply.lock")" = "600" ]
+  [[ "$output" == *"rc=1"* ]]
+  [[ "$output" == *"dossier de travail des applies inaccessible (/opt/lcars/var/tofu) — ce geste se joue en root ou sous autorite-double"*"deploy/workstation up"* ]]
+  refute grep -q verrou-tenu <<<"$output"
 }
 
 
@@ -603,24 +718,41 @@ EOF
   refute grep -q "^VOISIN" "$ENTRY_LOG"
 }
 
-@test "cli: SANS CLI sur le PATH, le voisin ../bin/lcars de l'arbre repond — le cas d'un checkout" {
+@test "cli: SANS CLI sur le PATH ni dans le repertoire des liens, le voisin ../bin/lcars de l'arbre repond — le cas d'un checkout" {
   setup_install
   local flat; flat="$(_flat_copy "$BATS_TEST_TMPDIR/arbre2/services")"
   _fake_entry "$BATS_TEST_TMPDIR/arbre2/bin/lcars" VOISIN
   rm -f "$BIN/lcars"
-  run env -u LCARS_CLI PATH="$BIN:/usr/bin:/bin" bash -c "'$flat' install cat < /dev/null"
+  run env -u LCARS_CLI LCARS_LINK_DIR="$BATS_TEST_TMPDIR/liens-vides" PATH="$BIN:/usr/bin:/bin" \
+      bash -c "'$flat' install cat < /dev/null"
   grep -q "^VOISIN catalogue-source cat" "$ENTRY_LOG"
 }
 
-@test "cli: AUCUN candidat -> refus A LA PORTE qui nomme la CLI, pas « pas de source »" {
+@test "cli: la copie a plat, sans CLI sur le PATH, trouve la CLI posee dans le repertoire des liens (A-202)" {
+  # La disposition des deux rails : `/opt/lcars/forge-gestures.sh`, dont le `../bin/lcars` est
+  # `/opt/bin/lcars`, qui n'existe pas ; la CLI est posee dans `/usr/local/bin`.
   setup_install
-  local flat; flat="$(_flat_copy "$BATS_TEST_TMPDIR/arbre3/services")"
+  local flat; flat="$(_flat_copy "$BATS_TEST_TMPDIR/opt/lcars")"
+  _fake_entry "$BATS_TEST_TMPDIR/usr/local/bin/lcars" POSEE
   rm -f "$BIN/lcars"
-  run env -u LCARS_CLI PATH="$BIN:/usr/bin:/bin" bash -c "'$flat' install cat < /dev/null"
+  [ ! -e "$BATS_TEST_TMPDIR/opt/bin/lcars" ]
+  run env -u LCARS_CLI LCARS_LINK_DIR="$BATS_TEST_TMPDIR/usr/local/bin" PATH="$BIN:/usr/bin:/bin" \
+      bash -c "'$flat' install cat < /dev/null"
+  [ "$status" -eq 0 ]
+  grep -q "^POSEE catalogue-source cat" "$ENTRY_LOG"
+}
+
+@test "cli: AUCUN candidat -> refus A LA PORTE qui nomme ce qui a ete cherche, jamais un chemin qui n'existe pas" {
+  setup_install
+  local flat; flat="$(_flat_copy "$BATS_TEST_TMPDIR/opt/lcars")"
+  rm -f "$BIN/lcars"
+  run env -u LCARS_CLI LCARS_LINK_DIR="$BATS_TEST_TMPDIR/liens-vides" PATH="$BIN:/usr/bin:/bin" \
+      bash -c "'$flat' install cat < /dev/null"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"portes outil du release introuvables"* ]]
-  [[ "$output" == *"lcars"* ]]
+  [[ "$output" == *"portes outil du release introuvables (ni « lcars » sur le PATH, ni $BATS_TEST_TMPDIR/liens-vides/lcars, ni $BATS_TEST_TMPDIR/opt/lcars/../bin/lcars)"* ]]
+  [[ "$output" == *"deploy/workstation up"* ]]
   [[ "$output" != *"pas de source installable"* ]]
+  [ ! -s "$ENTRY_LOG" ]
 }
 
 @test "cli: une SURCHARGE qui pointe dans le vide est refusee comme une absence" {
@@ -665,6 +797,48 @@ FAKE
   [ "$status" -ne 0 ]
   [[ "$output" == *"0 sans reponse exploitable"* ]]
   [[ "$output" == *"alice/cat"* ]]
+  [ "$(grep -c clone "$GIT_LOG" 2>/dev/null || echo 0)" -eq 0 ]
+}
+
+# B1 — la sortie de `lcars tool catalogue-source web-demo` relevée sur banc (v0.9-beta2) et rejouée
+# sur le release : le journal Elixir sur stderr, une ligne vide puis une ligne `[info]`, et la
+# réponse seule sur stdout. Lus ensemble, la première ligne est vide et la réponse juste est refusée.
+_porte_bavarde() { # <stdout de la porte>
+  cat > "$BIN/entrypoint" <<FAKE
+#!/usr/bin/env bash
+[[ "\$1" == tool ]] && shift
+printf '%s\n' "\$*" >> "$ENTRY_LOG"
+case "\$1" in
+  catalogue-source)
+    printf '\n20:26:15.108 [info] CatalogueDeposits: admiral/fleet declares '"'"'fleet'"'"', the catalogue carried by the release. It is installed by construction\n' >&2
+    printf '%b' '$1'
+    ;;
+  roles-tfvars) echo '{"org":"cat","roles":["cat_dev"]}' ;;
+esac
+exit 0
+FAKE
+  chmod +x "$BIN/entrypoint"
+}
+
+@test "install: le journal du release sur stderr ne prend pas la place de la réponse lue sur stdout (B1)" {
+  setup_install
+  _porte_bavarde 'alice/cat main deadbeef\n'
+  run bash -c "'$SCRIPT' install cat < /dev/null"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"cat <- alice/cat (main@deadbeef)"* ]]
+  grep -q "clone .*--branch main http://forge.test/alice/cat.git" "$GIT_LOG"
+  # une réponse exploitable ne montre pas le journal à l'opérateur
+  refute grep -q 'CatalogueDeposits' <<<"$output"
+}
+
+@test "install: une porte qui rend 0 sans réponse montre son journal avec le refus (B1)" {
+  setup_install
+  _porte_bavarde ''
+  run bash -c "'$SCRIPT' install cat < /dev/null"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"0 sans reponse exploitable"* ]]
+  [[ "$output" == *"Recu : RIEN"* ]]
+  [[ "$output" == *"[info] CatalogueDeposits"* ]]
   [ "$(grep -c clone "$GIT_LOG" 2>/dev/null || echo 0)" -eq 0 ]
 }
 

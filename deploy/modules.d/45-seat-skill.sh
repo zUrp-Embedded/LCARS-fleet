@@ -11,14 +11,17 @@ set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
 . "${PROVISION_LIB:?PROVISION_LIB non posé — ce module se joue par ./provision, pas nu}"
 
-SYSADMIN_UID="${LCARS_SYSADMIN_UID:-1000}"
 SKILL_SRC="${LCARS_ADMIRAL_SKILLS_SRC:-$(product_tree)/services/admiral/skills}"
 
 HUMAN_UID="$(id -u -- "$PROV_HUMAN" 2>/dev/null || true)"
-est_le_siege() { [[ "$HUMAN_UID" == "$SYSADMIN_UID" ]]; }
-pas_le_siege() { p_ok "$PROV_HUMAN (uid ${HUMAN_UID:-inconnu}) n'est pas le siège (uid $SYSADMIN_UID) — rien à poser"; }
-siege_home() { echo "${LCARS_SIEGE_HOME:-$(getent passwd -- "$PROV_HUMAN" | cut -d: -f6)}"; }
-skill_pose() { local d; d="$(siege_home)/.claude/skills/system-issues"; [[ -s "$d/SKILL.md" && -x "$d/list.sh" ]]; }
+est_le_siege() { [[ "$HUMAN_UID" == "$LCARS_SYSADMIN_UID" ]]; }
+pas_le_siege() { p_ok "$PROV_HUMAN (uid ${HUMAN_UID:-inconnu}) n'est pas le siège (uid $LCARS_SYSADMIN_UID) — rien à poser"; }
+siege_home() { getent passwd -- "$PROV_HUMAN" | cut -d: -f6 || true; }   # un compte inconnu rend un home vide, que l'apply nomme
+skill_pose() { # skill_pose → 0 si le skill posé chez le siège est celui de la source, list.sh exécutable
+  local d f; d="$(siege_home)/.claude/skills/system-issues"
+  for f in SKILL.md list.sh; do cmp -s "$SKILL_SRC/system-issues/$f" "$d/$f" || return 1; done
+  [[ -x "$d/list.sh" ]]
+}
 
 check() {
   if ! est_le_siege; then
@@ -26,7 +29,7 @@ check() {
   elif skill_pose; then
     p_ok "skill system-issues posé chez $PROV_HUMAN"
   else
-    p_drift "skill system-issues absent ou incomplet chez $PROV_HUMAN — la boîte de réception d'admiral ne se lit pas depuis sa session"
+    p_drift "skill system-issues absent, incomplet ou différent de sa source ($SKILL_SRC/system-issues) chez $PROV_HUMAN — la boîte de réception d'admiral ne se lit pas depuis sa session"
   fi
   verdict_check
 }

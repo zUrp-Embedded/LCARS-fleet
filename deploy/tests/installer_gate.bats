@@ -10,7 +10,6 @@ load refute
 setup() {
   PORTE_SRC="$BATS_TEST_DIRNAME/../gate.sh"
   [ -f "$PORTE_SRC" ]
-  SHELL_GATE="$BATS_TEST_DIRNAME/../../runtime/test/shell_gate.sh"
 
   DECOR="$BATS_TEST_TMPDIR/decor"
   mkdir -p "$DECOR/tests"
@@ -47,13 +46,6 @@ path_sans() { # path_sans <outil> → un dossier
   [ ! -e "$sans/$1" ]
   [ -x "$sans/bash" ]
   printf '%s' "$sans"
-}
-
-@test "LCARS header: SOURCE/AUTHOR/STARDATE/STATUS present" {
-  grep -q "^# SOURCE:" "$PORTE_SRC"
-  grep -q "^# AUTHOR:" "$PORTE_SRC"
-  grep -q "^# STARDATE:" "$PORTE_SRC"
-  grep -q "^# STATUS:" "$PORTE_SRC"
 }
 
 @test "corpus vide = échec — zéro test joué ne se lit pas comme zéro test rouge" {
@@ -97,6 +89,26 @@ path_sans() { # path_sans <outil> → un dossier
   [ "$status" -eq 0 ]
   [[ "$output" == *"BATS APPELE"* ]]
   [[ "$output" == *"OK"* ]]
+}
+
+@test "l'installeur à la racine du dépôt est dans le plancher shellcheck de la porte" {
+  command -v shellcheck >/dev/null || skip "shellcheck absent"
+  temoin x.bats unit '@test "a" { true; }'
+  printf '#!/usr/bin/env bash\n# SOURCE: install.sh\nset -eu\ninutile=1\n' > "$BATS_TEST_TMPDIR/install.sh"
+  stub_bats 0
+  run bash "$DECOR/gate.sh"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"install.sh"*"SC2034"* ]]
+}
+
+@test "l'installeur à la racine du dépôt doit porter son en-tête" {
+  command -v shellcheck >/dev/null || skip "shellcheck absent"
+  temoin x.bats unit '@test "a" { true; }'
+  printf '#!/usr/bin/env bash\nset -eu\necho ok\n' > "$BATS_TEST_TMPDIR/install.sh"
+  stub_bats 0
+  run bash "$DECOR/gate.sh"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"GO-7"*"install.sh"* ]]
 }
 
 @test "le compte de cas est réel, pas le nombre de fichiers" {
@@ -176,24 +188,13 @@ path_sans() { # path_sans <outil> → un dossier
   [ "$output" = "decor/tests" ]
 }
 
-@test "l'environnement du lanceur est neutralisé, et le dire fait partie du geste" {
+@test "l'environnement du lanceur est neutralisé pour bats, et la ligne compte et nomme chaque variable une fois" {
   temoin x.bats unit '@test "faux" { true; }'
-  stub_bats 0
-  run env PROV_FLEET_GROUP=piege LCARS_SEAT_UID_FILE=/x bash "$DECOR/gate.sh"
+  printf '#!/usr/bin/env bash\nenv | grep -E "^(LCARS_|PROV_|FORGE_)" | sed "s/^/VU: /"\nexit 0\n' > "$BIN/bats"; chmod 0755 "$BIN/bats"
+  run env -i PATH="$PATH" HOME="$HOME" PROV_FLEET_GROUP=piege LCARS_DECOR_ROOT=/x bash "$DECOR/gate.sh"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"neutralisée"* ]]
-  [[ "$output" == *"PROV_FLEET_GROUP"* ]]
-  [[ "$output" == *"LCARS_SEAT_UID_FILE"* ]]
-}
-
-@test "la seconde copie du bloc de neutralisation s'accorde avec celle de shell_gate.sh" {
-  [ -f "$SHELL_GATE" ] || skip "shell_gate.sh absent de cet arbre (contexte installeur seul)"
-  local a b
-  a="$(grep -oE "\\^\\(LCARS_\\|PROV_\\|FORGE_\\)" "$PORTE_SRC" | head -1)"
-  b="$(grep -oE "\\^\\(LCARS_\\|PROV_\\|FORGE_\\)" "$SHELL_GATE" | head -1)"
-  [ -n "$a" ]
-  [ -n "$b" ]
-  [ "$a" = "$b" ]
+  [[ "$output" == *"--- 2 variable(s) du lanceur neutralisée(s) : LCARS_DECOR_ROOT PROV_FLEET_GROUP"$'\n'* ]]
+  refute_out '^VU: ' <<<"$output"
 }
 
 go7_shape() { # go7_shape <fichier> <fonction> — la forme d'un prédicat : fenêtre lue, drapeaux triés, motifs

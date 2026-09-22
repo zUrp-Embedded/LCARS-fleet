@@ -3,37 +3,59 @@
 # SOURCE: deploy/tests/modules.d/15-toolchain.bats
 # AUTHOR: bob
 # STARDATE: 2026-09-06
-# STATUS: PROTO-V2 — 15-toolchain sous le plancher 1.20 : le pin d'Elixir, UNE source, et la pose a blanc
+# STATUS: témoins de 15-toolchain — le pin d'Elixir des constantes, sa pose sous le décor, la VM qui doit porter sa majeure, ses reliquats
 load ../refute
+load ../support/decor
 
 setup() {
   local _v
   while read -r _v; do unset "$_v" 2>/dev/null || true; done < <(compgen -v | grep -E '^(LCARS_|PROV_)' || true)
-  ROOT="$BATS_TEST_DIRNAME/../../.."
-  MOD="$ROOT/deploy/modules.d/15-toolchain.sh"; LIB="$ROOT/deploy/lib/provision-lib.sh"
-  DF="$ROOT/deploy/docker/Dockerfile"; MIX="$ROOT/runtime/mix.exs"
-  [ -f "$MOD" ]
-  [ -f "$LIB" ]
-  [ -f "$DF" ]
+  local src="$BATS_TEST_DIRNAME/../.."
+  CONSTANTES="$src/installer-constants.env"; MIX="$src/../runtime/mix.exs"
+  [ -f "$CONSTANTES" ]
   [ -f "$MIX" ]
-  export PROVISION_LIB="$LIB" PROVISION_MODULE=15-toolchain
-  export PROV_LINK_DIR="$BATS_TEST_TMPDIR/bin" LCARS_ELIXIR_PREFIX="$BATS_TEST_TMPDIR/opt/elixir-"
-  export PROV_ROOT="$BATS_TEST_TMPDIR/lcars" PROV_JOURNAL_ACC="$BATS_TEST_TMPDIR/journal"
-  # Meme garde que dans delivery_form.bats : `apply` retire des arbres, il ne doit jamais tirer hors
-  # du tmp du test (cicatrice du 2026-09-07 — une couture renommee visait /opt/elixir-1.18.4).
-  [[ "$LCARS_ELIXIR_PREFIX" == "$BATS_TEST_TMPDIR"/* ]] \
-    || { echo "couture Elixir hors du tmp du test : $LCARS_ELIXIR_PREFIX"; return 1; }
-  mkdir -p "$PROV_LINK_DIR" "$BATS_TEST_TMPDIR/opt" "$PROV_ROOT/var"
-  PIN="$(sed -n 's/^: "${PROV_ELIXIR_PIN:=\([^}]*\)}".*/\1/p' "$LIB")"
-  MIN="$(sed -n 's/^: "${PROV_ELIXIR_MIN:=\([^}]*\)}".*/\1/p' "$LIB")"
-  OTP="$(sed -n 's/^: "${PROV_ELIXIR_OTP_MAJOR:=\([^}]*\)}".*/\1/p' "$LIB")"
-  SHA="$(sed -n 's/^: "${PROV_ELIXIR_PIN_SHA256:=\([^}]*\)}".*/\1/p' "$LIB")"
+  PIN="$(sed -n 's/^PROV_ELIXIR_PIN=//p' "$CONSTANTES")"
+  OTP="$(sed -n 's/^PROV_ELIXIR_OTP_MAJOR=//p' "$CONSTANTES")"
+  SHA="$(sed -n 's/^PROV_ELIXIR_PIN_SHA256=//p' "$CONSTANTES")"
+
+  # un arbre de l'installeur dont les constantes portent le sha du zip de décor : le pin ne se règle pas
+  # par l'environnement, il se lit dans ce fichier
+  ARBRE="$BATS_TEST_TMPDIR/arbre"
+  mkdir -p "$ARBRE/deploy/lib" "$ARBRE/deploy/modules.d"
+  cp "$src"/lib/*.sh "$ARBRE/deploy/lib/"
+  cp "$src/system.manifest" "$ARBRE/deploy/"
+  cp "$src/modules.d/15-toolchain.sh" "$ARBRE/deploy/modules.d/"
+  export PROV_JOURNAL_ACC="$BATS_TEST_TMPDIR/journal"
+
+  decor_pose
+  LINKS="$LCARS_DECOR_ROOT/usr/local/bin"
+  HOME_PIN="$LCARS_DECOR_ROOT/opt/elixir-$PIN"
+  CURL_LOG="$BATS_TEST_TMPDIR/curl.log"
+  FAKE_ZIP="$BATS_TEST_TMPDIR/fake.zip"
+  printf '#!/usr/bin/env bash\nout=""; prev=""; for a in "$@"; do [[ "$prev" == -o ]] && out="$a"; prev="$a"; done\necho "${@: -1}" >> "%s"\ncp "%s" "$out"\n' "$CURL_LOG" "$FAKE_ZIP" > "$DECOR_BIN/curl"
+  vm "$OTP"
+  printf '#!/usr/bin/env bash\necho "APT $*" >> "%s"; exit 0\n' "$BATS_TEST_TMPDIR/apt.trace" > "$DECOR_BIN/apt-get"
+  # erlang est posé par apt : dpkg le dit
+  printf '#!/usr/bin/env bash\n[[ "${@: -1}" == erlang ]] && printf installed || printf not-installed\n' > "$DECOR_BIN/dpkg-query"
+  chmod 0755 "$DECOR_BIN"/*
 }
 
-# un faux zip d'Elixir : bin/elixir repond la version voulue
+vm() { # vm <majeure OTP> — l'erl du décor répond cette majeure
+  printf '#!/usr/bin/env bash\nprintf "%s"\n' "$1" > "$DECOR_BIN/erl"; chmod 0755 "$DECOR_BIN/erl"
+}
+
+constantes() { # constantes <sha du zip> — les constantes réelles, le sha du pin remplacé
+  { grep -v '^PROV_ELIXIR_PIN_SHA256=' "$CONSTANTES"; printf 'PROV_ELIXIR_PIN_SHA256=%s\n' "$1"; } > "$ARBRE/deploy/installer-constants.env"
+}
+
+elixir_script() { # elixir_script <version> <OTP annoncé> → un bin/elixir qui répond ces deux
+  printf '#!/usr/bin/env bash\ncase "$1" in --short-version) echo "%s" ;; --version) echo "Elixir %s (compiled with Erlang/OTP %s)" ;; esac\n' "$1" "$1" "$2"
+}
+
+# un faux zip d'Elixir : bin/elixir répond la version voulue
 _fake_zip() { # _fake_zip <version> <fichier zip> — python (zip n'est pas dans le socle, python3 oui)
   local d; d="$(mktemp -d)"; mkdir -p "$d/bin"
-  printf '#!/usr/bin/env bash\ncase "$1" in --short-version) echo "%s" ;; --version) echo "Elixir %s (compiled with Erlang/OTP %s)" ;; esac\n' "$1" "$1" "$OTP" > "$d/bin/elixir"
+  elixir_script "$1" "$OTP" > "$d/bin/elixir"
   for b in elixirc mix iex; do printf '#!/usr/bin/env bash\nexit 0\n' > "$d/bin/$b"; done
   chmod 0755 "$d/bin"/*
   python3 - "$d" "$2" <<'PYZ'
@@ -48,126 +70,183 @@ PYZ
   rm -rf "$d"
 }
 
-# les doublures : curl sert $FAKE_ZIP ; erl repond OTP ; apt-get trace ; elixir/erl reels absents du PATH
-_doubles() {
-  local bin="$BATS_TEST_TMPDIR/doubles"; mkdir -p "$bin"
-  printf '#!/usr/bin/env bash\nout=""; prev=""; for a in "$@"; do [[ "$prev" == -o ]] && out="$a"; prev="$a"; done; cp "%s" "$out"\n' "$FAKE_ZIP" > "$bin/curl"
-  printf '#!/usr/bin/env bash\nprintf "%s"\n' "$OTP" > "$bin/erl"
-  printf '#!/usr/bin/env bash\necho "APT $*" >> "%s"; exit 0\n' "$BATS_TEST_TMPDIR/apt.trace" > "$bin/apt-get"
-  # chown root:root n'est pas a la portee d'un temoin : la propriete n'est pas ce qu'on mesure ici
-  printf '#!/usr/bin/env bash\nexit 0\n' > "$bin/chown"
-  chmod 0755 "$bin"/*; echo "$bin"
+zip_du_pin() { _fake_zip "$PIN" "$FAKE_ZIP"; constantes "$(sha256sum "$FAKE_ZIP" | cut -c1-64)"; }
+
+arbre_pose() { # arbre_pose <version> [OTP annoncé] — un arbre sous le préfixe du décor, marqué comme posé par le module
+  local d="$LCARS_DECOR_ROOT/opt/elixir-$1"
+  mkdir -p "$d/bin"
+  elixir_script "$1" "${2:-$OTP}" > "$d/bin/elixir"; chmod 0755 "$d/bin/elixir"
+  : > "$d/.lcars-pose"
 }
 
-_run_apply() {
-  local bin; bin="$(_doubles)"
-  run bash -c "set -uo pipefail; export PATH=\"$PROV_LINK_DIR:$bin:\$PATH\" PROV_ELIXIR_PIN_SHA256='$FAKE_SHA'; source <(sed '/^case \"\${1:?usage/,\$d' '$MOD'); prov_delivery_is_binary() { return 1; }; apt_ensure() { echo \"APT-ENSURE \$*\"; }; apply 2>&1"
+# mod <check|apply> — le module entier, garde du runner armée ; DEVANT, s'il est posé, passe avant les liens dans le PATH
+mod() {
+  [ -f "$ARBRE/deploy/installer-constants.env" ] || constantes "$SHA"
+  run env PATH="${DEVANT:+$DEVANT:}$LINKS:$DECOR_BIN:$PATH" PROVISION_LIB="$ARBRE/deploy/lib/provision-lib.sh" \
+    PROVISION_MODULE=15-toolchain PROV_SUBSTRATE=linux PROVISION_RUN=1 bash "$ARBRE/deploy/modules.d/15-toolchain.sh" "$1"
 }
 
-@test "UNE SOURCE : le pin et le plancher s'accordent — et le pin SATISFAIT ce que mix.exs exige" {
+@test "le pin d'Elixir des constantes satisfait ce que mix.exs exige" {
   [ -n "$PIN" ]
-  [ -n "$MIN" ]
   [ -n "$OTP" ]
   [[ "$SHA" =~ ^[0-9a-f]{64}$ ]]
-  [ "${PIN%.*}" = "$MIN" ] || { echo "pin $PIN et plancher $MIN : pas la meme minor"; return 1; }
   local mixreq; mixreq="$(sed -n 's/.*elixir: "~> \([0-9.]*\)".*/\1/p' "$MIX")"
-  [ -n "$mixreq" ] || { echo "mix.exs ne declare plus de requirement elixir — l'accord n'a plus de sujet"; return 1; }
-  local rmaj rmin pmaj pmin fmaj fmin
+  [ -n "$mixreq" ] || { echo "mix.exs ne déclare plus de requirement elixir — l'accord n'a plus de sujet"; return 1; }
+  local rmaj rmin pmaj pmin
   rmaj="${mixreq%%.*}"; rmin="${mixreq#*.}"; rmin="${rmin%%.*}"
   pmaj="${PIN%%.*}";    pmin="${PIN#*.}";    pmin="${pmin%%.*}"
-  fmaj="${MIN%%.*}";    fmin="${MIN#*.}";    fmin="${fmin%%.*}"
-  # `~> M.m` = >= M.m et < (M+1).0 : le pin doit tomber dedans, et le plancher ne doit pas exiger
-  # MOINS que le projet (une machine au plancher doit pouvoir batir).
-  [ "$pmaj" -eq "$rmaj" ] && [ "$pmin" -ge "$rmin" ] \
+  # `~> M.m` = >= M.m et < (M+1).0 : le pin doit tomber dedans
+  [[ "$pmaj" -eq "$rmaj" && "$pmin" -ge "$rmin" ]] \
     || { echo "le pin $PIN ne satisfait pas « ~> $mixreq » de mix.exs"; return 1; }
-  [ "$fmaj" -eq "$rmaj" ] && [ "$fmin" -ge "$rmin" ] \
-    || { echo "le plancher $MIN est SOUS « ~> $mixreq » de mix.exs : une machine au plancher ne batirait pas"; return 1; }
 }
 
-@test "APPLY pose le pin : zip telecharge et verifie, arbre sous le prefixe, quatre liens" {
-  FAKE_ZIP="$BATS_TEST_TMPDIR/fake.zip"; _fake_zip "$PIN" "$FAKE_ZIP"; FAKE_SHA="$(sha256sum "$FAKE_ZIP" | cut -c1-64)"
-  _run_apply
+@test "APPLY pose le pin : zip téléchargé et vérifié, arbre marqué sous le décor, quatre liens, erlang trouvé par apt" {
+  zip_du_pin
+  mod apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [ -x "${LCARS_ELIXIR_PREFIX}${PIN}/bin/elixir" ]
+  [ -x "$HOME_PIN/bin/elixir" ]
+  [ -f "$HOME_PIN/.lcars-pose" ]
   local b; for b in elixir elixirc mix iex; do
-    [ "$(readlink -f "$PROV_LINK_DIR/$b")" = "$(readlink -f "${LCARS_ELIXIR_PREFIX}${PIN}/bin/$b")" ] || { echo "lien $b faux"; return 1; }
+    [ "$(readlink -f "$LINKS/$b")" = "$(readlink -f "$HOME_PIN/bin/$b")" ] || { echo "lien $b faux"; return 1; }
   done
-  [[ "$output" == *"Elixir $PIN (${LCARS_ELIXIR_PREFIX}${PIN} ; planchers $OTP / $MIN)"* ]]
-  [ ! -e "$BATS_TEST_TMPDIR/opt/.elixir-${PIN}.zip" ]
-  # erlang deja au plancher : apt n'est pas appele, le journal dit « trouve »
-  refute_out 'APT-ENSURE' <<<"$output"
-  grep -q 'apt_already erlang' "$PROV_JOURNAL_ACC"
+  [[ "$output" == *"OK    15-toolchain: Erlang/OTP $OTP"* ]]
+  [[ "$output" == *"OK    15-toolchain: Elixir $PIN posé ($HOME_PIN), variante OTP $OTP"* ]]
+  [ ! -e "$LCARS_DECOR_ROOT/opt/.elixir-${PIN}.zip" ]
+  [ ! -e "$BATS_TEST_TMPDIR/apt.trace" ]
+  # le journal compte ce que la passe a posé par apt : erlang trouvé n'y entre pas
+  refute grep -qs erlang "$PROV_JOURNAL_ACC"
 }
 
-@test "un sha256 qui ne correspond pas : RIEN n'est garde, ni zip ni arbre ni lien — et l'apply est rouge" {
-  FAKE_ZIP="$BATS_TEST_TMPDIR/fake.zip"; _fake_zip "$PIN" "$FAKE_ZIP"; FAKE_SHA="0000000000000000000000000000000000000000000000000000000000000000"
-  _run_apply
-  [ "$status" -ne 0 ]
+@test "le zip téléchargé est celui du pin officiel, et son arbre vit sous /opt/elixir-<pin> du décor" {
+  zip_du_pin
+  mod apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(cat "$CURL_LOG")" = "https://github.com/elixir-lang/elixir/releases/download/v${PIN}/elixir-otp-${OTP}.zip" ]
+  [ -x "$HOME_PIN/bin/elixir" ]
+}
+
+@test "un sha256 qui ne correspond pas : rien n'est gardé, ni zip ni arbre ni lien — et l'apply est rouge" {
+  _fake_zip "$PIN" "$FAKE_ZIP"; constantes 0000000000000000000000000000000000000000000000000000000000000000
+  mod apply
+  [ "$status" -eq 1 ]
   [[ "$output" == *"sha256 différent"* ]]
-  [ ! -e "${LCARS_ELIXIR_PREFIX}${PIN}" ]
-  [ ! -e "$PROV_LINK_DIR/elixir" ]
-  [ -z "$(ls -A "$BATS_TEST_TMPDIR/opt")" ] || { echo "reste dans opt : $(ls -A "$BATS_TEST_TMPDIR/opt")"; return 1; }
+  [ ! -e "$HOME_PIN" ]
+  [ ! -e "$LINKS/elixir" ]
+  [ -z "$(find "$LCARS_DECOR_ROOT/opt" -mindepth 1 -maxdepth 1 ! -name lcars)" ] || { echo "reste dans opt : $(ls -A "$LCARS_DECOR_ROOT/opt")"; return 1; }
 }
 
-@test "REJEU : le pin deja pose n'est pas retelecharge ; un arbre d'une AUTRE version est retire, un lien vers lui remplace" {
-  FAKE_ZIP="$BATS_TEST_TMPDIR/fake.zip"; _fake_zip "$PIN" "$FAKE_ZIP"; FAKE_SHA="$(sha256sum "$FAKE_ZIP" | cut -c1-64)"
-  _run_apply; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  # un ancien arbre, et le lien elixir pointe dessus
-  mkdir -p "${LCARS_ELIXIR_PREFIX}1.18.4/bin"; : > "${LCARS_ELIXIR_PREFIX}1.18.4/bin/elixir"
-  ln -sf "${LCARS_ELIXIR_PREFIX}1.18.4/bin/elixir" "$PROV_LINK_DIR/elixir"
-  rm -f "$BATS_TEST_TMPDIR/doubles/curl"; FAKE_ZIP=/nonexistent
-  _run_apply; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+@test "REJEU : le pin déjà posé n'est pas retéléchargé ; un arbre marqué d'une autre version est retiré, un lien vers lui remplacé" {
+  zip_du_pin
+  mod apply; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  arbre_pose 1.18.4
+  ln -sf "$LCARS_DECOR_ROOT/opt/elixir-1.18.4/bin/elixir" "$LINKS/elixir"
+  : > "$CURL_LOG"
+  mod apply; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"déjà posé"* ]]
-  [ ! -e "${LCARS_ELIXIR_PREFIX}1.18.4" ]
-  [ "$(readlink -f "$PROV_LINK_DIR/elixir")" = "$(readlink -f "${LCARS_ELIXIR_PREFIX}${PIN}/bin/elixir")" ]
-  [[ "$output" == *"retiré : ${LCARS_ELIXIR_PREFIX}1.18.4"* ]]
+  [ ! -s "$CURL_LOG" ]
+  [ ! -e "$LCARS_DECOR_ROOT/opt/elixir-1.18.4" ]
+  [ "$(readlink -f "$LINKS/elixir")" = "$(readlink -f "$HOME_PIN/bin/elixir")" ]
+  [[ "$output" == *"retiré : $LCARS_DECOR_ROOT/opt/elixir-1.18.4"* ]]
 }
 
-@test "CHECK : pin absent = drift qui nomme l'apply ; un elixir d'apt devant PROV_LINK_DIR = drift qui le nomme" {
-  local bin; bin="$BATS_TEST_TMPDIR/doubles"; mkdir -p "$bin"
-  printf '#!/usr/bin/env bash\nprintf "%s"\n' "$OTP" > "$bin/erl"; chmod 0755 "$bin/erl"
-  run bash -c "set -uo pipefail; export PATH=\"$PROV_LINK_DIR:$bin:\$PATH\"; source <(sed '/^case \"\${1:?usage/,\$d' '$MOD'); prov_delivery_is_binary() { return 1; }; check 2>&1"
+@test "un /opt/elixir-* sans la marque de la pose n'est ni nommé ni retiré — rien ne prouve qu'il vient d'ici" {
+  zip_du_pin
+  mkdir -p "$LCARS_DECOR_ROOT/opt/elixir-1.17.0/bin"
+  mod check
+  refute_out 'elixir-1.17.0' <<<"$output"
+  mod apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ -d "$LCARS_DECOR_ROOT/opt/elixir-1.17.0" ]
+}
+
+@test "CHECK : pin absent = drift qui nomme l'apply" {
+  mod check
+  [ "$status" -eq 1 ]
   [[ "$output" == *"DRIFT"*"Elixir $PIN non posé"*"l'apply le télécharge"* ]]
-  # le pin est pose, mais un elixir d'ailleurs repond en premier dans le PATH
-  mkdir -p "${LCARS_ELIXIR_PREFIX}${PIN}/bin"
-  printf '#!/usr/bin/env bash\necho "%s"\n' "$PIN" > "${LCARS_ELIXIR_PREFIX}${PIN}/bin/elixir"; chmod 0755 "${LCARS_ELIXIR_PREFIX}${PIN}/bin/elixir"
+}
+
+@test "CHECK : un erl qui échoue est une dérive nommée, pas un module mort" {
+  printf '#!/usr/bin/env bash\nexit 127\n' > "$DECOR_BIN/erl"
+  mod check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DRIFT 15-toolchain: Erlang/OTP « absent »"* ]]
+}
+
+@test "CHECK et APPLY : la majeure OTP est celle du zip — ni en dessous, ni au-dessus" {
+  local autre
+  for autre in $((OTP - 1)) $((OTP + 1)); do
+    vm "$autre"
+    mod check
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"DRIFT 15-toolchain: Erlang/OTP « $autre » — le précompilé d'Elixir est celui de la majeure $OTP"* ]] || { echo "$output"; return 1; }
+  done
+  zip_du_pin
+  mod apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL  15-toolchain: Erlang/OTP « $autre »"* ]]
+}
+
+@test "CHECK : un Elixir compilé pour une autre OTP que la VM est une dérive" {
+  arbre_pose "$PIN" 26
+  ln -sf "$HOME_PIN/bin/elixir" "$LINKS/elixir"
+  mod check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DRIFT 15-toolchain: Elixir $PIN compilé pour OTP « 26 », VM OTP « $OTP »"* ]]
+}
+
+@test "CHECK : un elixir posé qui échoue est une dérive qui le dit posé, pas absent" {
+  mkdir -p "$HOME_PIN/bin"
+  printf '#!/usr/bin/env bash\nexit 127\n' > "$HOME_PIN/bin/elixir"; chmod 0755 "$HOME_PIN/bin/elixir"
+  ln -sf "$HOME_PIN/bin/elixir" "$LINKS/elixir"
+  mod check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DRIFT 15-toolchain: Elixir $PIN posé ($HOME_PIN) mais son elixir ne répond pas"* ]]
+  refute_out "Elixir $PIN non posé" <<<"$output"
+}
+
+@test "CHECK : un elixir d'apt devant PROV_LINK_DIR = drift qui le nomme" {
+  arbre_pose "$PIN"
   local apt="$BATS_TEST_TMPDIR/aptbin"; mkdir -p "$apt"; printf '#!/usr/bin/env bash\necho "1.18.3"\n' > "$apt/elixir"; chmod 0755 "$apt/elixir"
-  run bash -c "set -uo pipefail; export PATH=\"$apt:$PROV_LINK_DIR:$bin:\$PATH\"; source <(sed '/^case \"\${1:?usage/,\$d' '$MOD'); prov_delivery_is_binary() { return 1; }; check 2>&1"
+  DEVANT="$apt" mod check
+  [ "$status" -eq 1 ]
   [[ "$output" == *"DRIFT"*"« elixir » répond 1.18.3"*"$apt/elixir"* ]]
 }
 
-@test "LIVRAISON BINAIRE : rien n'est pose, et TOUT arbre Elixir est un reliquat retire" {
-  mkdir -p "${LCARS_ELIXIR_PREFIX}${PIN}/bin"; : > "${LCARS_ELIXIR_PREFIX}${PIN}/bin/elixir"
-  ln -sf "${LCARS_ELIXIR_PREFIX}${PIN}/bin/elixir" "$PROV_LINK_DIR/elixir"
-  run bash -c "set -uo pipefail; export PATH=\"$PROV_LINK_DIR:\$PATH\"; source <(sed '/^case \"\${1:?usage/,\$d' '$MOD'); prov_delivery_is_binary() { return 0; }; apply 2>&1"
+@test "LIVRAISON BINAIRE : rien n'est exigé, posé ni retiré — le check est conforme" {
+  : > "$ARBRE/.source-revision"
+  arbre_pose "$PIN"
+  ln -sf "$HOME_PIN/bin/elixir" "$LINKS/elixir"
+  vm 0
+  mod check
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"toolchain non requise"* ]]
+  mod apply
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"livraison binaire, rien à bâtir ici"* ]]
-  [ ! -e "${LCARS_ELIXIR_PREFIX}${PIN}" ]
-  [ ! -e "$PROV_LINK_DIR/elixir" ]
+  [ -d "$HOME_PIN" ]
+  [ -L "$LINKS/elixir" ]
+  [ ! -e "$BATS_TEST_TMPDIR/apt.trace" ]
 }
 
-@test "CHECK : les deux causes d'un « elixir » qui n'est pas le pin se distinguent — notre lien, ou quelqu'un devant nous" {
-  local bin="$BATS_TEST_TMPDIR/doubles"; mkdir -p "$bin"
-  printf '#!/usr/bin/env bash\nprintf "%s"\n' "$OTP" > "$bin/erl"; chmod 0755 "$bin/erl"
-  # le pin est pose
-  mkdir -p "${LCARS_ELIXIR_PREFIX}${PIN}/bin"
-  printf '#!/usr/bin/env bash\necho "%s"\n' "$PIN" > "${LCARS_ELIXIR_PREFIX}${PIN}/bin/elixir"
-  chmod 0755 "${LCARS_ELIXIR_PREFIX}${PIN}/bin/elixir"
-  # CAS 1 : NOTRE lien pointe sur un autre arbre (le poste du 2026-09-07)
-  mkdir -p "${LCARS_ELIXIR_PREFIX}1.18.4/bin"
-  printf '#!/usr/bin/env bash\necho "1.18.4"\n' > "${LCARS_ELIXIR_PREFIX}1.18.4/bin/elixir"
-  chmod 0755 "${LCARS_ELIXIR_PREFIX}1.18.4/bin/elixir"
-  ln -sf "${LCARS_ELIXIR_PREFIX}1.18.4/bin/elixir" "$PROV_LINK_DIR/elixir"
-  run bash -c "set -uo pipefail; export PATH=\"$PROV_LINK_DIR:$bin:\$PATH\"; source <(sed '/^case \"\${1:?usage/,\$d' '$MOD'); prov_delivery_is_binary() { return 1; }; check 2>&1"
-  [[ "$output" == *"c'est NOTRE lien $PROV_LINK_DIR/elixir qui pointe sur un autre arbre"* ]]
+@test "CHECK : notre lien qui pointe sur un autre arbre se dit tel, avec l'arbre à retirer" {
+  arbre_pose "$PIN"
+  arbre_pose 1.18.4
+  local ancien="$LCARS_DECOR_ROOT/opt/elixir-1.18.4"
+  ln -sf "$ancien/bin/elixir" "$LINKS/elixir"
+  mod check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"c'est NOTRE lien $LINKS/elixir qui pointe sur un autre arbre"* ]]
   refute_out 'est devant .* dans le PATH ; c'"'"'est LUI qui compile' <<<"$output"
-  # et le drift sur l'arbre dit ce que converger ferait
-  [[ "$output" == *"${LCARS_ELIXIR_PREFIX}1.18.4"*"retire (rm -rf)"* ]]
-  # CAS 2 : notre lien est bon, mais un elixir d'ailleurs passe avant
-  ln -sf "${LCARS_ELIXIR_PREFIX}${PIN}/bin/elixir" "$PROV_LINK_DIR/elixir"
+  [[ "$output" == *"$ancien"*"retire (rm -rf)"* ]]
+}
+
+@test "CHECK : un elixir d'ailleurs devant notre bon lien se dit tel — ce n'est pas notre lien" {
+  arbre_pose "$PIN"
+  ln -sf "$HOME_PIN/bin/elixir" "$LINKS/elixir"
   local devant="$BATS_TEST_TMPDIR/devant"; mkdir -p "$devant"
   printf '#!/usr/bin/env bash\necho "1.18.3"\n' > "$devant/elixir"; chmod 0755 "$devant/elixir"
-  run bash -c "set -uo pipefail; export PATH=\"$devant:$PROV_LINK_DIR:$bin:\$PATH\"; source <(sed '/^case \"\${1:?usage/,\$d' '$MOD'); prov_delivery_is_binary() { return 1; }; check 2>&1"
-  [[ "$output" == *"$devant/elixir"*"est devant $PROV_LINK_DIR dans le PATH ; c'est LUI qui compile"* ]]
+  DEVANT="$devant" mod check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"$devant/elixir"*"est devant $LINKS dans le PATH ; c'est LUI qui compile"* ]]
   refute_out 'NOTRE lien' <<<"$output"
 }

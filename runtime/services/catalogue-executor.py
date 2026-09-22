@@ -39,6 +39,7 @@ import urllib.request
 # ⚠ LE MODULE VOISIN, PAS UN PAQUET : `lcars_socket.py` est POSE a cote de ce fichier par les deux
 # rails, et c'est ce qui rend l'import valide sans installation.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import lcars_facts  # noqa: E402 -- meme condition : le module voisin, pose par les deux rails
 import lcars_socket  # noqa: E402 -- apres le sys.path, c'est la condition de l'import
 
 # ⚠ SOUS `/run/lcars/authority/`, PAS `/run/lcars/` : ce service n'est pas root et ne peut rien
@@ -47,7 +48,7 @@ import lcars_socket  # noqa: E402 -- apres le sys.path, c'est la condition de l'
 SOCKET_PATH = os.environ.get("LCARS_CATALOGUE_SOCKET", "/run/lcars/authority/catalogue.sock")
 # THE SOCKET'S ACL CARRIES NO AUTHORIZATION -- it only bounds who may KNOCK. Opening it to the world
 # would grant nobody anything, but it would offer this process to every account on the container for no gain.
-SOCKET_GROUP = os.environ.get("LCARS_FLEET_GROUP", "fleet")
+SOCKET_GROUP = lcars_facts.get("LCARS_FLEET_GROUP")
 SOCKET_MODE = 0o660
 # ⚠ UNE SOCKET PAR VERBE, ET LE VERBE EST LE CANAL : le service sait quel code lancer par la socket
 # d'ARRIVEE, jamais par un mot lu sur le fil.
@@ -58,8 +59,8 @@ ROLES_SOCKET_PATH = os.environ.get(
 # laissant CE service lire le repertoire de la forge primaire — des gestes vises sur la seconde
 # forge presentant les jetons de la premiere.
 ROLE_TOKENS_DIR = os.environ.get("FORGE_ROLE_TOKENS_DIR", "/opt/lcars/var/tokens")
-FORGE_ORG = os.environ.get("LCARS_FORGE_ORG", "fleet")
-HUMANS_TEAM = os.environ.get("LCARS_HUMANS_TEAM", "humans")
+FORGE_ORG = lcars_facts.get("LCARS_FORGE_ORG")
+HUMANS_TEAM = lcars_facts.get("LCARS_HUMANS_TEAM")
 
 # Un nom de compte de role est un nom de compte forge, et il devient un CHEMIN juste en dessous.
 ROLE_RX = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")

@@ -2,29 +2,23 @@
 # SOURCE: deploy/lib/store.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-08-19
-# STATUS: les volumes du MAGASIN : ce qui coute du temps a refabriquer
+# STATUS: les volumes du magasin d'une instance — ce qui coûte du temps à refabriquer, hors du projet compose
 
 LCARS_STORE_TREES=(
-  cache        # npm, pip, cargo, hex — perdre coute de la BANDE PASSANTE. Purgeable de routine.
-  toolchains   # crosstool-NG, SDK embarques — perdre coute des HEURES. Ne se purge pas a la legere.
-  sysroots     # images disque amont extraites — perdre coute un telechargement de plusieurs Go.
-  state        # env.d/ et egress.d/ — ETAT CONVERGE, pas un artefact. Petit, et sa perte est MUETTE.
+  cache        # npm, pip, cargo, hex : se retélécharge, se purge sans dommage
+  toolchains   # crosstool-NG, SDK embarqués : des heures de construction
+  sysroots     # images disque amont extraites : plusieurs Go à retélécharger
+  state        # env.d/ et egress.d/ : l'état convergé, dont la perte ne se signale pas
 )
 
-store_volume_name() {
+store_volume_names() { # store_volume_names → un volume par nature, au nom du projet compose
   if [[ -z "${LCARS_STORE_PREFIX:-}" ]]; then
     echo "store : LCARS_STORE_PREFIX absent — le nom du projet compose est l'identité d'une installation ; sans lui, deux installations sur cette machine partageraient leur magasin" >&2
     return 1
   fi
-  [[ -n "${1:-}" ]] || { echo "store_volume_name: nature attendue (cache|toolchains|sysroots|state)" >&2; return 1; }
-  printf '%s-%s' "$LCARS_STORE_PREFIX" "$1"
-}
-
-store_volume_names() {
-  local nature name
+  local nature
   for nature in "${LCARS_STORE_TREES[@]}"; do
-    name="$(store_volume_name "$nature")" || return 1
-    printf '%s\n' "$name"
+    printf '%s-%s\n' "$LCARS_STORE_PREFIX" "$nature"
   done
 }
 

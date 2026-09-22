@@ -179,7 +179,7 @@ teardown() { rm -rf "$TMP"; }
 #
 # ⚠ ET CE TEMOIN EPINGLAIT `700`, CE QUI EST DEVENU FAUX. Mesure du 2026-08-25 sur une install
 # reelle : `/opt/lcars/var/tokens` ne contient pas que des secrets — `forge.url` et `forge.public.url` y sont
-# en 0644 — et TROIS modules `NEEDS: human` les lisent sous l'uid de l'humain. En `0700` ils
+# en 0644 — et TROIS modules de `human.d` les lisent sous l'uid de l'humain. En `0700` ils
 # prenaient « Permission denied » et le conteneur finissait sans `FORGE_BASE_URL`.
 #
 # L'exigence n'a pas bouge d'un mot : AUCUN uid humain ne LIT un secret. Ce qui bouge est le moyen —

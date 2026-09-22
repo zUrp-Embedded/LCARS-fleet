@@ -535,6 +535,13 @@ defmodule Fleet.Pilot.StepDispatcher do
       # Effective kind chooses the physical artifact and remains in spawn options for completion.
       brief_kind: decided.brief_kind,
       pod_id: decided.pod_id,
+      # ⚠ LE DEPOT EST UNE OPT DU POD, PAS SEULEMENT UN ARGUMENT DU DISPATCHER. `pod_info/1` ne rend
+      # que `Keyword.get(data.opts, :repo)` : sans cette ligne, TOUT producteur est ne sans depot,
+      # et `request_toolchain` refuse en `:pod_repo_unbound` — apres avoir cree sa branche. Mesure
+      # du 2026-09-19 sur le banc 2005 : le rail d'outillage n'avait jamais ete parcouru parce
+      # qu'il ne POUVAIT pas l'etre, et chaque tentative laissait une branche orpheline (les
+      # `lcars/toolchain-*` de LCARS-beta). L'architecte, lui, le recevait (`Project.Architect`).
+      repo: repo,
       # Keep the human label and machine slug separate; never parse one from the other.
       rc_name: Fleet.Layout.pod_label(project_slug, decided.role, decided.number),
       project_slug: project_slug,

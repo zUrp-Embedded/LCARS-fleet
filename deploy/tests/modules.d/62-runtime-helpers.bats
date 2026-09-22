@@ -6,6 +6,7 @@
 # STATUS: témoins de 62-runtime-helpers — les auxiliaires, les binaires du PATH, les arbres embarqués et leurs exclusions, le tampon de révision, les réglages de shell, les modes relus
 
 load ../refute
+load ../support/decor
 
 setup() {
   local _v
@@ -17,24 +18,24 @@ setup() {
   export PROVISION_LIB="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
   export PROVISION_MODULE=62-runtime-helpers PROV_SUBSTRATE=linux
   export PROV_HUMAN; PROV_HUMAN="$(id -un)"
-  export PROV_FLEET_GROUP; PROV_FLEET_GROUP="$(id -gn)"
-  export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/private"
-  export LCARS_HELPERS_DIR="$BATS_TEST_TMPDIR/opt/lcars"
-  export LCARS_HELPERS_OWNER; LCARS_HELPERS_OWNER="$(id -un):$(id -gn)"
-  export LCARS_TOOLCHAIN_CONVERGE_BIN="$BATS_TEST_TMPDIR/usr/local/bin/lcars-toolchain-converge"
-  export LCARS_AUTHORITY_ASK_BIN="$BATS_TEST_TMPDIR/usr/local/bin/lcars-authority-ask"
-  export LCARS_SKEL_FILE="$BATS_TEST_TMPDIR/etc/skel/.bashrc"
-  export LCARS_BASH_BASHRC="$BATS_TEST_TMPDIR/etc/bash.bashrc"
-  export LCARS_BASHRC_FILE="$BATS_TEST_TMPDIR/etc/lcars/lcars.bashrc"
-  export LCARS_CHANNEL_FILE="$BATS_TEST_TMPDIR/etc/lcars/channel"
+  decor_pose
+  HELPERS="$LCARS_DECOR_ROOT/opt/lcars"
+  TOOLCHAIN_BIN="$LCARS_DECOR_ROOT/usr/local/bin/lcars-toolchain-converge"
+  ASK_BIN="$LCARS_DECOR_ROOT/usr/local/bin/lcars-authority-ask"
+  SKEL="$LCARS_DECOR_ROOT/etc/skel/.bashrc"
+  # /etc/skel est dans toute image ; le décor le porte comme elle
+  mkdir -p "$(dirname "$SKEL")"
+  BASH_BASHRC="$LCARS_DECOR_ROOT/etc/bash.bashrc"
+  BASHRC_LCARS="$LCARS_DECOR_ROOT/etc/lcars/lcars.bashrc"
   export XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR/xdg"; mkdir -p "$XDG_RUNTIME_DIR"; chmod 0700 "$XDG_RUNTIME_DIR"
-  BINDIR="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BINDIR"; export PATH="$BINDIR:$PATH"
+  BINDIR="$DECOR_BIN"
   printf '#!/usr/bin/env bash\necho "ttyd version 1.7.7-stub"\n' > "$BINDIR/ttyd"; chmod 0755 "$BINDIR/ttyd"
-  export LCARS_TTYD_BIN="$BINDIR/ttyd"
   stub_curl "peu importe"
 }
 
-mod() { run bash "$MOD" "$1"; }
+# provision exporte la révision de l'arbre qu'il joue : un module la reçoit, il ne la recalcule pas
+revision_de() { bash -c '. "$1" >/dev/null 2>&1; prov_source_rev' _ "$1"; }
+mod() { run env PROV_SOURCE_REV="${PROV_SOURCE_REV:-$(revision_de "$PROVISION_LIB")}" bash "$MOD" "$1"; }
 stub_curl() { # stub_curl <contenu rendu par curl dans -o>
   cat > "$BINDIR/curl" <<EOF
 #!/usr/bin/env bash
@@ -44,16 +45,15 @@ printf '%s' '$1' > "\$dest"
 EOF
   chmod 0755 "$BINDIR/curl"
 }
-helpers() { sed -n '/^HELPERS=(/,/^)/p' "$MOD" | sed '1d;$d;s/#.*//' | tr -d ' \t' | grep -v '^$'; }
-need_git_checkout() {
-  git -C "$BATS_TEST_DIRNAME" rev-parse --git-dir >/dev/null 2>&1 \
-    || skip "pas de checkout git (arbre livré par tarball) — ce témoin lit la révision du dépôt"
-}
+helpers() { sed -n 's/^PROV_HELPERS=//p' "$BATS_TEST_DIRNAME/../../installer-constants.env" | tr ' ' '\n'; }
+# le corpus se joue depuis un checkout (le kit ne l'emporte pas) : ces cas lisent la révision du dépôt
+need_git_checkout() { git -C "$BATS_TEST_DIRNAME" rev-parse --git-dir >/dev/null 2>&1; }
 racine_paquet() { # racine_paquet → une racine de source qui se déclare paquet ; lib et modules copiés, le reste lié
   local src="$BATS_TEST_TMPDIR/paquet"
   mkdir -p "$src/deploy" "$src/runtime"
   cp -a "$BATS_TEST_DIRNAME/../../lib"       "$src/deploy/lib"
   cp -a "$BATS_TEST_DIRNAME/../../modules.d" "$src/deploy/modules.d"
+  cp "$BATS_TEST_DIRNAME/../../installer-constants.env" "$BATS_TEST_DIRNAME/../../system.manifest" "$src/deploy/"
   ln -s "$BATS_TEST_DIRNAME/../../../runtime/etc"      "$src/runtime/etc"
   ln -s "$BATS_TEST_DIRNAME/../../../runtime/services" "$src/runtime/services"
   ln -s "$BATS_TEST_DIRNAME/../../../runtime/bin"      "$src/runtime/bin"
@@ -75,7 +75,10 @@ racine_avec_artefacts() { # racine_avec_artefacts → la racine paquet avec serv
   printf 'resource "gitea_org" "x" {}\n' > "$src/runtime/services/forge-recipe/charte.tf"
   printf '%s\n' "$src"
 }
-mod_depuis() { run env PROVISION_LIB="$1/deploy/lib/provision-lib.sh" bash "$1/deploy/modules.d/62-runtime-helpers.sh" "$2"; }
+mod_depuis() {
+  run env PROVISION_LIB="$1/deploy/lib/provision-lib.sh" PROV_SOURCE_REV="$(revision_de "$1/deploy/lib/provision-lib.sh")" \
+    bash "$1/deploy/modules.d/62-runtime-helpers.sh" "$2"
+}
 
 @test "check sur une machine nue : chaque manque est un drift nommé" {
   mod check
@@ -84,19 +87,22 @@ mod_depuis() { run env PROVISION_LIB="$1/deploy/lib/provision-lib.sh" bash "$1/d
   [[ "$output" == *"client de terminal absent"* ]]
   [[ "$output" == *"lcars-toolchain-converge absent"* ]]
   [[ "$output" == *"provisionnement embarqué absent"* ]]
-  [[ "$output" == *"arbre embarqué absent ($LCARS_HELPERS_DIR/assets)"*"arbre embarqué absent ($LCARS_HELPERS_DIR/catalogues)"* ]]
-  [[ "$output" == *"$LCARS_BASH_BASHRC sans le bloc PATH"* ]]
-  [[ "$output" == *"$LCARS_SKEL_FILE sans le raccord"* ]]
+  [[ "$output" == *"arbre embarqué absent ($HELPERS/assets)"*"arbre embarqué absent ($HELPERS/catalogues)"* ]]
+  [[ "$output" == *"$BASH_BASHRC sans le bloc PATH"* ]]
+  [[ "$output" == *"$SKEL sans le raccord"* ]]
 }
 
-@test "check : ttyd absent se dit avec sa conséquence" {
+@test "check : ttyd absent du PATH se dit avec sa conséquence" {
+  local d sans=""
   rm -f "$BINDIR/ttyd"
-  mod check
+  # le PATH du décor garde tout sauf les dossiers qui portent un ttyd
+  while IFS= read -r d; do [[ -x "$d/ttyd" ]] || sans+="${sans:+:}$d"; done < <(tr ':' '\n' <<<"$PATH")
+  PATH="$sans" mod check
   [[ "$output" == *"ttyd absent — la console web n'a aucun serveur derrière sa socket (page noire)"* ]]
 }
 
 @test "la liste des auxiliaires du module n'est pas vide" {
-  [ "$(helpers | wc -l)" -ge 8 ]
+  [ -n "$(helpers)" ]
   helpers | grep -qx 'console-deck.py'
 }
 
@@ -104,75 +110,117 @@ mod_depuis() { run env PROVISION_LIB="$1/deploy/lib/provision-lib.sh" bash "$1/d
   mod apply
   local n
   while read -r n; do
-    [ -x "$LCARS_HELPERS_DIR/$n" ]
-    cmp -s "$SRC_DIR/$n" "$LCARS_HELPERS_DIR/$n"
+    [ -x "$HELPERS/$n" ]
+    cmp -s "$SRC_DIR/$n" "$HELPERS/$n"
   done < <(helpers)
 }
 
 @test "apply pose le convergeur de toolchain et le client d'autorité à leur chemin, identiques à leur source" {
   mod apply
-  [ -x "$LCARS_TOOLCHAIN_CONVERGE_BIN" ]
-  cmp -s "$BIN_SRC_DIR/lcars-toolchain-converge" "$LCARS_TOOLCHAIN_CONVERGE_BIN"
-  [ -x "$LCARS_AUTHORITY_ASK_BIN" ]
-  cmp -s "$BIN_SRC_DIR/lcars-authority-ask" "$LCARS_AUTHORITY_ASK_BIN"
+  [ -x "$TOOLCHAIN_BIN" ]
+  cmp -s "$BIN_SRC_DIR/lcars-toolchain-converge" "$TOOLCHAIN_BIN"
+  [ -x "$ASK_BIN" ]
+  cmp -s "$BIN_SRC_DIR/lcars-authority-ask" "$ASK_BIN"
 }
 
 @test "check dit l'absence du client d'autorité" {
   mod check
-  [[ "$output" == *"$LCARS_AUTHORITY_ASK_BIN absent — « lcars publish run », « lcars approve » et le skill system-issues"* ]]
+  [[ "$output" == *"$ASK_BIN absent — « lcars publish run », « lcars approve » et le skill system-issues"* ]]
 }
 
-@test "apply pose le provisionnement en forme de dépôt, sans ses témoins, et les arbres etc, bin et vendor" {
+@test "apply pose le provisionnement en forme de dépôt, sans ses témoins, et les arbres etc et bin ; vendor, sans lecteur, reste dans le dépôt" {
   mod apply
-  [ -x "$LCARS_HELPERS_DIR/deploy/provision" ]
-  [ -d "$LCARS_HELPERS_DIR/deploy/modules.d" ]
-  [ ! -d "$LCARS_HELPERS_DIR/deploy/tests" ]
-  [ -d "$LCARS_HELPERS_DIR/etc" ]
-  [ -d "$LCARS_HELPERS_DIR/bin" ]
-  [ -f "$LCARS_HELPERS_DIR/vendor/token_saver/lcars_hook.py" ]
-  [ -d "$LCARS_HELPERS_DIR/assets/avatars" ]
-  [ -d "$LCARS_HELPERS_DIR/catalogues" ]
+  [ -x "$HELPERS/deploy/provision" ]
+  [ -d "$HELPERS/deploy/modules.d" ]
+  [ ! -d "$HELPERS/deploy/tests" ]
+  [ -d "$HELPERS/etc" ]
+  [ -d "$HELPERS/bin" ]
+  [ ! -e "$HELPERS/vendor" ]
+  [ -d "$HELPERS/assets/avatars" ]
+  [ -d "$HELPERS/catalogues" ]
   mod check
-  [[ "$output" == *"arbre embarqué $LCARS_HELPERS_DIR/assets"*"arbre embarqué $LCARS_HELPERS_DIR/catalogues"*"arbre embarqué $LCARS_HELPERS_DIR/deploy"* ]]
+  [[ "$output" == *"arbre embarqué $HELPERS/assets"*"arbre embarqué $HELPERS/catalogues"*"arbre embarqué $HELPERS/deploy"* ]]
 }
 
 @test "un client de terminal non conforme à son pin n'est pas posé, l'apply échoue" {
   stub_curl "ceci n'est pas xterm.js"
   mod apply
   [ "$status" -eq 1 ]
-  [ ! -e "$LCARS_HELPERS_DIR/deck-static/xterm.js" ]
+  [ ! -e "$HELPERS/deck-static/xterm.js" ]
 }
 
 @test "rejoué : un auxiliaire déjà identique n'est pas reposé" {
   mod apply
-  local before; before="$(stat -c %Y "$LCARS_HELPERS_DIR/console.sh")"
+  local before; before="$(stat -c %Y "$HELPERS/console.sh")"
   mod apply
-  [ "$(stat -c %Y "$LCARS_HELPERS_DIR/console.sh")" = "$before" ]
+  [ "$(stat -c %Y "$HELPERS/console.sh")" = "$before" ]
+}
+
+@test "rejoué sans rien de neuf : aucune ligne POSÉ, ni pour les arbres embarqués ni pour les binaires du PATH" {
+  mod apply
+  [[ "$output" == *"POSÉ  62-runtime-helpers: arbre embarqué $HELPERS/deploy"* ]]
+  mod apply
+  refute_out '^POSÉ' <<<"$output"
+}
+
+@test "un arbre dont la source a changé est seul rebasculé, et compté" {
+  local src; src="$(racine_avec_artefacts)"
+  mod_depuis "$src" apply
+  printf '# retouche\n' >> "$src/runtime/services/console.tmux.conf"
+  mod_depuis "$src" apply
+  [[ "$output" == *"POSÉ  62-runtime-helpers: arbre embarqué $HELPERS/services"* ]]
+  [ "$(grep -c '^POSÉ  62-runtime-helpers: arbre embarqué' <<<"$output")" -eq 1 ]
+  cmp -s "$src/runtime/services/console.tmux.conf" "$HELPERS/services/console.tmux.conf"
+}
+
+@test "un arbre rebasculé : l'objet changé porte la date de sa pose, pas celle de la source ; l'objet identique et son dossier gardent la leur" {
+  local src avant; src="$(racine_avec_artefacts)"
+  mod_depuis "$src" apply
+  touch -d '2001-01-01 00:00:00' "$HELPERS/services/console.tmux.conf" "$HELPERS/services/lib"
+  printf '# retouche\n' >> "$src/runtime/services/lib/human-protocol.sh"
+  touch -d '2001-01-01 00:00:00' "$src/runtime/services/lib/human-protocol.sh"
+  avant="$(date +%s)"
+  mod_depuis "$src" apply
+  [[ "$output" == *"POSÉ  62-runtime-helpers: arbre embarqué $HELPERS/services"* ]]
+  cmp -s "$src/runtime/services/lib/human-protocol.sh" "$HELPERS/services/lib/human-protocol.sh"
+  [ "$(stat -c %Y "$HELPERS/services/lib/human-protocol.sh")" -ge "$avant" ]
+  [ "$(date -u -d "@$(stat -c %Y "$HELPERS/services/console.tmux.conf")" +%Y)" = 2001 ]
+  [ "$(date -u -d "@$(stat -c %Y "$HELPERS/services/lib")" +%Y)" = 2001 ]
+}
+
+@test "un changement de mode seul, contenu identique, rebascule l'arbre" {
+  local src; src="$(racine_avec_artefacts)"
+  mod_depuis "$src" apply
+  [ ! -x "$HELPERS/services/forge-recipe/charte.tf" ]
+  chmod +x "$src/runtime/services/forge-recipe/charte.tf"
+  mod_depuis "$src" apply
+  [[ "$output" == *"POSÉ  62-runtime-helpers: arbre embarqué $HELPERS/services"* ]] || { echo "$output"; return 1; }
+  [ -x "$HELPERS/services/forge-recipe/charte.tf" ]
 }
 
 @test "les données sont posées à leur destination en 0644, identiques à la source, non exécutables" {
   mod apply
-  cmp -s "$SRC_DIR/console.tmux.conf" "$LCARS_HELPERS_DIR/console.tmux.conf"
-  [ "$(stat -c %a "$LCARS_HELPERS_DIR/console.tmux.conf")" = 644 ]
-  cmp -s "$SRC_DIR/lcars.bashrc" "$LCARS_BASHRC_FILE"
-  [ "$(stat -c %a "$LCARS_BASHRC_FILE")" = 644 ]
+  cmp -s "$SRC_DIR/console.tmux.conf" "$HELPERS/console.tmux.conf"
+  [ "$(stat -c %a "$HELPERS/console.tmux.conf")" = 644 ]
+  cmp -s "$SRC_DIR/lcars.bashrc" "$BASHRC_LCARS"
+  [ "$(stat -c %a "$BASHRC_LCARS")" = 644 ]
 }
 
 @test "le tampon de révision est posé là où repo_root() de la copie le retrouve, et il n'est pas le discriminant de livraison" {
   need_git_checkout
   mod apply
   local lu
-  lu="$(PROVISION_LIB="$LCARS_HELPERS_DIR/deploy/lib/provision-lib.sh" bash -c '. "$PROVISION_LIB" >/dev/null 2>&1; repo_root')"
+  lu="$(PROVISION_LIB="$HELPERS/deploy/lib/provision-lib.sh" bash -c '. "$PROVISION_LIB" >/dev/null 2>&1; repo_root')"
   [ -s "$lu/.helpers-revision" ]
-  [ "$(cat "$LCARS_HELPERS_DIR/.helpers-revision")" = "$(cd "$BATS_TEST_DIRNAME" && git rev-parse --short=8 HEAD)$(cd "$BATS_TEST_DIRNAME" && git diff --quiet HEAD -- || echo '+local')" ]
-  [ ! -e "$LCARS_HELPERS_DIR/.source-revision" ]
+  [ "$(cat "$HELPERS/.helpers-revision")" = "$(cd "$BATS_TEST_DIRNAME" && git rev-parse --short=8 HEAD)$(cd "$BATS_TEST_DIRNAME" && git diff --quiet HEAD -- || echo '+local')" ]
+  [ ! -e "$HELPERS/.source-revision" ]
 }
 
 @test "la copie d'une livraison binaire porte le discriminant, séparé du tampon" {
   local src; src="$(racine_paquet)"
   mod_depuis "$src" apply
-  [ "$(cat "$LCARS_HELPERS_DIR/.source-revision")" = cafe1234 ]
-  [ -s "$LCARS_HELPERS_DIR/.helpers-revision" ]
+  [ "$(cat "$HELPERS/.source-revision")" = cafe1234 ]
+  [ -s "$HELPERS/.helpers-revision" ]
 }
 
 @test "la racine du décor est vue comme un paquet, pas comme le dépôt" {
@@ -184,12 +232,12 @@ mod_depuis() { run env PROVISION_LIB="$1/deploy/lib/provision-lib.sh" bash "$1/d
 @test "embarqué : la recette arrive, mais ni le cache de providers, ni l'état tofu, ni ses variables — aucun jeton sous le prefix" {
   local src; src="$(racine_avec_artefacts)"
   mod_depuis "$src" apply
-  local pose="$LCARS_HELPERS_DIR/services/forge-recipe"
+  local pose="$HELPERS/services/forge-recipe"
   [ -s "$pose/charte.tf" ]
   [ ! -e "$pose/.terraform" ]
   [ ! -e "$pose/terraform.tfstate" ]
   [ ! -e "$pose/secrets.tfvars" ]
-  refute grep -rq 'JETON-DE-FORGE' "$LCARS_HELPERS_DIR"
+  refute grep -rq 'JETON-DE-FORGE' "$HELPERS"
 }
 
 @test "check : une source absente n'est pas une divergence — rien n'est conclu, et c'est dit sans drift" {
@@ -197,7 +245,7 @@ mod_depuis() { run env PROVISION_LIB="$1/deploy/lib/provision-lib.sh" bash "$1/d
   mod_depuis "$src" apply
   rm -f "$src/runtime/services/console.sh"
   mod_depuis "$src" check
-  [[ "$output" == *"WARN  62-runtime-helpers: $LCARS_HELPERS_DIR/console.sh : rien n'est conclu — la source est absente ou illisible ici"* ]]
+  [[ "$output" == *"WARN  62-runtime-helpers: $HELPERS/console.sh : rien n'est conclu — la source est absente ou illisible ici"* ]]
   [[ "$output" != *"console.sh diverge"* ]]
 }
 
@@ -206,15 +254,15 @@ mod_depuis() { run env PROVISION_LIB="$1/deploy/lib/provision-lib.sh" bash "$1/d
   rm -f "$src/assets"; mkdir -p "$src/assets/github.io/node_modules/x" "$src/assets/github.io/dist"
   printf 'x' > "$src/assets/github.io/node_modules/x/index.js"; printf '<html>' > "$src/assets/github.io/dist/index.html"
   mod_depuis "$src" apply
-  [ -f "$LCARS_HELPERS_DIR/assets/github.io/dist/index.html" ]
-  [ ! -e "$LCARS_HELPERS_DIR/assets/github.io/node_modules" ]
+  [ -f "$HELPERS/assets/github.io/dist/index.html" ]
+  [ ! -e "$HELPERS/assets/github.io/node_modules" ]
 }
 
 @test "migration : un discriminant périmé est retiré en livraison source" {
   need_git_checkout
-  mkdir -p "$LCARS_HELPERS_DIR"; echo vieux1234 > "$LCARS_HELPERS_DIR/.source-revision"
+  mkdir -p "$HELPERS"; echo vieux1234 > "$HELPERS/.source-revision"
   mod apply
-  [ ! -e "$LCARS_HELPERS_DIR/.source-revision" ]
+  [ ! -e "$HELPERS/.source-revision" ]
 }
 
 @test "check sans tampon dit qu'il ne sait pas d'où sortent les auxiliaires" {
@@ -222,127 +270,130 @@ mod_depuis() { run env PROVISION_LIB="$1/deploy/lib/provision-lib.sh" bash "$1/d
   [[ "$output" == *"impossible de dire de quelle révision"* ]]
 }
 
-@test "une source en retard sur ce qui est posé est un échec au check, et l'apply l'annonce avant d'écrire" {
+@test "une source en retard sur ce qui est posé : le check dit le retour en arrière que l'apply fera, l'apply l'annonce et le fait" {
   need_git_checkout
+  # un ancêtre réel du dépôt
+  git -C "$BATS_TEST_DIRNAME" rev-parse --verify -q HEAD~1 >/dev/null
   mod apply
   local head prev
   head="$(cd "$BATS_TEST_DIRNAME" && git rev-parse --short=8 HEAD)"
   prev="$(cd "$BATS_TEST_DIRNAME" && git rev-parse --short=8 HEAD~1)"
-  echo "$head" > "$LCARS_HELPERS_DIR/.helpers-revision"
+  echo "$head" > "$HELPERS/.helpers-revision"
   PROV_SOURCE_REV="$prev" mod check
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"FAIL  62-runtime-helpers: la source est en retard : posé depuis $head, cet arbre est $prev, qui en est un ancêtre"* ]]
-  rm -f "$LCARS_HELPERS_DIR/console.sh"
+  # un FAIL au check serait un état que l'apply ne refuse pas
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DRIFT 62-runtime-helpers: retour en arrière : posé depuis $head, cet arbre est $prev, qui en est un ancêtre"* ]]
+  rm -f "$HELPERS/console.sh"
   PROV_SOURCE_REV="$prev" mod apply
-  [[ "$output" == *"WARN  62-runtime-helpers: retour en arrière : $LCARS_HELPERS_DIR sort de $head, cet arbre est $prev"* ]]
-  [ -x "$LCARS_HELPERS_DIR/console.sh" ]
+  [[ "$output" == *"WARN  62-runtime-helpers: retour en arrière : $HELPERS sort de $head, cet arbre est $prev"* ]]
+  [ -x "$HELPERS/console.sh" ]
 }
 
 @test "une parenté indéterminable se dit, ni à jour ni en retard" {
   mod apply
-  echo deadbeef > "$LCARS_HELPERS_DIR/.helpers-revision"
+  echo deadbeef > "$HELPERS/.helpers-revision"
   mod check
   [[ "$output" == *"parenté indéterminable"* ]]
 }
 
 @test "squelette : le .bashrc de la distribution est préservé, le raccord teste avant de sourcer et reste inerte sans l'installation" {
-  mkdir -p "$(dirname "$LCARS_SKEL_FILE")"
-  printf '# .bashrc de la distribution\nexport MARQUEUR_DISTRIBUTION=intact\nalias ll="ls -alF"\n' > "$LCARS_SKEL_FILE"
-  local avant; avant="$(cat "$LCARS_SKEL_FILE")"
+  mkdir -p "$(dirname "$SKEL")"
+  printf '# .bashrc de la distribution\nexport MARQUEUR_DISTRIBUTION=intact\nalias ll="ls -alF"\n' > "$SKEL"
+  local avant; avant="$(cat "$SKEL")"
   mod apply
-  [ "$(head -3 "$LCARS_SKEL_FILE")" = "$avant" ]
-  grep -qF "if [ -r $LCARS_BASHRC_FILE ]; then . $LCARS_BASHRC_FILE; fi" "$LCARS_SKEL_FILE"
-  rm -f "$LCARS_BASHRC_FILE"
-  run bash -c "set -e; . '$LCARS_SKEL_FILE'; echo OK-INERTE"
+  [ "$(head -3 "$SKEL")" = "$avant" ]
+  grep -qF "if [ -r $BASHRC_LCARS ]; then . $BASHRC_LCARS; fi" "$SKEL"
+  rm -f "$BASHRC_LCARS"
+  run bash -c "set -e; . '$SKEL'; echo OK-INERTE"
   [ "$status" -eq 0 ]
   [[ "$output" == *"OK-INERTE"* ]]
   mod apply
-  [ "$(grep -c 'lcars:skel >>>' "$LCARS_SKEL_FILE")" -eq 1 ]
+  [ "$(grep -c 'lcars:skel >>>' "$SKEL")" -eq 1 ]
 }
 
 @test "bash.bashrc : le bloc PATH met ~/.local/bin devant pour un shell interactif, une fois, en préservant le fichier" {
-  mkdir -p "$(dirname "$LCARS_BASH_BASHRC")"
-  printf '# bash.bashrc de la distribution\nshopt -s checkwinsize\n' > "$LCARS_BASH_BASHRC"
+  mkdir -p "$(dirname "$BASH_BASHRC")"
+  printf '# bash.bashrc de la distribution\nshopt -s checkwinsize\n' > "$BASH_BASHRC"
   mod apply
-  [ "$(head -2 "$LCARS_BASH_BASHRC")" = "$(printf '# bash.bashrc de la distribution\nshopt -s checkwinsize')" ]
+  [ "$(head -2 "$BASH_BASHRC")" = "$(printf '# bash.bashrc de la distribution\nshopt -s checkwinsize')" ]
   local home="$BATS_TEST_TMPDIR/home"; mkdir -p "$home/.local/bin"
-  run env -i HOME="$home" PATH=/usr/bin:/bin bash -c ". '$LCARS_BASH_BASHRC'; . '$LCARS_BASH_BASHRC'; echo \"\$PATH\""
+  run env -i HOME="$home" PATH=/usr/bin:/bin bash -c ". '$BASH_BASHRC'; . '$BASH_BASHRC'; echo \"\$PATH\""
   [ "$output" = "$home/.local/bin:/usr/bin:/bin" ]
-  run env -i HOME="$BATS_TEST_TMPDIR/sans" PATH=/usr/bin:/bin bash -c ". '$LCARS_BASH_BASHRC'; echo \"\$PATH\""
+  run env -i HOME="$BATS_TEST_TMPDIR/sans" PATH=/usr/bin:/bin bash -c ". '$BASH_BASHRC'; echo \"\$PATH\""
   [ "$output" = "/usr/bin:/bin" ]
   mod check
-  [[ "$output" == *"PATH des shells interactifs : ~/.local/bin ($LCARS_BASH_BASHRC)"* ]]
+  [[ "$output" == *"PATH des shells interactifs : ~/.local/bin ($BASH_BASHRC)"* ]]
   mod apply
-  [ "$(grep -c 'lcars:path >>>' "$LCARS_BASH_BASHRC")" -eq 1 ]
+  [ "$(grep -c 'lcars:path >>>' "$BASH_BASHRC")" -eq 1 ]
 }
 
 @test "check : un bloc géré vidé de son corps est un drift, le marqueur seul ne suffit pas" {
   mod apply
-  printf '# >>> lcars:path >>> (bloc géré par deploy — édition manuelle écrasée au prochain apply)\n# rien\n# <<< lcars:path <<<\n' > "$LCARS_BASH_BASHRC"
-  printf '# >>> lcars:skel >>> (bloc géré par deploy — édition manuelle écrasée au prochain apply)\n# <<< lcars:skel <<<\n' > "$LCARS_SKEL_FILE"
+  printf '# >>> lcars:path >>> (bloc géré par deploy — édition manuelle écrasée au prochain apply)\n# rien\n# <<< lcars:path <<<\n' > "$BASH_BASHRC"
+  printf '# >>> lcars:skel >>> (bloc géré par deploy — édition manuelle écrasée au prochain apply)\n# <<< lcars:skel <<<\n' > "$SKEL"
   mod check
-  [[ "$output" == *"DRIFT 62-runtime-helpers: $LCARS_BASH_BASHRC sans le bloc PATH attendu"* ]]
-  [[ "$output" == *"DRIFT 62-runtime-helpers: $LCARS_SKEL_FILE sans le raccord attendu"* ]]
+  [[ "$output" == *"DRIFT 62-runtime-helpers: $BASH_BASHRC sans le bloc PATH attendu"* ]]
+  [[ "$output" == *"DRIFT 62-runtime-helpers: $SKEL sans le raccord attendu"* ]]
   mod apply
   mod check
   [[ "$output" == *"PATH des shells interactifs"*"squelette des humains raccordé"* ]]
 }
 
-@test "check : un arbre embarqué du runtime absent (vendor, bin, etc, services) est un drift" {
+@test "check : un arbre embarqué du runtime absent (bin, etc, services) est un drift" {
   mod apply
-  rm -rf "${LCARS_HELPERS_DIR:?}/vendor" "${LCARS_HELPERS_DIR:?}/bin"
+  rm -rf "${HELPERS:?}/bin"
   mod check
-  [[ "$output" == *"arbre embarqué absent ($LCARS_HELPERS_DIR/bin)"*"arbre embarqué absent ($LCARS_HELPERS_DIR/vendor)"* ]]
-  [[ "$output" == *"arbre embarqué $LCARS_HELPERS_DIR/etc"*"arbre embarqué $LCARS_HELPERS_DIR/services"* ]]
+  [[ "$output" == *"arbre embarqué absent ($HELPERS/bin)"* ]]
+  [[ "$output" == *"arbre embarqué $HELPERS/etc"*"arbre embarqué $HELPERS/services"* ]]
 }
 
 @test "embarqué : aucun fichier ni répertoire posé n'est setgid ni inscriptible par le groupe ou les autres" {
   need_git_checkout
   mod apply
-  [ -d "$LCARS_HELPERS_DIR/services" ]
-  [ "$(find "$LCARS_HELPERS_DIR/services" "$LCARS_HELPERS_DIR/deploy" -perm /2022 2>/dev/null | wc -l)" -eq 0 ]
+  [ -d "$HELPERS/services" ]
+  [ "$(find "$HELPERS/services" "$HELPERS/deploy" -perm /2022 2>/dev/null | wc -l)" -eq 0 ]
 }
 
 @test "modes : un auxiliaire g+w est un drift nommé, l'apply le ramène à 0755 sans le reposer" {
   mod apply
   local me; me="$(id -un):$(id -gn)"
-  chmod 0775 "$LCARS_HELPERS_DIR/console.sh"
+  chmod 0775 "$HELPERS/console.sh"
   mod check
-  [[ "$output" == *"$LCARS_HELPERS_DIR/console.sh : 775 $me ≠ 755 $me"* ]]
-  local before; before="$(stat -c %Y "$LCARS_HELPERS_DIR/console.sh")"
+  [[ "$output" == *"$HELPERS/console.sh : 775 $me ≠ 755 $me"* ]]
+  local before; before="$(stat -c %Y "$HELPERS/console.sh")"
   mod apply
-  [ "$(stat -c %a "$LCARS_HELPERS_DIR/console.sh")" = 755 ]
-  [ "$(stat -c %Y "$LCARS_HELPERS_DIR/console.sh")" = "$before" ]
+  [ "$(stat -c %a "$HELPERS/console.sh")" = 755 ]
+  [ "$(stat -c %Y "$HELPERS/console.sh")" = "$before" ]
   mod check
-  refute grep -qF "$LCARS_HELPERS_DIR/console.sh : " <<<"$output"
+  refute grep -qF "$HELPERS/console.sh : " <<<"$output"
   [[ "$output" == *"modes et propriétaires relus"* ]]
 }
 
 @test "modes : une donnée en 0664 est un drift nommé, l'apply la ramène" {
   mod apply
   local me; me="$(id -un):$(id -gn)"
-  chmod 0664 "$LCARS_HELPERS_DIR/console.tmux.conf"
+  chmod 0664 "$HELPERS/console.tmux.conf"
   mod check
-  [[ "$output" == *"$LCARS_HELPERS_DIR/console.tmux.conf : 664 $me ≠ 644 $me"* ]]
+  [[ "$output" == *"$HELPERS/console.tmux.conf : 664 $me ≠ 644 $me"* ]]
   mod apply
-  [ "$(stat -c %a "$LCARS_HELPERS_DIR/console.tmux.conf")" = 644 ]
+  [ "$(stat -c %a "$HELPERS/console.tmux.conf")" = 644 ]
 }
 
 @test "modes : un arbre embarqué avec un objet g+w ou setgid est un drift compté, l'apply repose l'arbre ; ce que la copie n'emporte pas n'est pas jugé" {
   need_git_checkout
   mod apply
-  chmod g+w "$LCARS_HELPERS_DIR/services/console.sh"
+  chmod g+w "$HELPERS/services/console.sh"
   mod check
-  [[ "$output" == *"$LCARS_HELPERS_DIR/services : 1 objet(s) hors contrat (premier : $LCARS_HELPERS_DIR/services/console.sh, "* ]]
+  [[ "$output" == *"$HELPERS/services : 1 objet(s) hors contrat (premier : $HELPERS/services/console.sh, "* ]]
   mod apply
   mod check
-  refute grep -qF "$LCARS_HELPERS_DIR/services : " <<<"$output"
-  chmod g+s "$LCARS_HELPERS_DIR/services/human.d"; chmod o+w "$LCARS_HELPERS_DIR/services/console.sh"
+  refute grep -qF "$HELPERS/services : " <<<"$output"
+  chmod g+s "$HELPERS/services/human.d"; chmod o+w "$HELPERS/services/console.sh"
   mod check
-  [[ "$output" == *"$LCARS_HELPERS_DIR/services : 2 objet(s) hors contrat"* ]]
-  mkdir -p "$LCARS_HELPERS_DIR/deploy/.terraform" "$LCARS_HELPERS_DIR/assets/node_modules"
-  ln -s /nulle/part "$LCARS_HELPERS_DIR/deploy/.terraform/lien"; chmod 0777 "$LCARS_HELPERS_DIR/assets/node_modules"
+  [[ "$output" == *"$HELPERS/services : 2 objet(s) hors contrat"* ]]
+  mkdir -p "$HELPERS/deploy/.terraform" "$HELPERS/assets/node_modules"
+  ln -s /nulle/part "$HELPERS/deploy/.terraform/lien"; chmod 0777 "$HELPERS/assets/node_modules"
   mod check
-  refute grep -qF "$LCARS_HELPERS_DIR/deploy : " <<<"$output"
-  refute grep -qF "$LCARS_HELPERS_DIR/assets : " <<<"$output"
+  refute grep -qF "$HELPERS/deploy : " <<<"$output"
+  refute grep -qF "$HELPERS/assets : " <<<"$output"
 }

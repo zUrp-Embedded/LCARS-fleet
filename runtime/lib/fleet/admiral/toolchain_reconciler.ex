@@ -64,7 +64,9 @@ defmodule Fleet.Admiral.ToolchainReconciler do
       repo: Keyword.get(opts, :repo),
       branch: Keyword.get(opts, :branch),
       last_result: nil,
-      rejected_sha: nil
+      rejected_sha: nil,
+      # Les branches de demande SANS PR vues au tick precedent : une seconde vue les condamne.
+      orphelines_vues: MapSet.new()
     }
 
     _ = PeriodicCheck.schedule(:reconcile, state.interval_ms)
@@ -88,15 +90,20 @@ defmodule Fleet.Admiral.ToolchainReconciler do
       rescue
         e ->
           Logger.error("ToolchainReconciler: passe en échec — #{Exception.message(e)}")
-          {{:error, {:raised, Exception.message(e)}}, state.rejected_sha}
+          {{:error, {:raised, Exception.message(e)}}, state.rejected_sha, state.orphelines_vues}
       end
 
-    %{state | last_result: elem(result, 0), rejected_sha: elem(result, 1)}
+    %{
+      state
+      | last_result: elem(result, 0),
+        rejected_sha: elem(result, 1),
+        orphelines_vues: elem(result, 2)
+    }
   end
 
   # Cache the head rejected by {:converger_failed, 2, _} until a different head is read.
-  # The cache is process-local. Default socket FAIL responses use converger_refused
-  # and do not trigger this freeze; the rc=2 tests inject the older error shape.
+  # Exit 2 of lcars-toolchain-converge means the manifest itself is refused: replaying the
+  # same head cannot succeed. The cache is process-local.
   defp reconcile_pass(state) do
     repo = state.repo || Fleet.Toolchain.ops_repo()
     branch = state.branch || Fleet.Toolchain.branch()
@@ -129,49 +136,137 @@ defmodule Fleet.Admiral.ToolchainReconciler do
           {unreachable(reason), state.rejected_sha}
       end
 
-    drain_pass(repo, branch, result)
-    {result, rejected}
+    {result, rejected, drain_pass(repo, branch, result, state.orphelines_vues)}
   end
 
   # Closed-without-merge PRs leave the branch unchanged, so drain them separately.
   # Merged PRs require this pass's successful branch result. Issue labels carry the
   # waiting state; failures may leave partial effects for a later tick.
-  defp drain_pass(repo, branch, branch_result) do
+  defp drain_pass(repo, branch, branch_result, orphelines_vues) do
     # Request server-side base filtering, then recheck the base locally.
     case forge().list_pulls_for_base(repo, branch, []) do
       {:ok, prs} ->
-        Enum.each(prs, &maybe_drain(&1, branch, branch_result))
+        Enum.each(prs, &maybe_drain(&1, repo, branch, branch_result))
+        balaie_orphelines(repo, branch, prs, orphelines_vues)
 
       {:error, reason} ->
         Logger.warning(
           "ToolchainReconciler: passe de drain — PR illisibles (#{inspect(reason)}), " <>
             "les verrous restent posés, le tick suivant retentera"
         )
+
+        orphelines_vues
     end
   rescue
     e ->
       Logger.warning("ToolchainReconciler: passe de drain en échec — #{Exception.message(e)}")
+      orphelines_vues
   end
 
-  defp maybe_drain(pr, branch, branch_result) do
+  # ⚠ UNE BRANCHE DE DEMANDE SANS PR N'EST VUE PAR PERSONNE. Le drain s'accroche aux PR : une
+  # branche qui n'en a jamais eu — une demande morte entre sa création et l'ouverture de sa PR —
+  # reste sur le dépôt du système pour toujours. Mesuré le 2026-09-19 sur le banc 2005, et les trois
+  # `lcars/toolchain-*` de LCARS-beta sont dans ce cas. `forget_request_branch/2` disait déjà
+  # l'intention : « leaving it would let the runtime grow branches on the system repo at will ».
+  #
+  # ⚠ DEUX TICKS, JAMAIS UN. Entre la création de la branche et l'ouverture de sa PR il y a deux
+  # appels à la forge ; balayer sur une seule vue tuerait une demande en cours de route. Une branche
+  # orpheline vue DEUX passes de suite est abandonnée pour de bon.
+  defp balaie_orphelines(repo, branch, prs, vues_avant) do
+    case forge().list_branches(repo, []) do
+      {:ok, branches} ->
+        avec_pr = MapSet.new(prs, &Payload.head_ref/1)
+
+        orphelines =
+          branches
+          |> Enum.map(& &1.name)
+          |> Enum.filter(&(Fleet.Toolchain.request_branch?(&1) and &1 != branch))
+          |> Enum.reject(&MapSet.member?(avec_pr, &1))
+          |> MapSet.new()
+
+        orphelines
+        |> MapSet.intersection(vues_avant)
+        |> Enum.each(&supprime_orpheline(repo, &1))
+
+        orphelines
+
+      {:error, reason} ->
+        Logger.warning(
+          "ToolchainReconciler: branches illisibles (#{inspect(reason)}) — le balayage des " <>
+            "branches de demande sans PR attend le tick suivant"
+        )
+
+        vues_avant
+    end
+  end
+
+  defp supprime_orpheline(repo, nom) do
+    case forge().delete_branch(repo, nom, []) do
+      {:ok, :deleted} ->
+        Logger.info(
+          "ToolchainReconciler: branche de demande ORPHELINE #{repo}:#{nom} supprimée — " <>
+            "aucune PR ne l'a jamais portée (vue deux passes de suite)"
+        )
+
+      {:ok, :absent} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "ToolchainReconciler: orpheline #{repo}:#{nom} NON supprimée (#{inspect(reason)}) — " <>
+            "le tick suivant retentera"
+        )
+    end
+  end
+
+  defp maybe_drain(pr, repo, branch, branch_result) do
     with true <- Payload.base_ref(pr) == branch,
          {:ok, item_repo, item_issue} <- Fleet.Toolchain.parse_workitem_marker(pr["body"]) do
-      drain_outcome(pr_outcome(pr), {item_repo, item_issue, pr}, branch_result)
+      drain_outcome(pr_outcome(pr), {item_repo, item_issue, pr}, repo, branch_result)
     else
       _ -> :ok
     end
   end
 
-  defp drain_outcome(:open, _work_item, _branch_result), do: :ok
+  defp drain_outcome(:open, _work_item, _repo, _branch_result), do: :ok
 
-  defp drain_outcome(:merged, {item_repo, item_issue, pr}, branch_result) do
+  defp drain_outcome(:merged, {item_repo, item_issue, pr}, repo, branch_result) do
     if applied?(branch_result),
-      do: drain(item_repo, item_issue, pr, :merged),
+      do: drain(item_repo, item_issue, pr, :merged, repo),
       else: :ok
   end
 
-  defp drain_outcome(:refused, {item_repo, item_issue, pr}, _branch_result),
-    do: drain(item_repo, item_issue, pr, :refused)
+  defp drain_outcome(:refused, {item_repo, item_issue, pr}, repo, _branch_result),
+    do: drain(item_repo, item_issue, pr, :refused, repo)
+
+  # A request branch has done its work once its PR is drained. Leaving it would let the runtime
+  # grow branches on the system repo at will — measured on the beta bench (⚖ user 2026-09-16): the
+  # reconciler deletes what it created, and only that family (never the protected branch, never a
+  # branch of another origin). It runs ONCE, with the drain: the PR list is `state=all`, so a
+  # deletion retried at every tick would hit every historical PR every minute.
+  defp forget_request_branch(repo, pr) do
+    head = Payload.head_ref(pr)
+
+    if is_binary(head) and Fleet.Toolchain.request_branch?(head) do
+      case forge().delete_branch(repo, head, []) do
+        {:ok, :deleted} ->
+          Logger.info(
+            "ToolchainReconciler: branche de demande #{repo}:#{head} supprimée (PR ##{pr["number"]} drainée)"
+          )
+
+        {:ok, :absent} ->
+          :ok
+
+        {:error, reason} ->
+          Logger.warning(
+            "ToolchainReconciler: branche de demande #{repo}:#{head} NON supprimée " <>
+              "(#{inspect(reason)}) — le drain est fait et ne se rejoue pas : à supprimer à la main"
+          )
+      end
+    else
+      :ok
+    end
+  end
 
   defp pr_outcome(pr) do
     cond do
@@ -185,13 +280,13 @@ defmodule Fleet.Admiral.ToolchainReconciler do
   defp applied?({:ok, :converged, _}), do: true
   defp applied?(_), do: false
 
-  defp drain(repo, issue, pr, why) do
+  defp drain(repo, issue, pr, why, ops_repo) do
     lock = Fleet.Toolchain.waiting_label()
 
     case forge().get_issue(repo, issue, []) do
       {:ok, payload} ->
         if lock in Payload.label_names(payload) do
-          do_drain(repo, issue, pr, why, lock)
+          do_drain(repo, issue, pr, why, lock, ops_repo)
         else
           :ok
         end
@@ -204,7 +299,7 @@ defmodule Fleet.Admiral.ToolchainReconciler do
     end
   end
 
-  defp do_drain(repo, issue, pr, why, lock) do
+  defp do_drain(repo, issue, pr, why, lock, ops_repo) do
     case forge().remove_label(repo, issue, lock, []) do
       {:ok, _} ->
         # Removing the wait label makes the issue eligible for normal redispatch checks.
@@ -214,6 +309,8 @@ defmodule Fleet.Admiral.ToolchainReconciler do
         Logger.info(
           "ToolchainReconciler: work-item #{repo}##{issue} drainé (#{why}, PR ##{pr["number"]})"
         )
+
+        forget_request_branch(ops_repo, pr)
 
       {:error, reason} ->
         Logger.warning(
@@ -268,6 +365,10 @@ defmodule Fleet.Admiral.ToolchainReconciler do
         _ = write_marker(head)
         {:ok, :converged, head}
 
+      {:error, {:converger_failed, 2, _}} = err ->
+        # the freeze is logged by reconcile_pass/1: a "next pass retries" line here would contradict it
+        err
+
       {:error, reason} ->
         Logger.error(
           "ToolchainReconciler: le convergeur a REFUSÉ #{head} (#{inspect(reason)}) — le SHA " <>
@@ -310,7 +411,7 @@ defmodule Fleet.Admiral.ToolchainReconciler do
             {:ok, sha}
 
           "FAIL:" <> cause ->
-            {:error, {:converger_refused, cause}}
+            {:error, refusal(cause)}
 
           other ->
             {:error, {:converger_mute, path, other}}
@@ -320,6 +421,19 @@ defmodule Fleet.Admiral.ToolchainReconciler do
         {:error, {:converger_mute, path, reason}}
     end
   end
+
+  # The service reports a converger exit as FAIL:converger_failed:<rc>; its own refusals
+  # (no_forge, forge_unreachable, busy, converger_absent) carry no exit code. Only a
+  # parsed rc can reach the rc=2 freeze in reconcile_pass/1.
+  defp refusal("converger_failed:" <> code = cause) do
+    case Integer.parse(code) do
+      {rc, ""} -> {:converger_failed, rc, ""}
+      {rc, ":" <> detail} -> {:converger_failed, rc, detail}
+      _ -> {:converger_refused, cause}
+    end
+  end
+
+  defp refusal(cause), do: {:converger_refused, cause}
 
   defp unreachable(reason) do
     Logger.warning(
@@ -378,7 +492,8 @@ defmodule Fleet.Admiral.ToolchainReconciler do
   @spec default_converger_fun(String.t(), keyword()) ::
           {:ok, String.t()}
           | {:error,
-             {:converger_refused, binary()}
+             {:converger_failed, integer(), binary()}
+             | {:converger_refused, binary()}
              | {:converger_mute, Path.t(), term()}
              | {:privileged_unreachable, Path.t(), term()}}
   def default_converger_fun(head, opts), do: default_converger(head, opts)

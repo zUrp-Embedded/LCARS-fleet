@@ -6,6 +6,8 @@ defmodule Fleet.Workflow.DeliverableGate do
   Secret scanning recognizes configured patterns only, with the limits described in scan_secrets/2.
   """
 
+  alias Fleet.Credentials.ForgeIdentity
+
   @git_timeout_ms 15_000
 
   # Distinctive prefixes reduce false positives at a blocking gate. Unprefixed 40-hex Gitea
@@ -115,12 +117,32 @@ defmodule Fleet.Workflow.DeliverableGate do
 
   @doc """
   Requires each FIRST-PARENT commit author and committer email to be allowed; empty range is valid.
+
+  ALREADY-PUBLISHED commits are not judged. The runtime writes on the shared faces a producer
+  delivers from — a workshop scratchpad note, a publication of the face — and the producer inherits
+  those commits by aligning: it can neither remove them nor sign them, and judging them as ITS
+  identity refused a delivery for someone else's commit (measured 2026-09-16 on the bench).
+
+  What is skipped is decided by a FACT THE POD CANNOT PRODUCE: the commit is reachable from a
+  remote-tracking ref, i.e. the forge already has it. An identity-based exemption would not be that
+  fact — `user.email` is one `git -c` away for anyone holding Bash, so any pod could have signed its
+  own work with the runtime's name and delivered it unattributed.
+
+  A workspace without remote-tracking refs skips nothing, and the whole range is judged.
   """
   # A0: do not demand this producer's identity on commits imported from another merge parent.
   # First-parent ancestry is the chosen cut, not proof that other parents were previously gated.
   @spec check_identity(Path.t(), String.t(), [String.t()]) :: :ok | {:error, reason()}
   def check_identity(workspace, base_sha, allowed) do
-    case git(workspace, ["log", "--first-parent", "#{base_sha}..HEAD", "--format=%ae%n%ce"]) do
+    case git(workspace, [
+           "log",
+           "--first-parent",
+           "#{base_sha}..HEAD",
+           # ce que la forge a deja : pas le travail de cette livraison, pas juge ici
+           "--not",
+           "--remotes=origin",
+           "--format=%ae%n%ce"
+         ]) do
       {out, 0} -> identity_verdict(out, allowed)
       {out, rc} -> {:error, classify_git_error(out, rc)}
     end
@@ -152,13 +174,18 @@ defmodule Fleet.Workflow.DeliverableGate do
   @doc """
   Requires a Git-parsed Co-authored-by value starting with the expected LCARS-role name
   on each first-parent commit. The comparison is a prefix, not exact role/email authentication.
+
+  ALREADY-PUBLISHED commits are skipped, for the same reason as in `check_identity/3`: the runtime
+  writes on the shared faces a producer delivers from, and demanding this producer's trailer on
+  someone else's commit refuses a delivery for a note it did not write. Reachability from a
+  remote-tracking ref is the cut — a fact of the forge, not a string the pod can write.
   """
   # Same first-parent cut as identity so sibling producers need not carry this role's trailer.
   @spec check_coauthor_trailer(Path.t(), String.t(), String.t()) :: :ok | {:error, reason()}
   def check_coauthor_trailer(workspace, base_sha, expected_role) when is_binary(expected_role) do
     # F-03: use Git's trailer parser rather than searching the whole commit message.
     needle =
-      Fleet.Credentials.ForgeIdentity.coauthor_trailer(expected_role)
+      ForgeIdentity.coauthor_trailer(expected_role)
       |> String.replace_prefix("Co-authored-by: ", "")
       |> String.split(" <")
       |> hd()
@@ -168,6 +195,9 @@ defmodule Fleet.Workflow.DeliverableGate do
            "log",
            "--first-parent",
            "#{base_sha}..HEAD",
+           # ce que la forge a deja : pas le travail de cette livraison, pas juge ici
+           "--not",
+           "--remotes=origin",
            "--format=%H%x1f%(trailers:key=Co-authored-by,valueonly)%x00"
          ]) do
       {out, 0} ->

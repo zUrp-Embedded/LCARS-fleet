@@ -43,7 +43,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
       files == [] ->
         %{
           id: "bats.descriptions_inert",
-          status: :pass,
+          # `:skip` : aucune suite bats ici, donc RIEN n'a ete mesure — ce n'est pas un succes.
+          status: :skip,
           remediation:
             "aucun geste : aucun fichier .bats dans cet arbre. Rejouer depuis un arbre complet",
           evidence: [],
@@ -110,7 +111,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
     else
       %{
         id: "site.build_inputs",
-        status: :pass,
+        # `:skip` : l'arbre du site n'est pas dans cet artefact — le filtre `paths:` n'est pas mesure.
+        status: :skip,
         remediation:
           "aucun geste : l'arbre du site n'est pas ici. Rejouer ce check depuis un arbre complet " <>
             "(racine du depot) pour mesurer le filtre `paths:`",
@@ -500,7 +502,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
         %{
           id: "shell.sourcers_set_strict",
           remediation: "—",
-          status: :pass,
+          # `:skip` : aucune racine de sourceur ici — rien n'a ete lu, donc rien n'est atteste.
+          status: :skip,
           evidence: [],
           note:
             "NOT CHECKED here — no sourcer root present in this artifact (runtime-only context): " <>

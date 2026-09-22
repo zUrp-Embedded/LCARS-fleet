@@ -185,12 +185,14 @@ defmodule Mix.Tasks.Lcars.Contracts.CatalogueFamilyCheckTest do
     end
     """
 
+    # ⚖ Decision 3 : la moitie shell n'est plus les defauts de `bin/lcars` mais LE FAIT que la CLI
+    # lit (`etc/facts.env`). Ce qui doit s'accorder avec Fleet.Layout est le fait, pas une copie.
     defp installe(dir, shipped, prov) do
       [
         {"runtime/lib/fleet/layout.ex", @layout},
-        {"runtime/bin/lcars",
-         "D=\"${LCARS_CATALOGUES_DIR:-#{dir}}\"\nS=\"${LCARS_CATALOGUES_SHIPPED:-#{shipped}}\"\n"},
-        {"deploy/lib/provision-lib.sh", ": \"${PROV_CATALOGUES_DIR:=#{prov}}\"\n"}
+        {"runtime/etc/facts.env",
+         "LCARS_CATALOGUES_DIR=#{dir}\nLCARS_CATALOGUES_SHIPPED=#{shipped}\n"},
+        {"deploy/installer-constants.env", "PROV_ROOT=/opt/lcars\nPROV_CATALOGUES_DIR=#{prov}\n"}
       ]
     end
 
@@ -202,7 +204,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CatalogueFamilyCheckTest do
       assert %{status: :pass, evidence: []} = Catalogue.check_catalogue_paths_locked(root)
     end
 
-    test "le CLI qui a derive est nomme, avec les deux valeurs" do
+    test "le FAIT qui a derive est nomme, avec les deux valeurs" do
       root = depot(installe("/opt/lcars/cache", @shipped, @dir))
 
       assert %{status: :fail, evidence: [ev]} = Catalogue.check_catalogue_paths_locked(root)
@@ -215,19 +217,33 @@ defmodule Mix.Tasks.Lcars.Contracts.CatalogueFamilyCheckTest do
 
       assert %{status: :fail, evidence: [ev]} = Catalogue.check_catalogue_paths_locked(root)
       assert ev =~ "PROV_CATALOGUES_DIR"
-      assert ev =~ "provision-lib.sh"
+      assert ev =~ "installer-constants.env"
     end
 
-    test "⚠ UN DEFAUT SHELL ABSENT SE DISTINGUE D'UN DEFAUT QUI A DERIVE" do
+    test "⚠ L'INSTALLEUR DECLARE DANS SON FICHIER DE CONSTANTES — un defaut dans la lib n'en tient pas lieu" do
       root =
         depot([
           {"runtime/lib/fleet/layout.ex", @layout},
-          {"runtime/bin/lcars", "D=\"${LCARS_CATALOGUES_DIR:-#{@dir}}\"\n"},
+          {"runtime/etc/facts.env",
+           "LCARS_CATALOGUES_DIR=#{@dir}\nLCARS_CATALOGUES_SHIPPED=#{@shipped}\n"},
           {"deploy/lib/provision-lib.sh", ": \"${PROV_CATALOGUES_DIR:=#{@dir}}\"\n"}
         ])
 
       assert %{status: :fail, evidence: [ev]} = Catalogue.check_catalogue_paths_locked(root)
-      assert ev =~ "no shell default"
+      assert ev =~ "no declaration"
+      assert ev =~ "PROV_CATALOGUES_DIR (../deploy/installer-constants.env)"
+    end
+
+    test "⚠ UN FAIT ABSENT SE DISTINGUE D'UN FAIT QUI A DERIVE" do
+      root =
+        depot([
+          {"runtime/lib/fleet/layout.ex", @layout},
+          {"runtime/etc/facts.env", "LCARS_CATALOGUES_DIR=#{@dir}\n"},
+          {"deploy/installer-constants.env", "PROV_CATALOGUES_DIR=#{@dir}\n"}
+        ])
+
+      assert %{status: :fail, evidence: [ev]} = Catalogue.check_catalogue_paths_locked(root)
+      assert ev =~ "no declaration"
       assert ev =~ "LCARS_CATALOGUES_SHIPPED"
     end
 
@@ -237,9 +253,9 @@ defmodule Mix.Tasks.Lcars.Contracts.CatalogueFamilyCheckTest do
       root =
         depot([
           {"runtime/lib/fleet/layout.ex", sans},
-          {"runtime/bin/lcars",
-           "D=\"${LCARS_CATALOGUES_DIR:-#{@dir}}\"\nS=\"${LCARS_CATALOGUES_SHIPPED:-#{@shipped}}\"\n"},
-          {"deploy/lib/provision-lib.sh", ": \"${PROV_CATALOGUES_DIR:=#{@dir}}\"\n"}
+          {"runtime/etc/facts.env",
+           "LCARS_CATALOGUES_DIR=#{@dir}\nLCARS_CATALOGUES_SHIPPED=#{@shipped}\n"},
+          {"deploy/installer-constants.env", "PROV_CATALOGUES_DIR=#{@dir}\n"}
         ])
 
       assert %{status: :fail, evidence: [ev]} = Catalogue.check_catalogue_paths_locked(root)

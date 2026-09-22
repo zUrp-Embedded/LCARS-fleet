@@ -73,9 +73,68 @@ defmodule Fleet.Project.Onboard.Faces do
     end
   end
 
+  # ⚠ AVEC UNE BRANCHE, LE REFSPEC EST RESSERRE : une FACE ne porte que la sienne (cf. le bloc de
+  # `clone_main`). Sans elle — le cas d'un arbre de travail d'import, qui pousse trois branches
+  # depuis un seul clone — le refspec reste celui que git a pose.
   @doc false
-  @spec set_origin(String.t(), String.t()) :: :ok | {:error, term()}
-  def set_origin(dir, url) do
+  @spec set_origin(String.t(), String.t(), String.t() | nil) :: :ok | {:error, term()}
+  def set_origin(dir, url, branch \\ nil) do
+    with :ok <- put_origin(dir, url) do
+      narrow_to(dir, branch)
+    end
+  end
+
+  defp narrow_to(_dir, nil), do: :ok
+
+  defp narrow_to(dir, branch) do
+    refspec = "+refs/heads/#{branch}:refs/remotes/origin/#{branch}"
+
+    with :ok <-
+           GitOps.run(["-C", dir, "config", "remote.origin.fetch", refspec], auth: false) do
+      drop_foreign_tracking(dir, branch)
+    end
+  end
+
+  # ⚠ REPOINTER `origin` CHANGE DE MONDE, ET LES REFS DE L'ANCIEN SURVIVENT. Mesure du 2026-09-19
+  # sur le banc 2005 : la face du projet du systeme suivait `origin/passe16/deploy-assaini` — la
+  # branche de l'arbre de l'operateur, que la forge ne porte PAS — et n'avait pas `origin/main`,
+  # qu'elle porte. Le refspec resserre empeche d'en creer d'autres ; il n'efface pas les anciennes.
+  # Une face qui dit de sa forge ce qui est faux egare la premiere lecture qui s'y fie.
+  #
+  # Effacement LOCAL (`update-ref -d`), jamais un `remote prune` : aucune question n'est posee a la
+  # forge, et rien n'est supprime chez elle.
+  defp drop_foreign_tracking(dir, branch) do
+    garde = "refs/remotes/origin/#{branch}"
+
+    case GitOps.read(
+           ["-C", dir, "for-each-ref", "--format=%(refname)", "refs/remotes/origin"],
+           auth: false
+         ) do
+      {:ok, sortie} ->
+        sortie
+        |> String.split("\n", trim: true)
+        |> Enum.reject(&(&1 == garde))
+        |> Enum.reduce_while(:ok, &supprime_ref(dir, &1, &2))
+
+      # Un depot sans refs distantes n'a rien a elaguer : `for-each-ref` ne rend rien, et un refus
+      # de lecture ne doit pas faire echouer la pose de l'origin qui, elle, a reussi.
+      {:error, _} ->
+        :ok
+    end
+  end
+
+  # ⚠ `--no-deref` N'EST PAS UNE PRECAUTION, C'EST LE CONTRAT. `origin/HEAD` est un symref vers
+  # `origin/<defaut>` ; sans ce drapeau, `update-ref -d` suit le lien et efface LA CIBLE — donc la
+  # seule ref qu'on voulait garder. Mesure du 2026-09-19 : le temoin a rendu une face sans aucune
+  # ref distante la ou elle devait en garder une.
+  defp supprime_ref(dir, ref, :ok) do
+    case GitOps.run(["-C", dir, "update-ref", "--no-deref", "-d", ref], auth: false) do
+      :ok -> {:cont, :ok}
+      {:error, _} = err -> {:halt, err}
+    end
+  end
+
+  defp put_origin(dir, url) do
     case GitOps.read(["-C", dir, "config", "--get", "remote.origin.url"]) do
       {:ok, _present} -> GitOps.run(["-C", dir, "remote", "set-url", "origin", url], auth: false)
       {:error, _} -> GitOps.run(["-C", dir, "remote", "add", "origin", url], auth: false)
@@ -97,20 +156,15 @@ defmodule Fleet.Project.Onboard.Faces do
 
   # Track each branch only after a successful push return; a push error can still be ambiguous.
   # Carry the successful prefix on failure because ops publishes before workshop.
-  # Explicit root modes avoid umask-dependent shared-group access: workshop writable, ops narrower.
-  # chmod applies to the face root only, not recursively to its contents.
+  # The mode comes from `Fleet.Layout` by branch, never from a literal here; chmod applies to the
+  # face root only, not recursively to its contents.
   @doc false
   @spec ensure_writer_faces(String.t(), String.t(), map(), String.t(), keyword()) ::
           {:ok, [String.t()]} | {:error, term(), [String.t()]}
   def ensure_writer_faces(full_name, url, dirs, name, opts) do
     faces = [
-      %{dir: dirs.ops, branch: Layout.ops_branch(), template: "ops", mode: 0o2755},
-      %{
-        dir: dirs.workshop,
-        branch: Layout.workshop_branch(),
-        template: "workshop",
-        mode: 0o2775
-      }
+      %{dir: dirs.ops, branch: Layout.ops_branch(), template: "ops"},
+      %{dir: dirs.workshop, branch: Layout.workshop_branch(), template: "workshop"}
     ]
 
     Enum.reduce_while(faces, {:ok, []}, fn %{branch: branch} = face, {:ok, published} ->
@@ -170,11 +224,28 @@ defmodule Fleet.Project.Onboard.Faces do
     :ok
   end
 
+  # ⚠ `--single-branch` N'EST PAS UNE OPTIMISATION, C'EST CE QUI SEPARE LES TROIS FACES.
+  #
+  # Un projet a UN depot et trois faces, qui sont trois branches ORPHELINES de ce depot (aucun
+  # ancetre commun : `merge-base` ne rend rien, mesure du 2026-09-18 sur le banc 2004). Mais chaque
+  # face est un clone a part, et `--branch <face>` choisit seulement ce qui SORT dans le repertoire
+  # de travail : sans `--single-branch`, git configure `+refs/heads/*:refs/remotes/origin/*` et
+  # RAPATRIE LES OBJETS DE TOUTES LES BRANCHES.
+  #
+  # Mesure, meme jour, meme banc : 20 Mo pousses sur `workshop`, puis un `git fetch origin` nu dans
+  # la face CODE — elle passe de 456 KiB a 19,54 MiB, et le blob de workshop est dans sa base. Une
+  # zone de depot ou un humain verse des firmwares fait donc porter trois fois chaque fichier, dont
+  # une par la face que les pods clonent a chaque tache et qui ne l'affichera jamais.
+  #
+  # ⚠ ET CA NE COUPE RIEN : ce que la face code doit voir en plus — les branches de travail des pods
+  # — est cherche par un refspec EXPLICITE (`worktree_sync`, `refs/heads/lcars/issue-<n>-*:…`), et
+  # un refspec en ligne de commande l'emporte sur celui de la config. Sur les dix fetchs du runtime,
+  # huit nomment deja ce qu'ils veulent ; les deux `fetch origin` nus ne veulent que leur face.
   @doc false
   @spec clone_main(String.t(), String.t()) :: :ok | {:error, term()}
   def clone_main(url, proj_dir) do
     File.mkdir_p!(Path.dirname(proj_dir))
-    GitOps.run(["clone", "--branch", "main", url, proj_dir], auth: true)
+    GitOps.run(["clone", "--single-branch", "--branch", "main", url, proj_dir], auth: true)
   end
 
   @doc false
@@ -188,8 +259,26 @@ defmodule Fleet.Project.Onboard.Faces do
   def init_face(dir, url, branch) do
     File.mkdir_p!(Path.dirname(dir))
 
-    with :ok <- GitOps.run(["init", "-q", "-b", branch, dir], auth: false) do
-      GitOps.run(["-C", dir, "remote", "add", "origin", url], auth: false)
+    # ⚠ LE MODE SE POSE ICI, PARCE QUE C'EST ICI QUE LE REPERTOIRE NAIT. Les trois chemins qui
+    # batissent une face d'ecriture passent par ce verbe — creation d'un projet, adoption d'un
+    # arbre local, import d'une branche absente — et deux d'entre eux ne le posaient pas : la face
+    # naissait sous l'umask du BEAM (mesure du 2026-09-16 sur LCARS-beta : atelier en 2755 au lieu
+    # de 2775). Le laisser a l'appelant, c'est l'oublier dans l'appelant suivant.
+    #
+    # `-t <branche>` : le pendant de `--single-branch` pour une face PUBLIEE et non clonee. Sans
+    # lui, `remote add` pose le refspec large, et le premier fetch rapatrie les deux autres faces —
+    # meme defaut, autre porte.
+    with :ok <- GitOps.run(["init", "-q", "-b", branch, dir], auth: false),
+         :ok <- GitOps.run(["-C", dir, "remote", "add", "-t", branch, "origin", url], auth: false) do
+      apply_face_mode(dir, branch)
+    end
+  end
+
+  # Nil mode = no rule declared for this face (the code face, a feature branch): leave the umask.
+  defp apply_face_mode(dir, branch) do
+    case Layout.writer_face_mode(Layout.face_of(branch)) do
+      nil -> :ok
+      mode -> chmod_face(dir, mode)
     end
   end
 
@@ -199,7 +288,7 @@ defmodule Fleet.Project.Onboard.Faces do
   @spec ensure_face(String.t(), String.t(), map(), String.t(), keyword()) ::
           {:ok, :cloned | :published} | {:error, term()}
   def ensure_face(full_name, url, face, name, opts) do
-    %{dir: dir, branch: branch, template: template, mode: mode} = face
+    %{dir: dir, branch: branch, template: template} = face
 
     case Repo.repo_mod(opts).branch_exists?(full_name, branch, Repo.fc_opts(opts)) do
       {:error, reason} ->
@@ -208,14 +297,15 @@ defmodule Fleet.Project.Onboard.Faces do
       {:ok, true} ->
         File.mkdir_p!(Path.dirname(dir))
 
-        with :ok <- GitOps.run(["clone", "--branch", branch, url, dir], auth: true),
-             :ok <- chmod_face(dir, mode) do
+        # `--single-branch` : cf. le bloc de `clone_main` — une face ne porte QUE sa branche.
+        with :ok <-
+               GitOps.run(["clone", "--single-branch", "--branch", branch, url, dir], auth: true),
+             :ok <- apply_face_mode(dir, branch) do
           {:ok, :cloned}
         end
 
       {:ok, false} ->
         with :ok <- init_face(dir, url, branch),
-             :ok <- chmod_face(dir, mode),
              :ok <- Scaffold.face(dir, template, name, opts),
              :ok <- commit(dir, "chore(import): init #{branch}"),
              :ok <- publish_face(dir, branch) do
@@ -224,9 +314,22 @@ defmodule Fleet.Project.Onboard.Faces do
     end
   end
 
+  # Measure before writing: a chmod on a directory carrying an ACL clamps that ACL's mask down to
+  # the group bits, and the deployment grants named accounts access to the face roots that way.
+  # Re-onboarding a project must not silently revoke access the runtime never granted.
   @doc false
   @spec chmod_face(String.t(), non_neg_integer()) :: :ok | {:error, term()}
   def chmod_face(dir, mode) do
+    case File.stat(dir) do
+      {:ok, %File.Stat{mode: current}} ->
+        if Bitwise.band(current, 0o7777) == mode, do: :ok, else: write_face_mode(dir, mode)
+
+      {:error, reason} ->
+        {:error, {:face_mode_unreadable, dir, reason}}
+    end
+  end
+
+  defp write_face_mode(dir, mode) do
     case File.chmod(dir, mode) do
       :ok -> :ok
       {:error, reason} -> {:error, {:face_mode_failed, dir, mode, reason}}

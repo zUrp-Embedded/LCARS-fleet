@@ -6,6 +6,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Scratchpad do
 
   require Logger
 
+  alias Fleet.Credentials.ForgeIdentity
   alias Fleet.MCP.PodTools.Delegation.{Gate, Workshop}
   alias Fleet.Project.GitOps
 
@@ -26,22 +27,22 @@ defmodule Fleet.MCP.PodTools.Delegation.Scratchpad do
   @spec scratch(map(), String.t()) :: {:ok, map()} | {:error, term()}
   def scratch(state, note) when is_binary(note) do
     # mcp.tools_gated requires the gate in this public entry point, before payload validation.
-    with {:ok, %{repo: repo}} <- Gate.require_architect(state) do
+    with {:ok, %{repo: repo, role: role}} <- Gate.require_architect(state) do
       case String.trim(note) do
         "" -> {:error, :note_empty}
-        trimmed -> scratch_write(repo, trimmed)
+        trimmed -> scratch_write(repo, role, trimmed)
       end
     end
   end
 
-  defp scratch_write(repo, note) do
+  defp scratch_write(repo, role, note) do
     dir = Workshop.lot_workspace(repo)
     path = Path.join(dir, @scratch_file)
 
     if File.dir?(dir) do
-      case File.write(path, scratch_block(note), [:append]) do
+      case File.write(path, scratch_block(role, note), [:append]) do
         :ok ->
-          _ = scratch_publish(dir, repo)
+          _ = scratch_publish(dir, repo, role)
           {:ok, scratch_receipt(path)}
 
         {:error, reason} ->
@@ -54,20 +55,26 @@ defmodule Fleet.MCP.PodTools.Delegation.Scratchpad do
 
   # A blank line before --- prevents a Setext heading. Use #### so manual triage can
   # group notes under ### headings without rewriting their blocks.
-  defp scratch_block(note) do
+  #
+  # LE ROLE EST DANS LE TITRE DU BLOC parce que c'est le seul endroit qui se lit SANS git — et une
+  # note relue trois semaines plus tard sans auteur ne vaut rien. Le commit le porte aussi (sujet et
+  # trailer) ; ce qui ne peut pas le porter, c'est sa SIGNATURE : elle reste celle du systeme, sinon
+  # la livraison suivante faite depuis cette face serait refusee dessus.
+  defp scratch_block(role, note) do
     {{y, mo, d}, {h, mi, _s}} = :calendar.local_time()
 
     stamp =
       :io_lib.format("~4..0B-~2..0B-~2..0B - ~2..0B:~2..0B", [y, mo, d, h, mi])
       |> IO.iodata_to_binary()
 
-    "\n#### #{stamp}\n\n#{String.trim(note)}\n\n---\n"
+    "\n#### #{stamp} — #{role}\n\n#{String.trim(note)}\n\n---\n"
   end
 
   # Keep the local note on publication failure. Add/commit failures are logged here;
   # a returned push failure bypasses this else and its result is discarded by the caller.
-  # Commit also includes any pre-staged changes; HEAD is pushed without isolation or rollback.
-  defp scratch_publish(dir, repo) do
+  # The commit carries the scratchpad ALONE (pathspec); HEAD is pushed without isolation or
+  # rollback, so commits already made on the face travel with it.
+  defp scratch_publish(dir, repo, role) do
     branch = Fleet.Layout.workshop_branch()
 
     with :ok <- GitOps.run(["-C", dir, "add", "--", @scratch_file], auth: false),
@@ -78,13 +85,19 @@ defmodule Fleet.MCP.PodTools.Delegation.Scratchpad do
                dir,
                # Demandee a `ForgeIdentity`, jamais recopiee : c'est lui l'autorite du nom systeme.
                "-c",
-               "user.name=#{Fleet.Credentials.ForgeIdentity.system_identity().name}",
+               "user.name=#{ForgeIdentity.system_identity().name}",
                "-c",
-               "user.email=#{Fleet.Credentials.ForgeIdentity.system_email()}",
+               "user.email=#{ForgeIdentity.system_email()}",
                "commit",
                "-q",
                "-m",
-               "chore(scratch): note d'atelier"
+               "chore(scratch): note d'atelier (#{role})\n\n" <>
+                 ForgeIdentity.coauthor_trailer(role),
+               # Le chemin est la PORTEE du commit : sans lui, la note emportait tout ce qui
+               # etait indexe a cote, et un document partait sur la forge sous ce message-la.
+               # Ce qu'un delegateur veut publier passe par `workshop_publish`, qui le nomme.
+               "--",
+               @scratch_file
              ],
              auth: false
            ) do

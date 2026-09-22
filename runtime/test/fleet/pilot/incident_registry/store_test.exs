@@ -3,7 +3,11 @@ defmodule Fleet.Pilot.IncidentRegistry.StoreTest do
   Checks WAL round-trips, corruption handling, merge fields and no-op forge writes.
   These tests do not simulate power loss or concurrent cross-machine writes.
   """
-  use ExUnit.Case, async: true
+  # ⚠ SERIAL : ce module pose une clef de l'env de l'APPLICATION, qui est global. En async, tout
+  # temoin qui la lit pendant la fenetre recoit la valeur du voisin et rougit ailleurs, sans
+  # rapport avec ce qu'il mesure (`test_helper.exs` le dit deja : « tests changing that global
+  # configuration must serialize and restore it »). Restaurer ne suffit pas : c'est la FENETRE.
+  use ExUnit.Case, async: false
 
   alias Fleet.Pilot.IncidentRegistry.Store
 
@@ -94,6 +98,44 @@ defmodule Fleet.Pilot.IncidentRegistry.StoreTest do
       path = Path.join(tmp, "forge.json")
       :ok = Store.write_wal(path, reg)
       {:ok, reg: reg, forge_content: File.read!(path)}
+    end
+
+    test "the registry branch is `incidents` by default — the recipe lays it, the runtime only names it",
+         %{reg: reg, forge_content: content} do
+      pid = self()
+      prev = Application.get_env(:lcars_fleet, :pilot_incident_registry_branch)
+      Application.delete_env(:lcars_fleet, :pilot_incident_registry_branch)
+
+      on_exit(fn ->
+        if prev, do: Application.put_env(:lcars_fleet, :pilot_incident_registry_branch, prev)
+      end)
+
+      assert {:ok, ^reg} =
+               Store.sync_forge(reg,
+                 get_file_fun: fn _r, _p, o ->
+                   send(pid, {:read_at, o[:ref]})
+                   {:ok, %{content: content, sha: "s"}}
+                 end,
+                 put_file_fun: fn _r, _p, _c, _o -> {:ok, "c"} end
+               )
+
+      assert_receive {:read_at, "incidents"}
+    end
+
+    test "a PUT refused with 404 is a MISSING BRANCH, named — not an unreachable forge", %{
+      reg: reg
+    } do
+      assert {:error, {:registry_branch_missing, repo, branch}} =
+               Store.sync_forge(reg,
+                 get_file_fun: fn _r, _p, _o -> {:error, :not_found} end,
+                 put_file_fun: fn _r, _p, _c, _o ->
+                   {:error, {:http, 404, "branch does not exist"}}
+                 end,
+                 branch: "incidents"
+               )
+
+      assert repo == Fleet.Pilot.IncidentRegistry.Escalation.ops_repo()
+      assert branch == "incidents"
     end
 
     test "the merge equals what the forge holds → {:ok, merged} and NO put", %{

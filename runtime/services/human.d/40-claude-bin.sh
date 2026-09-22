@@ -3,10 +3,9 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
 # STATUS: PROTO-V2 — binaire claude PER-HUMAIN (~/.local/bin) via l'installer officiel
-# APPLY-ON: any
-# CHECK-ON: any
-# NEEDS: human
-# AFTER: 20-groups
+# JOUE PAR : le convergeur d'humains, pour chaque humain de la fleet, dans l'ordre des noms.
+# Ni terrain ni dependance ne se declarent ici : ces en-tetes ne sont lus que dans
+# `deploy/modules.d`, et les recopier ici promettait une mecanique que personne ne joue.
 # ⚠ TOUTE MACHINERIE AJOUTÉE ICI DOUBLE LA SIENNE ET NE PEUT QUE DIVERGER D'ELLE. L'installeur
 # vérifie son sha256 contre un manifeste signé, nettoie derrière lui sur CHAQUE branche d'échec,
 # installe pour l'utilisateur courant et nomme ses morts (dont l'OOM killer). Un staging, un
@@ -20,9 +19,8 @@
 # `claude_bin.bats` tient cette occurrence-ci pour la seule.
 
 set -euo pipefail
-# Le protocole des modules per-humain, cote PRODUIT (Q3, 2026-09-04) : l'hote — le convergeur, ou
-# un temoin — nomme le fichier. Ce module sourcait la lib de l'INSTALLEUR, que son hote reel ne
-# posait pas : il mourait ici, a chaque humain, sur les deux rails.
+# L'hote nomme le protocole per-humain (LCARS_HUMAN_PROTOCOL) : le convergeur, ou un temoin. Le
+# contrat de ce dialecte est dans le fichier source, il ne se recopie pas ici.
 # shellcheck source=../lib/human-protocol.sh
 . "${LCARS_HUMAN_PROTOCOL:?LCARS_HUMAN_PROTOCOL non posé — lance via human-converger, pas le module nu}"
 
@@ -71,7 +69,16 @@ apply() {
   # tuer quoi que ce soit. Sans tty, l'installeur reste non interactif et rend un CODE.
   if ! run_quiet bash "$tmp/install.sh" </dev/null; then
     rm -rf "$tmp"
-    p_fail "installeur officiel en échec"
+    # ⚠ SA CAUSE LA PLUS FRÉQUENTE NE SE VOIT PAS DANS SA PLAINTE. L'installeur prend l'artefact
+    # COMPRESSÉ quand `zstd` est là, et le binaire NU sinon — 230 Mo. Sur un lien ordinaire le
+    # téléchargement n'aboutit pas, et il le dit en « somme de contrôle » sur un fichier qui
+    # n'existe même pas (mesuré le 2026-09-17 sur LCARS-beta : aucun humain n'avait `claude`).
+    # `10-packages` pose `zstd` ; une machine qui ne l'a pas mérite de l'entendre ici.
+    if ! command -v zstd >/dev/null 2>&1; then
+      p_fail "installeur officiel en échec, et « zstd » manque a cette machine — sans lui il telecharge le binaire NU (230 Mo) au lieu de l'artefact compresse, et sa plainte parle d'une somme de controle. Poser zstd (10-packages le declare), puis rejouer"
+    else
+      p_fail "installeur officiel en échec"
+    fi
     verdict_apply
   fi
   rm -rf "$tmp"

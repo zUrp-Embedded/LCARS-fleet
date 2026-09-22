@@ -106,13 +106,18 @@ EOF
   sed 's/#.*//' "$SUT" | grep -qE 'curl -sS -m 30 -K -'
 }
 
-@test "VERROU: une seconde convergence pendant la premiere sort 0 sans rien faire" {
+@test "VERROU: une seconde convergence pendant la premiere sort 4 sans rien poser — tenu n'est pas applique" {
+  # Un 0 ferait repondre `OK:<sha>` a l'executeur, et le reconciliateur noterait un SHA que la
+  # convergence en vol peut encore ne pas appliquer.
+  stub_forge "$(printf 'kind: ecosystem_enable\necosystem: python\n' | base64 -w0)"
   exec 8>"$LCARS_TOOLCHAIN_LOCK"
   flock -n 8
   run "$SUT" deadbeef
-  [[ "$status" -eq 0 ]]
-  [[ "$output" == *"tourne deja"* ]]
   exec 8>&-
+  [[ "$status" -eq 4 ]]
+  [[ "$output" == *"tourne déjà"* ]]
+  [[ ! -e "$LCARS_STORE_ROOT/state/eco.d/python.applied" ]]
+  [[ ! -e "$LCARS_STORE_ROOT/state/egress.d/.applied" ]]
 }
 
 @test "IDEMPOTENCE: marqueur au MEME SHA — les verbes MAGASIN sont sautes, APT REJOUE" {
@@ -340,8 +345,9 @@ exit 0
 EOF
   chmod +x "$BATS_TEST_TMPDIR/bin/curl"
   run "$SUT" deadbeef
-  [[ "$status" -eq 1 ]]
-  [[ "$output" == *"tete de"* ]]
+  # 4 et pas 1 : une forge muette est un echec passager, pas un appel mal forme.
+  [[ "$status" -eq 4 ]]
+  [[ "$output" == *"tête de"* ]]
   [[ "$output" == *"introuvable"* ]]
 }
 
@@ -360,4 +366,222 @@ EOF
   # Et l'autorite dit bien ce nom-la : sans cette ligne, le temoin epinglerait un litteral que le
   # runtime aurait pu changer sans lui.
   grep -q 'def branch, do: "tool_request"' "$BATS_TEST_DIRNAME/../../../runtime/lib/fleet/toolchain.ex"
+}
+
+# Une forge en erreur, telle que `curl` la rend : avec `-f`, rien sur stdout et le code 22 ; sans
+# `-f`, le corps d'erreur JSON et le code 0. `jq` suit sa semantique reelle sur ce corps : `.content`
+# absent rend `null`, et `-e` en fait un code 1.
+stub_forge_en_erreur() { # stub_forge_en_erreur <motif d'url en erreur> <yaml-base64 des autres>
+  cat > "$BATS_TEST_TMPDIR/bin/curl" <<EOF
+#!/usr/bin/env bash
+fail=0
+for a in "\$@"; do case "\$a" in --fail) fail=1;; --*|http*) ;; -*f*) fail=1;; esac; done
+for a in "\$@"; do
+  case "\$a" in
+    $1)
+      if [[ "\$fail" -eq 1 ]]; then echo "curl: (22) The requested URL returned error: 500" >&2; exit 22; fi
+      echo '{"message":"Internal Server Error"}'; exit 0;;
+  esac
+done
+for a in "\$@"; do case "\$a" in *branches/*) echo '{"commit":{"id":"$STUB_HEAD"}}'; exit 0;; esac; done
+for a in "\$@"; do case "\$a" in *contents/ops/toolchains.d/python.yaml*) echo '{"content":"$2"}'; exit 0;; esac; done
+for a in "\$@"; do case "\$a" in *contents/ops/toolchains.d*) echo '[{"name":"python.yaml","path":"ops/toolchains.d/python.yaml"}]'; exit 0;; esac; done
+exit 0
+EOF
+  chmod +x "$BATS_TEST_TMPDIR/bin/curl"
+  cat > "$BATS_TEST_TMPDIR/bin/jq" <<'EOF'
+#!/usr/bin/env bash
+in=$(cat)
+e=0
+for a in "$@"; do case "$a" in -e|-er|-re) e=1;; esac; done
+case "$*" in
+  *commit.id*) if [[ "$in" == *'"commit"'* ]]; then sed 's/.*"id":"\([^"]*\)".*/\1/' <<<"$in"; fi ;;
+  *endswith*)
+    if [[ "$in" == '['* ]]; then
+      echo "ops/toolchains.d/python.yaml"
+    elif [[ "$*" == *'error('* ]]; then
+      echo "jq: error (at <stdin>:1): pas une liste" >&2
+      exit 5
+    fi ;;
+  *.content*)
+    if [[ "$in" == *'"content"'* ]]; then
+      sed 's/.*"content":"\([^"]*\)".*/\1/' <<<"$in"
+    else
+      echo null
+      if [[ "$e" -eq 1 ]]; then exit 1; fi
+    fi ;;
+esac
+exit 0
+EOF
+  chmod +x "$BATS_TEST_TMPDIR/bin/jq"
+}
+
+@test "FORGE: une erreur sur le CONTENU d'un manifeste sort en 4, jamais en 2 — une panne ne gele pas la tete" {
+  # En 2, le reconciliateur gele la tete jusqu'au merge suivant : une forge qui hoquette une fois
+  # bloquerait un manifeste juste. Sans `-f` ni `-e`, le `null` du corps d'erreur passait par
+  # `base64 -d` et devenait « kind inattendu ».
+  stub_forge_en_erreur '*contents/ops/toolchains.d/python.yaml*' \
+    "$(printf 'kind: ecosystem_enable\necosystem: python\n' | base64 -w0)"
+  run "$SUT" deadbeef
+  [[ "$status" -eq 4 ]]
+  [[ "$output" == *"illisible"* ]]
+  printf '%s\n' "$output" | refute_out 'kind inattendu'
+  [[ ! -e "$LCARS_STORE_ROOT/state/eco.d/python.applied" ]]
+  [[ ! -e "$LCARS_STORE_ROOT/state/egress.d/.applied" ]]
+}
+
+@test "FORGE: un contenu qui n'est pas du base64 sort en 4 — illisible n'est pas refuse" {
+  stub_forge '@@@ pas du base64 @@@'
+  run "$SUT" deadbeef
+  [[ "$status" -eq 4 ]]
+  [[ "$output" == *"illisible"* ]]
+  [[ ! -e "$LCARS_STORE_ROOT/state/eco.d/python.applied" ]]
+}
+
+@test "FORGE: une erreur sur la LISTE des manifestes sort en 4 — illisible n'est pas vide" {
+  # Lue comme vide, la liste faisait sortir 0 et estampiller `.applied` : le SHA etait note sans
+  # qu'un seul manifeste ait ete lu.
+  stub_forge_en_erreur '*contents/ops/toolchains.d\?ref=*' \
+    "$(printf 'kind: ecosystem_enable\necosystem: python\n' | base64 -w0)"
+  run "$SUT" deadbeef
+  [[ "$status" -eq 4 ]]
+  [[ "$output" == *"liste des manifestes illisible"* ]]
+  [[ ! -e "$LCARS_STORE_ROOT/state/egress.d/.applied" ]]
+}
+
+@test "APPLICATION: un apt-get en echec (100) fait echouer la passe en 3, sans aucun marqueur" {
+  # Le sous-shell d'application etait en condition d'un `if` : bash y ignore `set -e`, la passe
+  # continuait apres l'echec et posait les marqueurs. L'executeur repondait `OK:<sha>`.
+  stub_forge "$(printf 'kind: ecosystem_enable\necosystem: python\napt:\n  packages:\n    - python3-yaml\negress_hosts:\n  - pypi.org\n' | base64 -w0)"
+  cat > "$BATS_TEST_TMPDIR/bin/apt-get" <<'EOS'
+#!/usr/bin/env bash
+echo "E: Unable to locate package python3-yaml" >&2
+exit 100
+EOS
+  chmod +x "$BATS_TEST_TMPDIR/bin/apt-get"
+  run "$SUT" deadbeef
+  [[ "$status" -eq 3 ]]
+  [[ "$output" == *"A ECHOUE"* ]]
+  printf '%s\n' "$output" | refute_out 'applique a deadbeef'
+  # La suite de la passe ne s'est pas jouee : l'egress, qui vient apres apt, n'est pas pose.
+  [[ ! -e "$LCARS_STORE_ROOT/state/egress.d/engineer.hosts" ]]
+  [[ ! -e "$LCARS_STORE_ROOT/state/eco.d/python.applied" ]]
+  [[ ! -e "$LCARS_STORE_ROOT/state/egress.d/.applied" ]]
+}
+
+@test "SYSROOT: un keyring DECLARE mais absent de l'hote sort en 1 — un fichier a poser n'est pas un document faux" {
+  # En 2, la tete resterait gelee apres que l'operateur a pose le fichier : seul un merge sans objet
+  # la degelerait.
+  stub_forge "$(printf 'kind: ecosystem_enable\necosystem: cross\nsysroot:\n  arch: arm64\n  keyring: %s\n  sources:\n    - "deb http://deb.debian.org/debian bookworm main"\n  packages:\n    - libssl-dev\n' "$BATS_TEST_TMPDIR/absent.gpg" | base64 -w0)"
+  run "$SUT" deadbeef
+  [[ "$status" -eq 1 ]]
+  [[ "$output" == *"keyring de la cible absent ou illisible sur l'hôte"* ]]
+  [[ ! -e "$LCARS_STORE_ROOT/state/egress.d/.applied" ]]
+}
+
+@test "SYSROOT: un keyring NON DECLARE reste un manifeste refuse (2)" {
+  stub_forge "$(printf 'kind: ecosystem_enable\necosystem: cross\nsysroot:\n  arch: arm64\n  sources:\n    - "deb http://deb.debian.org/debian bookworm main"\n  packages:\n    - libssl-dev\n' | base64 -w0)"
+  run "$SUT" deadbeef
+  [[ "$status" -eq 2 ]]
+  [[ "$output" == *"non declare"* ]]
+}
+
+# ─── LA FORGE EN HTTP, TELLE QUE `curl` LA REND, ET LE VRAI `jq` ─────────────────────────────────
+#
+# La doublure suit la semantique de curl sur les options que le convergeur passe : `-f` supprime le
+# corps d'une reponse >= 400 et rend 22 en disant le code sur stderr ; sans `-f`, le corps sort et
+# le code est 0 ; `-w` ecrit son format (`%{stderr}` bascule sur stderr, `%{http_code}` rend le code)
+# dans les deux cas ; `-K -` consomme stdin. Les routes sont une table « motif<TAB>code<TAB>corps ».
+# `jq` est le VRAI : un corps HTML ou un message d'erreur JSON y rencontre sa semantique reelle, et
+# aucun temoin ne decide sur le texte d'un filtre.
+stub_forge_http() { # stub_forge_http <fichier de routes>
+  rm -f "$BATS_TEST_TMPDIR/bin/jq"
+  command -v jq >/dev/null || skip "jq absent de la machine : ces temoins exigent le vrai"
+  cat > "$BATS_TEST_TMPDIR/bin/curl" <<EOF
+#!/usr/bin/env bash
+fail=0 fmt="" url=""
+while [[ \$# -gt 0 ]]; do
+  case "\$1" in
+    -f|--fail) fail=1 ;;
+    -w) fmt="\$2"; shift ;;
+    -K) [[ "\$2" == - ]] && cat >/dev/null; shift ;;
+    -m) shift ;;
+    http*) url="\$1" ;;
+  esac
+  shift
+done
+code=404 body='<!DOCTYPE html><html><body>404 Not Found</body></html>'
+while IFS=\$'\t' read -r motif c b; do
+  if [[ "\$url" == \$motif ]]; then code="\$c"; body="\$b"; break; fi
+done < '$1'
+ecrire_format() {
+  [[ -n "\$fmt" ]] || return 0
+  local out="\${fmt//%\{http_code\}/\$code}"
+  if [[ "\$out" == *'%{stderr}'* ]]; then printf '%b' "\${out//%\{stderr\}/}" >&2; else printf '%b' "\$out"; fi
+}
+if [[ "\$code" -ge 400 && "\$fail" -eq 1 ]]; then
+  echo "curl: (22) The requested URL returned error: \$code" >&2
+  ecrire_format
+  exit 22
+fi
+printf '%s\n' "\$body"
+ecrire_format
+exit 0
+EOF
+  chmod +x "$BATS_TEST_TMPDIR/bin/curl"
+}
+
+routes() { # routes <motif|code|corps>… -> le chemin du fichier de routes
+  local f="$BATS_TEST_TMPDIR/routes" l
+  : > "$f"
+  for l in "$@"; do printf '%s\n' "$l" | tr '|' '\t' >> "$f"; done
+  printf '%s' "$f"
+}
+
+TETE='*/branches/tool_request|200|{"commit":{"id":"deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}}'
+
+@test "LISTE: ops/toolchains.d absent au SHA (404 HTML) — liste vide, sortie 0, SHA note" {
+  # Le dernier manifeste et son `.gitkeep` retires : il ne reste rien a appliquer, et une sortie 4
+  # a chaque tick ne noterait jamais ce SHA. Sans `-f`, le corps HTML part dans `jq` et sort en 4.
+  stub_forge_http "$(routes "$TETE" '*/contents/ops/toolchains.d\?ref=*|404|<!DOCTYPE html><html><body>404 Not Found</body></html>')"
+  run "$SUT" deadbeef
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"aucun dossier ops/toolchains.d sur lcars/_ops au sha deadbeef — aucun manifeste à appliquer"* ]]
+  [[ "$(cat "$LCARS_STORE_ROOT/state/egress.d/.applied")" == "deadbeef" ]]
+  printf '%s\n' "$output" | refute_out 'parse error|illisible'
+}
+
+@test "JETON: un 401 sur la tete sort en 1 et nomme FORGE_TOKEN — un refus n'est pas une panne passagere" {
+  # Sans `-f`, le message d'erreur JSON part dans `jq`, la tete est vide, et la sortie est 4.
+  export FORGE_TOKEN=jeton-refuse
+  stub_forge_http "$(routes '*/branches/tool_request|401|{"message":"user does not exist [uid: 0, name: ]"}')"
+  run "$SUT" deadbeef
+  [[ "$status" -eq 1 ]]
+  [[ "$output" == *"la forge refuse le jeton du convergeur (HTTP 401) en lisant la tête de « tool_request » sur lcars/_ops — rien n'est appliqué. FORGE_TOKEN est invalide ou ne donne pas la lecture de ce dépôt"* ]]
+  printf '%s\n' "$output" | refute_out 'jeton-refuse'
+  [[ ! -e "$LCARS_STORE_ROOT/state/egress.d/.applied" ]]
+}
+
+@test "JETON: un 403 anonyme sur la liste sort en 1 et dit que FORGE_TOKEN manque" {
+  stub_forge_http "$(routes "$TETE" '*/contents/ops/toolchains.d\?ref=*|403|{"message":"forbidden"}')"
+  run "$SUT" deadbeef
+  [[ "$status" -eq 1 ]]
+  [[ "$output" == *"la forge refuse la lecture anonyme (HTTP 403) de la liste des manifestes sur lcars/_ops"*"poser FORGE_TOKEN"* ]]
+  [[ ! -e "$LCARS_STORE_ROOT/state/egress.d/.applied" ]]
+}
+
+@test "LISTE: une autre erreur de lecture (500) garde 4 — ni vide ni refus" {
+  stub_forge_http "$(routes "$TETE" '*/contents/ops/toolchains.d\?ref=*|500|<html>500</html>')"
+  run "$SUT" deadbeef
+  [[ "$status" -eq 4 ]]
+  [[ "$output" == *"liste des manifestes illisible"* ]]
+  [[ ! -e "$LCARS_STORE_ROOT/state/egress.d/.applied" ]]
+}
+
+@test "LISTE: un corps 200 qui n'est pas une liste garde 4" {
+  stub_forge_http "$(routes "$TETE" '*/contents/ops/toolchains.d\?ref=*|200|{"message":"pas une liste"}')"
+  run "$SUT" deadbeef
+  [[ "$status" -eq 4 ]]
+  [[ "$output" == *"liste des manifestes illisible"* ]]
+  [[ ! -e "$LCARS_STORE_ROOT/state/egress.d/.applied" ]]
 }

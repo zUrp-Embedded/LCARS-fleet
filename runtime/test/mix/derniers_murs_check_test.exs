@@ -231,11 +231,17 @@ defmodule Mix.Tasks.Lcars.Contracts.DerniersMursCheckTest do
   end
 
   describe "site.build_inputs — le hors-perimetre se DIT, il ne se tait pas" do
-    test "⚠ ARBRE DU SITE ABSENT → `pass` QUI L'ANNONCE, et c'est la seule forme acceptee" do
+    test "⚠ ARBRE DU SITE ABSENT → `:skip` QUI L'ANNONCE, et c'est la seule forme acceptee" do
       # Runtime-only images do not carry the site; the skip must be reported.
+      #
+      # ⚖ user 2026-09-20 : ce cas rendait `:pass`. La note disait « HORS PERIMETRE » pendant que le
+      # statut disait « verifie » — deux mots contradictoires sur la meme ligne, et c'est le statut
+      # qu'un lecteur pressé retient. `:skip` est desormais le troisieme mot du vocabulaire ; il ne
+      # fait pas echouer la porte (une image runtime-only serait rouge par construction) mais il se
+      # compte a part dans le resume.
       root = arbre([{"runtime/lib/a.ex", "defmodule A do\nend\n"}])
 
-      assert %{status: :pass, note: note} =
+      assert %{status: :skip, note: note} =
                Artifact.check_site_build_inputs(Path.join(root, "runtime"))
 
       assert note =~ "HORS PERIMETRE"

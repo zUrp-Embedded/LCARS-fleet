@@ -2,7 +2,7 @@
 # SOURCE: runtime/test/services/forge.d/deck-oidc.bats
 # AUTHOR: DrDree
 # STARDATE: (posee par /push-github)
-# STATUS: bats tests for modules.d/66-deck-oidc — la LISTE DES ENTREES doit converger
+# STATUS: bats tests for forge.d/deck-oidc.sh — la LISTE DES ENTREES doit converger
 #
 # CE QUE CES TEMOINS TIENNENT. La porte du deck refuse une entree non declaree et imprime le geste
 # qui repare : « ajouter celle-ci a LCARS_DECK_ORIGINS et rejouer le provisioning ». Mesure du

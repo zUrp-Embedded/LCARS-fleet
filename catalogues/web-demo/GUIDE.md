@@ -409,15 +409,16 @@ le catalogue ne porte pas, et une entrée **plus** un prompt écrit à la main �
 et c'est la seule chose destructrice que cet outil pourrait faire.
 
 **Les comptes forge de vos rôles se dérivent, mais il faut le demander.** Vos rôles ont besoin d'un
-compte et d'un jeton sur la forge, sinon rien n'est commité à leur nom. La liste ne se devine pas
-au démarrage — elle se lit depuis votre catalogue, une fois, au provisionnement :
+compte et d'un jeton sur la forge, sinon rien n'est commité à leur nom. Les comptes se lisent
+depuis votre catalogue, pour la recette forge :
 
 ```bash
 deploy/lib/enroll-catalogue.sh --catalogue /chemin/vers/mon-catalogue --tofu-dir <recette-forge>
 ```
 
-Le script écrit les entrées de la recette forge (`roles.auto.tfvars.json`) et vous rend la ligne
-`PROV_ROLES` à poser avant la frappe des jetons. Vous pouvez aussi lire la liste seule :
+Le script écrit les entrées de la recette forge (`roles.auto.tfvars.json`). Les jetons, eux, n'ont
+pas de liste à poser : le minteur unit les rôles de la release et ceux de chaque catalogue installé.
+Vous pouvez aussi lire la liste seule :
 
 ```bash
 mix lcars.catalogue.roles /chemin/vers/mon-catalogue

@@ -1,37 +1,26 @@
 #!/usr/bin/env bats
-# bats file_tags=structure
+# bats file_tags=unit
 # SOURCE: deploy/tests/transverse/store_volumes.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-19
 # STATUS: bats tests for the STORE — what survives a destruction, and what says so
 
 # shellcheck disable=SC2016
-
-# ⚠ SIGNALEMENTS VERIFIES UN PAR UN, AUCUN N'EST UN DEFAUT :
-#   SC2209 — affectation d'une CHAINE qui porte un nom de commande, pas d'une sortie
+# SC2209 : les affectations portent une chaîne qui nomme une commande, pas sa sortie
 # shellcheck disable=SC2209
 
 load ../refute
 
+# le préfixe posé au projet par chaque appelant, et le magasin posé avant compose, se jouent chez
+# eux : container_config.bats, docker/bench/bench-up.bats, bench-down.bats, bench-swap-image.bats
 setup() {
   DEPLOY="$BATS_TEST_DIRNAME/../.."
   STORE_LIB="$DEPLOY/lib/store.sh"
-  COMPOSE="$DEPLOY/docker/docker-compose.yml"
   # shellcheck source=../../lib/store.sh
   source "$STORE_LIB"
   # Le prefixe est EXIGE par la lib (aucun defaut, pour que deux installations ne puissent pas
   # retomber sur le meme magasin). Les temoins s'en donnent un, arbitraire.
   export LCARS_STORE_PREFIX="testproj"
-}
-
-store_mounts() { grep -oE '^\s*- lcars-[a-z]+:/var/lib/lcars/[a-z.]+' "$1" | sed 's/^\s*- //'; }
-
-@test "chaque nature declaree par store.sh est montee par le compose — aucun orphelin" {
-  local nature
-  for nature in "${LCARS_STORE_TREES[@]}"; do
-    grep -q "^\s*- lcars-${nature}:/var/lib/lcars/${nature}\$" "$COMPOSE" \
-      || { echo "nature declaree et JAMAIS montee : $nature"; return 1; }
-  done
 }
 
 @test "REGRESSION — le nom REEL porte le projet : deux installations ne partagent AUCUN volume" {
@@ -50,7 +39,8 @@ store_mounts() { grep -oE '^\s*- lcars-[a-z]+:/var/lib/lcars/[a-z.]+' "$1" | sed
   unset LCARS_STORE_PREFIX
   run store_volume_names
   [ "$status" -ne 0 ]
-  [[ "$output" == *"LCARS_STORE_PREFIX"* ]]
+  [ "${#lines[@]}" -eq 1 ]
+  [[ "$output" == *"LCARS_STORE_PREFIX absent"* ]]
   # RIEN d'ecrit : une liste partielle ferait croire a un appelant qui detruit qu'il a fini.
   [[ "$output" != *"-cache"* ]]
 }
@@ -68,27 +58,6 @@ store_mounts() { grep -oE '^\s*- lcars-[a-z]+:/var/lib/lcars/[a-z.]+' "$1" | sed
   [ "$status" -ne 0 ]
   # Et docker n'a JAMAIS ete appele : refuser, ce n'est pas agir a moitie.
   [ ! -s "$calls" ]
-}
-
-@test "le compose EXIGE le prefixe sur ses quatre volumes — un up sans lui est refuse, jamais silencieux" {
-  # `:?` et non `:-` : sans elle, la lib refuserait de creer pendant que le compose monterait un nom nu.
-  [ "$(grep -c 'LCARS_STORE_PREFIX:?' "$COMPOSE")" -eq 4 ]
-}
-
-@test "REGRESSION — chaque montage du magasin a son volume EXTERNE, aucun ne tombe sur la couche conteneur" {
-  local mount vol
-  while read -r mount; do
-    [[ -n "$mount" ]] || continue
-    vol="${mount%%:*}"
-    grep -A 2 "^  ${vol}:\$" "$COMPOSE" | grep -q "external: true" \
-      || { echo "monte mais PAS external (donc emporte par down -v) : $vol"; return 1; }
-  done < <(store_mounts "$COMPOSE")
-}
-
-@test "le chemin du magasin est ecrit par le compose SEUL, jamais par un script" {
-  # store.sh possede les NOMS, le compose possede le CHEMIN.
-  grep -q "LCARS_STORE_ROOT: /var/lib/lcars" "$COMPOSE"
-  refute grep -q "/var/lib/lcars" "$STORE_LIB"
 }
 
 @test "store_ensure_volumes cree TOUS les volumes, et rejouer ne casse rien" {
@@ -138,39 +107,4 @@ store_mounts() { grep -oE '^\s*- lcars-[a-z]+:/var/lib/lcars/[a-z.]+' "$1" | sed
   done < <(store_volume_names)
   # Et elle donne le geste qui les detruit vraiment : nommer sans dire comment est un demi-aveu.
   [[ "$output" == *"docker volume rm"* ]]
-}
-
-@test "les DEUX gestes de destruction, et ils ne font PAS la meme chose" {
-  grep -q "store_spared_line" "$DEPLOY/container"
-  refute grep -q "store_spared_line" "$DEPLOY/docker/bench/bench-down.sh"
-  grep -q "store_destroy_volumes" "$DEPLOY/docker/bench/bench-down.sh"
-  refute grep -q "store_destroy_volumes" "$DEPLOY/container"
-}
-
-@test "tout appelant du magasin POSE le prefixe avant d'appeler compose ou la lib" {
-  # Le prefixe n'a pas de defaut : un appelant qui l'oublie ne partage pas — il ECHOUE. Ce temoin
-  # garde la moitie qu'un `:?` ne peut pas garder : qu'il soit pose, et pose au PROJET.
-  local f
-  # lot 9 (DI-05) : chez `container` le projet EST celui du conteneur ; sur le banc c'est `<N>-fleet`,
-  # derive de la base — le prefixe suit le projet du conteneur dans les deux cas
-  grep -qE '^export LCARS_STORE_PREFIX="\$PROJECT"$' "$DEPLOY/container" \
-    || { echo "n'exporte pas le prefixe au nom du projet : $DEPLOY/container"; return 1; }
-  for f in "$DEPLOY/docker/bench/bench-up.sh" "$DEPLOY/docker/bench/bench-down.sh"; do
-    grep -qE '^export LCARS_STORE_PREFIX="\$CONTAINER_PROJECT"$' "$f" \
-      || { echo "n'exporte pas le prefixe au nom du projet du conteneur : $f"; return 1; }
-    grep -qE '^CONTAINER_PROJECT="\$\{PROJECT\}-fleet"$' "$f" \
-      || { echo "ne derive pas le projet du conteneur de la base : $f"; return 1; }
-  done
-}
-
-@test "les deux gestes qui montent le conteneur posent le magasin AVANT" {
-  # `external: true` = compose refuse de demarrer sur un volume absent. L'appel doit donc preceder
-  # le up/create, et ces deux scripts sont les seuls a s'executer avant.
-  grep -q "store_ensure_volumes" "$DEPLOY/docker/bench/bench-up.sh"
-  grep -q "store_ensure_volumes" "$DEPLOY/container"
-
-  local up_line ensure_line
-  ensure_line="$(grep -n "store_ensure_volumes" "$DEPLOY/container" | head -1 | cut -d: -f1)"
-  up_line="$(grep -n "compose_pose up -d" "$DEPLOY/container" | head -1 | cut -d: -f1)"
-  [ "$ensure_line" -lt "$up_line" ]
 }

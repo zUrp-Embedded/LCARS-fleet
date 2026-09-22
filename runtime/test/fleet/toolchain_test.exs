@@ -115,11 +115,11 @@ defmodule Fleet.ToolchainTest do
   describe "les clefs de corrélation" do
     test "la branche est STABLE pour un work-item — un retry ne rouvre pas une seconde PR" do
       assert Toolchain.branch_for("wi-42") == Toolchain.branch_for("wi-42")
-      assert Toolchain.branch_for("wi-42") =~ "lcars/toolchain-"
+      assert Toolchain.branch_for("wi-42") =~ "tool_request-"
     end
 
     test "un work-item au nom exotique donne quand même un nom de branche valide" do
-      assert Toolchain.branch_for("wi/42 étrange") == "lcars/toolchain-wi-42-trange"
+      assert Toolchain.branch_for("wi/42 étrange") == "tool_request-wi-42-trange"
     end
 
     test "UN fichier par écosystème, pas un par demande" do
@@ -138,7 +138,7 @@ defmodule Fleet.ToolchainTest do
     end
 
     test "le dépôt est celui du domaine sysadmin, la branche n'est PAS `ops`" do
-      assert Toolchain.ops_repo() == "fleet/lcars"
+      assert Toolchain.ops_repo() == "lcars/_ops"
       assert Toolchain.branch() == "tool_request"
       refute Toolchain.branch() == "ops"
     end

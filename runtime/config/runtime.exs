@@ -19,7 +19,8 @@ end
 # Share the Forge account between API calls and git push credentials. FORGE_BOT_LOGIN
 # is the launcher-provided fallback; LCARS_SYSTEM_ACCOUNT belongs to provisioning.
 forge_push_account =
-  System.get_env("FORGE_PUSH_ACCOUNT") || System.get_env("FORGE_BOT_LOGIN") || "system_starfleet"
+  System.get_env("FORGE_PUSH_ACCOUNT") || System.get_env("FORGE_BOT_LOGIN") ||
+    Fleet.Facts.get!("LCARS_SYSTEM_ACCOUNT")
 
 # Eval tools need Forge API configuration too. Account tokens are requested on use;
 # an explicitly supplied FORGE_TOKEN remains a literal token in Application config.
@@ -39,6 +40,17 @@ if forge_opts != [] do
   config :lcars_fleet, :pilot_forge, forge_opts
 end
 
+# The system org carries the fleet's identity and the system's own repositories (`_ops`, the
+# catalogue store `_catalogues`): the machine names it (services.env, loaded by bin/fleet), and an
+# org the installer renamed takes its repositories along. ⚖ Decision 3: the literal is NOT written
+# here any more. It is a machine fact, read from `etc/facts.env` by Fleet.Facts — the same file the
+# shell protocol and the Python services read, so MUR 19 has one source to hold instead of four.
+system_org = Fleet.Facts.get!("LCARS_FORGE_ORG")
+
+config :lcars_fleet,
+  catalogue_system_org: system_org,
+  pilot_ops_repo: System.get_env("LCARS_OPS_REPO") || "#{system_org}/_ops"
+
 # Eval tools that create projects also push, unlike reconciliation of existing branches.
 # Configure git auth outside tool_mode so these tools receive the same account identity.
 # This block stores the account name; ForgeAuth requests its token when needed.
@@ -52,98 +64,13 @@ if config_env() != :test and is_binary(forge_base) do
 end
 
 if config_env() != :test and not tool_mode? do
-  # R-no-root-runtime / GUARD B: reject root, the reserved sysadmin seat and UIDs outside
-  # the declared human range. Apply in dev as well as prod for manual launches.
-  # This is cooperative launch hygiene, not an anti-adversary boundary. Failed id execution
-  # is recorded for refusal after reading the machine policy files below.
-  uid_reading =
-    try do
-      case System.cmd("id", ["-u"]) do
-        {out, 0} -> String.trim(out)
-        {out, code} -> {:unreadable, "`id -u` exited #{code}: #{String.trim(out)}"}
-      end
-    rescue
-      e -> {:unreadable, Exception.message(e)}
-    end
-
-  # Read the seat from the provisioned file, with no numeric fallback. The old process-env
-  # value could redefine the seat. LCARS_SEAT_UID_FILE remains a test path override;
-  # this reader does not verify file ownership or prevent a caller selecting another file.
-  seat_uid_path = System.get_env("LCARS_SEAT_UID_FILE", "/etc/lcars/seat.uid")
-
-  sysadmin_uid =
-    with {:ok, body} <- File.read(seat_uid_path),
-         trimmed <- String.trim(body),
-         {n, ""} when n >= 0 <- Integer.parse(trimmed) do
-      Integer.to_string(n)
-    else
-      _ ->
-        raise "R-no-seat: the seat UID could not be established (#{seat_uid_path} missing or not " <>
-                "an integer) — GUARD B refuses a boot it cannot verify. This machine is not " <>
-                "provisioned: run `sudo deploy/provision apply`."
-    end
-
-  # Read both UID_MIN and UID_MAX from login.defs, like bin/fleet, console/human convergence
-  # and provisioning. Missing bounds refuse; PASSWD_DEFS is the shared test path override.
-  # Matching uses the first column-zero declaration's digit prefix; it does not validate
-  # the entire line or min/max ordering. Unparseable successful id output passes the case below.
-  uid_bounds_path = System.get_env("PASSWD_DEFS", "/etc/login.defs")
-
-  no_uid_bound = fn name ->
-    raise "R-no-uid-min: the system/human boundary could not be established (#{name} " <>
-            "unreadable in #{uid_bounds_path}) — GUARD B refuses a boot it cannot verify. The " <>
-            "bound is declared by the system, not by this process: fix #{uid_bounds_path}."
-  end
-
-  login_defs =
-    case File.read(uid_bounds_path) do
-      {:ok, body} -> body
-      _ -> no_uid_bound.("UID_MIN")
-    end
-
-  uid_bound = fn name ->
-    with [_, raw] <- Regex.run(~r/^#{name}\s+(\d+)/m, login_defs),
-         {n, ""} <- Integer.parse(raw) do
-      n
-    else
-      _ -> no_uid_bound.(name)
-    end
-  end
-
-  uid_min = uid_bound.("UID_MIN")
-  uid_max = uid_bound.("UID_MAX")
-
-  case uid_reading do
-    "0" ->
-      raise "R-no-root-runtime: the fleet daemon refuses to run as root " <>
-              "(launch under your human UID via bin/fleet, never as root)"
-
-    uid when uid == sysadmin_uid ->
-      raise "R-no-root-runtime: the fleet daemon refuses to run under the SYSADMIN seat " <>
-              "(uid #{sysadmin_uid}) — GUARD B: a fleet under the seat would run sudo-capable " <>
-              "pods, the exact inverse of the sandbox. The seat fixes the box; a fleet human " <>
-              "runs the fleet (bin/fleet under a worker account)."
-
-    {:unreadable, why} ->
-      raise "R-no-root-runtime: the runtime UID could not be established (#{why}) — the anti-root " <>
-              "guard refuses a boot it cannot verify (launch via bin/fleet)"
-
-    uid when is_binary(uid) ->
-      case Integer.parse(uid) do
-        {n, ""} when n < uid_min ->
-          raise "R-no-root-runtime: the fleet daemon refuses to run under a SYSTEM account " <>
-                  "(uid #{n} < UID_MIN #{uid_min}) — the fleet runs under a HUMAN uid " <>
-                  "(launch via bin/fleet under a worker account)"
-
-        {n, ""} when n > uid_max ->
-          raise "R-no-root-runtime: the fleet daemon refuses to run under an account ABOVE the " <>
-                  "human range (uid #{n} > UID_MAX #{uid_max}) — `nobody` and the high service " <>
-                  "uids are not fleet humans; the fleet runs under a HUMAN uid (launch via " <>
-                  "bin/fleet under a worker account)"
-
-        _human_or_unparseable ->
-          :ok
-      end
+  # R-no-root-runtime / GUARD B: reject root, the reserved sysadmin seat and UIDs outside the
+  # declared human range. Applies in dev as well as prod, for manual launches. The judgement and
+  # its two machine facts live in Fleet.BootGuard, which its witnesses drive branch by branch; this
+  # file only raises what it returns, so the guard has ONE implementation and no second reading.
+  case Fleet.BootGuard.verify() do
+    :ok -> :ok
+    {:error, message} -> raise message
   end
 
   # LCARS_HOST_BOOT=1 explicitly selects host boot; otherwise MCP gets :pod and refuses.
@@ -318,7 +245,7 @@ if config_env() != :test and not tool_mode? do
       workflow_workflow_maps_root: Fleet.EnvParse.path("LCARS_WORKFLOW_MAPS_ROOT", path)
   end
 
-  # Workspaces are per-pod; the retired shared LCARS_WORKSPACES_ROOT has no reader.
+  # Workspaces are per-pod: no shared root is configurable here, and none is read.
 
   # Use AggregateDispatcher through the shutdown seam; tests keep their NoOp default.
   # The launcher reads this same grace value and adds its own wait margin.
@@ -342,7 +269,7 @@ if config_env() != :test and not tool_mode? do
   # Project incidents use project.card_failed/project.declaration_invalid events and immediate
   # incident routes in events.yaml; do not add a parallel Project -> Pilot function seam.
 
-  # API has only an AF_UNIX control socket; the retired LCARS_API_PORT configures no listener.
+  # API listens on an AF_UNIX control socket ONLY: no TCP port is configurable here.
 
   # Control writes use a per-human home socket outside the pod's mounted home.
   # An explicit LCARS_API_SOCK overrides that location; this assignment does not validate it.
@@ -416,8 +343,9 @@ if config_env() != :test and not tool_mode? do
       pilot_forge_write_spacing_ms: Fleet.EnvParse.positive_ms("LCARS_FORGE_WRITE_SPACING_MS", ms)
   end
 
-  # Do not restore the retired human-team preflight knob: onboarding writes as the system
-  # account, and creating an issue on a public repository does not establish team membership.
+  # No preflight gates the human team here, and adding one would measure nothing: onboarding
+  # writes as the system account, and creating an issue on a public repository does not establish
+  # team membership.
 
   # Routing uses scoped wfmap/stage labels; type labels are presentation.
 

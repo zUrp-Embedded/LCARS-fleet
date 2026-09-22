@@ -108,3 +108,52 @@ setup() {
   [ "$(stat -c %a "$STORE/cache")" = 2775 ]
   [ "$(stat -c %a "$STORE/sysroots")" = 755 ]
 }
+
+# ⚠ LE COMPTEUR DECIDE, PAS ERREXIT. Le protocole compte les echecs (`p_fail`) et le module tourne
+# sous `set -e` : sans garde, le premier dossier refuse emporte le module, et l'init s'arrete avant
+# d'avoir seulement essaye les suivants. La regle vivait recopiee a chaque ligne de `layout` —
+# treize fois ; ce temoin la tient une fois, sur la table entiere.
+@test "layout : toute la table est jouee, et un dossier refuse est COMPTE sans emporter la suite" {
+  local BLOC="$BATS_TEST_TMPDIR/layout.sh" LOG="$BATS_TEST_TMPDIR/poses"
+  { sed -n '/^layout_table() {/,/^}/p' "$SUT"; sed -n '/^layout() {/,/^}/p' "$SUT"; } > "$BLOC"
+  [ -s "$BLOC" ]
+  run bash -c "
+    set -euo pipefail
+    . '$LCARS_MODULE_PROTOCOL' >/dev/null
+    store() { :; }
+    ensure_dir() { printf '%s\n' \"\$1\" >> '$LOG'; [[ \"\$1\" != /etc/lcars ]] || { p_fail 'refus de decor'; return 1; }; return 0; }
+    source '$BLOC'
+    layout
+    printf 'FAILED=%s\n' \"\$LCARS_FAILED\""
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"FAILED=1"* ]]
+  [ "$(wc -l < "$LOG")" -eq 13 ]
+  grep -qx '/run/lock/lcars' "$LOG"   # la derniere ligne de la table est atteinte malgre le refus
+  grep -qx "$LCARS_PRIVATE_DIR" "$LOG"
+}
+
+# ⚠ LA TABLE EST LE CONTRAT AVEC `deploy/system.manifest`, et une table qu'on ne mesure que par le
+# NOMBRE de ses lignes laisse passer un mode ou un propriétaire faux — c'est-à-dire exactement ce que
+# ces lignes servent à dire. Chaque ligne se compare donc à la déclaration du manifeste.
+@test "layout : le mode et le proprietaire de chaque ligne sont ceux que le manifeste declare" {
+  local MAN="$BATS_TEST_DIRNAME/../../../../deploy/system.manifest"
+  [ -f "$MAN" ]
+  local table
+  # les DEFAUTS du protocole, pas le décor des autres cas : le contrat se lit sur la machine réelle
+  table="$(env -u LCARS_PRIVATE_DIR -u LCARS_FLEET_GROUP -u LCARS_CATALOGUES_DIR -u LCARS_CATALOGUES_WORK \
+    -u LCARS_AUTHORITY_USER bash -c ". '$LCARS_MODULE_PROTOCOL' >/dev/null 2>&1
+      $(sed -n '/^layout_table() {/,/^}/p' "$SUT")
+      layout_table")"
+  [ -n "$table" ]
+  local path mode owner decl compares=0 bad=""
+  while read -r path mode owner; do
+    # `dir` sur disque, `runtime` sous /run : les deux types déclarent un mode et un propriétaire
+    decl="$(awk -v p="$path" '($1 == "dir" || $1 == "runtime") && $2 == p { print $3, $4; exit }' "$MAN")"
+    [ -n "$decl" ] || continue          # un chemin que le manifeste ne déclare pas : hors contrat
+    compares=$((compares + 1))
+    [ "$decl" = "$mode $owner" ] || bad="$bad\n  $path : table « $mode $owner », manifeste « $decl »"
+  done <<< "$table"
+  [ -z "$bad" ] || { printf 'la table et le manifeste divergent :%b\n' "$bad" >&2; return 1; }
+  # GARDE D'INSTRUMENT : sans comparaison, ce témoin serait vert sur une table vide
+  [ "$compares" -ge 12 ] || { echo "instrument casse : $compares ligne(s) comparee(s), 8 au moins attendues" >&2; return 1; }
+}

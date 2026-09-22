@@ -10,36 +10,53 @@ defmodule Fleet.MCP.PodTools.Delegation.Retirement do
 
   alias Fleet.MCP.PodTools.Delegation.{DependencyForge, Gate, IssuePR}
 
-  # Copy both dependency directions before closing the old ticket. Failure stops closure,
-  # but prior copies and PR closure remain. Validate the resolved seam before copying.
+  # Copy both dependency directions before closing the old ticket. Reading the graph is what can
+  # stop the retirement; a single edge that will not be written does NOT — it is reported.
+  #
+  # ⚠ MESURE DU 2026-09-16 : LE RETRAIT QUI ECHOUE EST PIRE QUE L'ARETE QU'IL PORTE. Gitea 1.26 rend
+  # 500 (pas 409) sur deux etats ordinaires de cette ecriture — « issue dependency does already
+  # exist » et « circular dependencies exists » — et ce code faisait alors avorter le retrait. Le
+  # ticket remplace restait OUVERT, la fleet le redispatchait, et la meme brique etait livree deux
+  # fois : mesure sur le banc beta, cinq supersedes en echec sur un projet, deux livraisons
+  # jumelles (#12 et #14, #19 et #20). Une arete non portee se DIT ; un zombie, personne ne le voit.
+  #
+  # ⚠ A SURVEILLER : si ces deux etats se mettent a rendre 409 ou 200, c'est que la forge a ete
+  # corrigee en amont — le code ci-dessous continuera de marcher, et cette note pourra partir.
   defp carry_dependencies(forge, repo, old_n, new_n) do
     with {:ok, _} <- Gate.conforming(DependencyForge, forge),
          {:ok, blockers} <- forge.issue_dependencies(repo, old_n, []),
-         {:ok, blocked} <- forge.issue_blocks(repo, old_n, []),
-         :ok <- copy_edges(blockers, fn b -> forge.add_issue_dependency(repo, new_n, b, []) end),
-         :ok <- copy_edges(blocked, fn b -> forge.add_issue_dependency(repo, b, new_n, []) end) do
-      :ok
+         {:ok, blocked} <- forge.issue_blocks(repo, old_n, []) do
+      non_portees =
+        copy_edges(blockers, fn b -> forge.add_issue_dependency(repo, new_n, b, []) end) ++
+          copy_edges(blocked, fn b -> forge.add_issue_dependency(repo, b, new_n, []) end)
+
+      {:ok, non_portees}
     else
-      {:error, reason} -> {:error, {:dependencies_not_carried, reason}}
+      {:error, reason} -> {:error, {:dependencies_not_read, reason}}
     end
   end
 
+  # Rend la liste des aretes qui n'ont PAS ete portees, chacune avec sa cause.
   defp copy_edges(issues, write_fun) do
-    Enum.reduce_while(issues, :ok, &copy_one_edge(&1, &2, write_fun))
+    Enum.flat_map(issues, &copy_one_edge(&1, write_fun))
   end
 
-  # Halt on an unaddressable edge rather than silently dropping a dependency.
-  defp copy_one_edge(issue, :ok, write_fun) do
+  defp copy_one_edge(issue, write_fun) do
     case Map.get(issue, "number") do
-      n when is_integer(n) -> edge_written(write_fun.(n))
-      _ -> {:halt, {:error, {:edge_without_number, issue}}}
+      n when is_integer(n) -> edge_written(n, write_fun.(n))
+      _ -> ["une arête sans numéro (#{inspect(issue)})"]
     end
   end
 
-  defp edge_written({:ok, _}), do: {:cont, :ok}
-  # Treat every HTTP 409 as already present without readback.
-  defp edge_written({:error, {:http, 409, _}}), do: {:cont, :ok}
-  defp edge_written({:error, _} = err), do: {:halt, err}
+  defp edge_written(_n, {:ok, _}), do: []
+  # 409, et 500 « does already exist » : l'arête EST portée, la forge le dit mal.
+  defp edge_written(_n, {:error, {:http, 409, _}}), do: []
+
+  defp edge_written(n, {:error, {:http, 500, %{"message" => m}}}) when is_binary(m) do
+    if String.contains?(m, "does already exist"), do: [], else: ["##{n} : #{m}"]
+  end
+
+  defp edge_written(n, {:error, raison}), do: ["##{n} : #{inspect(raison)}"]
 
   @doc """
   Sweeps issues in projects whose reported state is open, behind the onboarder gate.
@@ -244,14 +261,12 @@ defmodule Fleet.MCP.PodTools.Delegation.Retirement do
   defp do_retire(forge, repo, n, pr, result) do
     new_number = Map.get(result, "issue")
 
-    comment =
-      "Remplacé par ##{new_number} (brief re-cadré) — ticket retiré par la fleet (supersede)."
-
     # Supersedes is an LCARS convention, not a forge graph operation. Copy what the old
     # issue waits on and what waits on it before closure; otherwise dependents can be
     # admitted in the gap or the replacement can lose its own prerequisites.
     with :ok <- IssuePR.close_live_pr(forge, repo, pr),
-         :ok <- carry_dependencies(forge, repo, n, new_number),
+         {:ok, non_portees} <- carry_dependencies(forge, repo, n, new_number),
+         comment = supersede_comment(new_number, non_portees),
          {:ok, _} <- forge.post_comment(repo, n, comment, []),
          # Work moved to the replacement; retiring the old issue claims no delivery.
          {:ok, _} <- forge.close_issue(repo, n, closure: :retired) do
@@ -272,6 +287,17 @@ defmodule Fleet.MCP.PodTools.Delegation.Retirement do
           "le retrait de ##{n} a échoué — il est encore ouvert, fais-le fermer par ton humain"
         )
     end
+  end
+
+  # Une arête non portée se dit SUR LE TICKET, pas seulement dans un journal que personne ne lit.
+  defp supersede_comment(new_number, []) do
+    "Remplacé par ##{new_number} (brief re-cadré) — ticket retiré par la fleet (supersede)."
+  end
+
+  defp supersede_comment(new_number, non_portees) do
+    "Remplacé par ##{new_number} (brief re-cadré) — ticket retiré par la fleet (supersede).\n\n" <>
+      "⚠ Dépendance(s) NON portée(s) vers ##{new_number}, à reposer à la main si elles comptent :\n" <>
+      Enum.map_join(non_portees, "\n", &("- " <> &1))
   end
 
   # Upward reaper seam: keep the module in an attribute rather than a forbidden remote Pilot call.

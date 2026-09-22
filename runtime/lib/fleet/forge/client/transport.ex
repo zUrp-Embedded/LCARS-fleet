@@ -10,6 +10,13 @@ defmodule Fleet.Forge.Client.Transport do
   as nonempty; file contents are trimmed. There is no implicit ~/.gitea_token fallback,
   which could otherwise substitute the BEAM user's personal identity for a missing system one.
 
+  `allow_anonymous: true` is the ONE way to reach a forge without a token, and it is a per-call
+  opt-in, never a fallback: it takes effect only after every named source has been found absent,
+  so a token file that exists and is empty still fails loudly rather than downgrading the call.
+  An anonymous config carries `token: ""`, sends NO authorization header, and has no login.
+  It exists for material that is public by construction — a catalogue store read by a container
+  that was never given any authority.
+
   :req_options overrides request defaults, including headers, URL, retry and timeouts.
   Its Plug option supports HTTP interception in tests.
   """
@@ -22,6 +29,7 @@ defmodule Fleet.Forge.Client.Transport do
   @type config :: %{
           base_url: String.t(),
           token: String.t(),
+          anonymous: boolean(),
           req_options: Keyword.t()
         }
 
@@ -50,6 +58,7 @@ defmodule Fleet.Forge.Client.Transport do
        %{
          base_url: String.trim_trailing(base_url, "/"),
          token: token,
+         anonymous: token == "",
          req_options: Keyword.get(merged, :req_options, [])
        }}
     end
@@ -63,11 +72,17 @@ defmodule Fleet.Forge.Client.Transport do
   end
 
   # Selection occurs after merging: an env :token can outrank an explicit :account or :token_file.
+  #
+  # :allow_anonymous is LAST on purpose. A named source that fails still fails — it is only the
+  # total absence of one that anonymity answers for, and only where the caller asked for it. Put
+  # any earlier, it would turn every unreadable token into a quiet unauthenticated request, which
+  # is the exact failure this rail refuses everywhere else.
   defp resolve_token(opts) do
     cond do
       token = non_vide(opts, :token) -> {:ok, token}
       path = non_vide(opts, :token_file) -> read_token_file(path)
       account = non_vide(opts, :account) -> token_from_authority(account)
+      Keyword.get(opts, :allow_anonymous) == true -> {:ok, ""}
       true -> {:error, {:config, :no_token_source}}
     end
   end
@@ -123,6 +138,10 @@ defmodule Fleet.Forge.Client.Transport do
   # One slot per URL, digest/login in the value: rotation replaces instead of accumulating.
   # Wrong cached authors affect protocol trust. No raw token is stored in persistent_term.
   # No expiry or same-token revalidation; alternating role/system tokens replace each other.
+  # An anonymous config has no login BY CONSTRUCTION. Letting it reach `/user` would cache a 401
+  # under the digest of the empty string and read as a transport problem.
+  defp derive_bot_login(%{anonymous: true}), do: {:error, :bot_login_unresolved}
+
   defp derive_bot_login(config) do
     key = {__MODULE__, :bot_login, config.base_url}
     fingerprint = :crypto.hash(:sha256, config.token)
@@ -249,10 +268,14 @@ defmodule Fleet.Forge.Client.Transport do
       [
         method: method,
         url: url,
-        headers: [
-          {"authorization", "token " <> config.token},
-          {"accept", "application/json"}
-        ],
+        # An anonymous config sends NO authorization header — not `token ""`, which Gitea reads as
+        # a malformed credential and answers 401 instead of serving the public resource.
+        headers:
+          if config.anonymous do
+            [{"accept", "application/json"}]
+          else
+            [{"authorization", "token " <> config.token}, {"accept", "application/json"}]
+          end,
         receive_timeout: 10_000,
         retry: false,
         finch: [name: Fleet.Forge.finch_name()]

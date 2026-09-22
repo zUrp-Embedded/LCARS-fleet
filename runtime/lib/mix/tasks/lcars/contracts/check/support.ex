@@ -9,11 +9,20 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
   @typedoc """
   A check verdict. Empty-population failures use `:fail` with an INSTRUMENT BROKEN
   diagnostic; they are not a separate status.
+
+  ⚠ `:skip` IS NOT A WEAK `:pass`, AND C'EST POUR CA QU'IL EXISTE. Un mur rend `:skip` quand il n'a
+  RIEN MESURE — parce que l'arbre qu'il lit n'est pas dans cet artefact (un release ne porte que
+  `runtime/`, pas `deploy/` ni `assets/`). Avant ce mot, ces cas rendaient `:pass` avec une note
+  « NOT CHECKED here », et un relecteur a lu la ligne comme un faux vert : il avait raison, « pass »
+  ne doit pas pouvoir vouloir dire « pas verifie ».
+
+  `:skip` ne fait pas echouer la porte — un artefact runtime-only serait rouge par construction —
+  mais il se COMPTE a part, et le resume le dit.
   """
   @type result :: %{
           id: String.t(),
           remediation: String.t(),
-          status: :pass | :fail,
+          status: :pass | :fail | :skip,
           evidence: [String.t()],
           note: String.t()
         }
@@ -186,14 +195,20 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
     Code.ensure_loaded?(mod)
   end
 
-  # Stops at # outside double quotes, toggling on every quote without escape handling.
-  # Single quotes, sigils, heredoc state and ?# are not parsed; false positives and negatives are possible.
+  # Stops at # outside double quotes AND outside `${…}`, toggling on every quote without escape
+  # handling. Single quotes, sigils, heredoc state and ?# are not parsed; false positives and
+  # negatives are possible.
+  #
+  # ⚠ THE `${…}` CLAUSE IS NOT A REFINEMENT, IT IS THE DIFFERENCE BETWEEN MEASURING A LINE AND
+  # MEASURING ITS FIRST HALF. `${path#/opt/lcars}` is shell's prefix-strip, not a comment: cutting
+  # there dropped everything after it, so every wall built on this function was blind to the rest of
+  # such a line. Measured 2026-09-19: seventy-nine lines of this repository carry that form.
   @doc false
   @spec strip_comment(String.t()) :: String.t()
   def strip_comment(line) do
     line
     |> String.to_charlist()
-    |> do_strip_comment([], false)
+    |> do_strip_comment([], false, 0)
     |> Enum.reverse()
     |> List.to_string()
   end
@@ -204,75 +219,23 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
   def code_of(body),
     do: body |> String.split("\n") |> Enum.map_join("\n", &strip_comment/1)
 
-  # ─── LES DEFAUTS DU SHELL DE L'INSTALLEUR, ET CE QU'ILS VALENT ────────────────────────────────
-  #
-  # ⚠ UNE DECLARATION DERIVEE EST UNE DECLARATION, PAS UN DESACCORD. Depuis le lot 0 du chantier
-  # terrain-controle (2026-09-08), `provision-lib.sh` nomme sa racine UNE fois — une affectation
-  # nue, `PROV_ROOT_CANON=/opt/lcars` — et compose tout le reste : `: "${PROV_ROOT:=$PROV_ROOT_CANON}"`,
-  # `: "${PROV_TOKENS_DIR:=$PROV_ROOT/var/tokens}"`. Les murs qui comparaient ces defauts au litteral
-  # des autres porteurs rendaient « 2 chemins pour un repertoire » sur un corpus parfaitement
-  # d'accord, et verrouillaient `mix release` (R7) sur un faux rouge — mesure du 2026-09-09 sur le
-  # banc 2007 (60-deploy FAIL), puis du 2026-09-11 (3 contrats rouges, 71 verts). La seule facon de
-  # faire taire ce rouge sans ceci etait de RECOPIER le litteral dans la lib — la copie que ces murs
-  # existent pour interdire.
-  #
-  # La resolution est DELIBEREMENT bornee : les defauts `: "${VAR:=valeur}"` et les affectations
-  # nues `VAR=valeur` de premier niveau (hors commentaire, hors fonction), substitues jusqu'au point
-  # fixe — cinq passes au plus. Ce n'est pas un interpreteur shell : une variable qu'on ne sait pas
-  # resoudre reste telle quelle, et le desaccord se voit.
-  @doc false
-  @spec shell_defaults(String.t()) :: %{optional(String.t()) => String.t()}
-  def shell_defaults(src) do
-    code = code_of(src)
+  defp do_strip_comment([], acc, _in_str, _depth), do: acc
 
-    defauts =
-      ~r/:\s*"\$\{([A-Z_][A-Z0-9_]*):=([^}"]*)\}"/
-      |> Regex.scan(code)
-      |> Map.new(fn [_, nom, val] -> {nom, val} end)
+  # `${` opens an expansion — inside it, `#` and `%` are operators, and `}` closes it. Depth,
+  # not a flag: `${a:-${b#x}}` nests, and a flag would reopen the comment at the inner `}`.
+  defp do_strip_comment([?$, ?{ | rest], acc, in_str, depth),
+    do: do_strip_comment(rest, [?{, ?$ | acc], in_str, depth + 1)
 
-    nues =
-      ~r/^([A-Z_][A-Z0-9_]*)=([^\s"'$][^\s]*)\s*$/m
-      |> Regex.scan(code)
-      |> Map.new(fn [_, nom, val] -> {nom, val} end)
+  defp do_strip_comment([?} | rest], acc, in_str, depth) when depth > 0,
+    do: do_strip_comment(rest, [?} | acc], in_str, depth - 1)
 
-    Map.merge(nues, defauts)
-  end
+  defp do_strip_comment([?# | _rest], acc, false, 0), do: acc
 
-  @doc false
-  @spec resolve_shell(%{optional(String.t()) => String.t()}, String.t()) :: String.t()
-  def resolve_shell(defaults, value), do: do_resolve_shell(defaults, value, 5)
+  defp do_strip_comment([?" | rest], acc, in_str, depth),
+    do: do_strip_comment(rest, [?" | acc], not in_str, depth)
 
-  defp do_resolve_shell(_defaults, value, 0), do: value
-
-  defp do_resolve_shell(defaults, value, passes) do
-    next =
-      Regex.replace(~r/\$\{?([A-Z_][A-Z0-9_]*)\}?/, value, fn entier, nom ->
-        Map.get(defaults, nom, entier)
-      end)
-
-    if next == value, do: value, else: do_resolve_shell(defaults, next, passes - 1)
-  end
-
-  # `{brut, resolu}` : la forme que le fichier PORTE (celle qu'un miroir doit retrouver au mot pres)
-  # et ce qu'elle VAUT (ce qu'une autorite doit egaler). `nil` : pas de defaut pour ce nom.
-  @doc false
-  @spec shell_default_resolved(String.t(), String.t()) :: {String.t(), String.t()} | nil
-  def shell_default_resolved(src, var) do
-    defaults = shell_defaults(src)
-
-    case Map.get(defaults, var) do
-      nil -> nil
-      raw -> {raw, resolve_shell(defaults, raw)}
-    end
-  end
-
-  defp do_strip_comment([], acc, _in_str), do: acc
-  defp do_strip_comment([?# | _rest], acc, false), do: acc
-
-  defp do_strip_comment([?" | rest], acc, in_str),
-    do: do_strip_comment(rest, [?" | acc], not in_str)
-
-  defp do_strip_comment([c | rest], acc, in_str), do: do_strip_comment(rest, [c | acc], in_str)
+  defp do_strip_comment([c | rest], acc, in_str, depth),
+    do: do_strip_comment(rest, [c | acc], in_str, depth)
 
   # Missing files return no matches; other read errors raise. Absence checks need a population guard.
   # Matches raw lines, including documentation and strings.

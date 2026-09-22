@@ -2,35 +2,29 @@
 # SOURCE: deploy/lib/kit-verify.sh
 # AUTHOR: bob
 # STARDATE: 2026-09-08
-# STATUS: ce qu'un kit doit porter, contre les listes (system.manifest, release.manifest, 62), vérifié avant que le tar ne ferme
-# USAGE : . kit-verify.sh ; kit_verifie <stage> <release relative au stage>   → 0 si le kit est complet, 1 sinon (manques nommés)
-
-[[ -n "${LCARS_KIT_VERIFY_LOADED:-}" ]] && return 0
-LCARS_KIT_VERIFY_LOADED=1
-
-kv_tableau() {
-  local f="$1" n="$2" blk
-  blk="$(sed -n "/^$n=(/,/^)/p" "$f")"
-  [[ -n "$blk" ]] || blk="$(grep -E "^$n=\(.*\)\$" "$f" || true)"
-  [[ -n "$blk" ]] || return 1
-  ( HELPERS_DIR=/opt/lcars; LCARS_BASHRC=/etc/lcars/lcars.bashrc; export HELPERS_DIR LCARS_BASHRC
-    eval "$blk"; eval 'printf "%s\n" "${'"$n"'[@]}"' )
-}
+# STATUS: ce qu'un kit doit porter — manifestes et constantes, tampon de révision, release, doc bâtie, entrées de release.manifest, listes des constantes que pose 62, médias — vérifié avant que le tar ne ferme
+# USAGE : . kit-verify.sh (après provision-lib.sh) ; kit_verifie <stage> <release relative au stage>   → 0 si le kit est complet, 1 sinon (manques nommés)
+# Les constantes lues sont celles du kit, par env_field : une donnée, jamais sourcée.
 
 kit_verifie() { # kit_verifie <stage> <release-relative-au-stage> -> 0 si complet ; sinon 1, manques NOMMÉS
-  local stage="${1:?kit_verifie: <stage> manquant}"
-  local rel="${2:?kit_verifie: <release relative au stage> manquant — pack.sh la connaît, pas cette lib}"
+  local stage="$1" rel="$2"
   local manques=() n
   local manifest="$stage/deploy/system.manifest"
+  local constantes="$stage/deploy/installer-constants.env"
   local relman="$stage/runtime/etc/release.manifest"
-  local mod62="$stage/deploy/modules.d/62-runtime-helpers.sh"
 
   local f
-  for f in "$manifest" "$relman" "$mod62"; do
+  for f in "$manifest" "$constantes" "$relman"; do
     [[ -r "$f" ]] || manques+=("le kit n'a pas ${f#"$stage"/} — ce n'est pas un kit")
   done
-  [[ -r "$stage/.source-revision" ]] \
-    || manques+=(".source-revision absent — l'install se croirait SOURCE et bâtirait dans le kit")
+  if [[ "${#manques[@]}" -gt 0 ]]; then kv_dire "${manques[@]}"; return 1; fi
+  local tampon
+  tampon="$(env_field "$constantes" PROV_SOURCE_STAMP)"
+  if [[ -z "$tampon" ]]; then
+    manques+=("deploy/installer-constants.env ne déclare pas PROV_SOURCE_STAMP — le tampon de révision n'est pas vérifiable")
+  elif [[ ! -r "$stage/$tampon" ]]; then
+    manques+=("$tampon absent — l'install se croirait SOURCE et bâtirait dans le kit")
+  fi
   if [[ "${#manques[@]}" -gt 0 ]]; then kv_dire "${manques[@]}"; return 1; fi
 
   [[ -x "$stage/$rel" ]] \
@@ -38,33 +32,46 @@ kit_verifie() { # kit_verifie <stage> <release-relative-au-stage> -> 0 si comple
   [[ -s "$stage/assets/github.io/dist/index.html" ]] \
     || manques+=("la doc bâtie manque (assets/github.io/dist/index.html) — un kit sans sa doc est une demi-livraison")
 
-  if [[ -r "$relman" ]]; then
-    while read -r name _; do
-      [[ -n "$name" ]] || continue
-      [[ -r "$stage/runtime/bin/$name" ]] \
-        || manques+=("release.manifest nomme bin/$name, absent du kit")
-    done < <(awk 'NF && $1 !~ /^#/ { print $1 }' "$relman")
-  fi
+  while read -r name _; do
+    [[ -r "$stage/runtime/bin/$name" ]] \
+      || manques+=("release.manifest nomme bin/$name, absent du kit")
+  done < <(awk 'NF && $1 !~ /^#/ { print $1 }' "$relman")
   [[ -r "$stage/runtime/etc/fleet.env.template" ]] \
     || manques+=("runtime/etc/fleet.env.template absent — le provisionnement en dérive l'environnement")
 
-  if [[ -r "$mod62" ]]; then
-    while read -r h; do
-      [[ -n "$h" ]] || continue
+  local cle h
+  local -a liste
+  for cle in PROV_HELPERS PROV_HELPERS_DATA PROV_SHELL_RC; do
+    read -ra liste <<<"$(env_field "$constantes" "$cle")"
+    if [[ "${#liste[@]}" -eq 0 ]]; then
+      manques+=("deploy/installer-constants.env ne déclare pas $cle — ce que 62-runtime-helpers en pose n'est pas vérifié")
+      continue
+    fi
+    for h in "${liste[@]}"; do
+      h="${h##*/}"
       [[ -r "$stage/runtime/services/$h" ]] \
-        || manques+=("62-runtime-helpers nomme l'auxiliaire $h, absent du kit")
-    done < <(kv_tableau "$mod62" HELPERS || true)
-    while read -r d_src _; do
-      [[ -n "$d_src" ]] || continue
-      [[ -r "$stage/runtime/services/$d_src" ]] \
-        || manques+=("62-runtime-helpers nomme la donnée $d_src, absente du kit")
-    done < <(kv_tableau "$mod62" DATA || true)
-  fi
+        || manques+=("$cle nomme $h, absent du kit (runtime/services/$h)")
+    done
+  done
 
   local src
-  for src in runtime/bin/lcars-toolchain-converge runtime/bin/lcars-authority-ask \
-             runtime/services/lcars.bashrc; do
-    [[ -r "$stage/$src" ]] || manques+=("la table déclare une ancre dont la source manque : $src")
+  for src in runtime/bin/lcars-toolchain-converge runtime/bin/lcars-authority-ask; do
+    [[ -r "$stage/$src" ]] || manques+=("62-runtime-helpers pose $src hors de ses listes, et le kit ne le porte pas")
+  done
+
+  # ⚖ décision 3 : les FAITS DE LA MACHINE et leur lecteur shell voyagent par PROV_EMBEDDED, donc
+  # hors des listes ci-dessus. Sans eux, l'installeur refuse au sourcing et AUCUN geste du produit
+  # ne démarre : un kit qui les oublie est un kit qui ne s'installe pas, et il faut le dire ici.
+  for src in runtime/etc/facts.env runtime/services/lib/facts.sh; do
+    [[ -r "$stage/$src" ]] \
+      || manques+=("$src absent — sans les faits de la machine, ni l'installeur ni un geste du produit ne démarrent")
+  done
+  # ⚖ phases 5 et 6, les deux libs que les DEUX rails sourcent : la lecture de la frontière
+  # système/humain (sans elle, ni console ni convergence ni lancement) et les primitives
+  # convergentes (sans elles, la lib de l'installeur refuse au sourcing et rien ne se pose).
+  for src in runtime/services/lib/uid-bounds.sh runtime/services/lib/primitives.sh; do
+    [[ -r "$stage/$src" ]] \
+      || manques+=("$src absent — les deux rails le sourcent : sans lui, ce kit ne pose rien")
   done
 
   local t
