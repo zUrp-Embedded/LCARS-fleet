@@ -185,16 +185,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
   defp deposit_names_verdict(id, remediation, {branche, dossier}, checked, skipped, root) do
     bad =
       Enum.flat_map(checked, fn rel ->
-        branch_freeze_gap(rel, root, branche) ++
-          case File.read(Path.expand(rel, root)) do
-            {:ok, body} ->
-              if String.contains?(body, "\"#{dossier}\""),
-                do: [],
-                else: [{rel, "does not carry the literal #{inspect(dossier)}"}]
-
-            _ ->
-              []
-          end
+        branch_freeze_gap(rel, root, branche) ++ ready_room_gap(rel, root, dossier)
       end)
 
     if bad == [] do
@@ -219,6 +210,22 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
             Enum.map_join(bad, " · ", fn {f, why} -> "#{f}: #{why}" end) <> skipped_note(skipped)
       }
     end
+  end
+
+  # Le SECOND litteral du miroir, sur la meme forme que la branche : une lecture, un verdict. Un
+  # fichier illisible n'est pas redit ici — `branch_freeze_gap` lit le MEME fichier et le nomme
+  # deja ; deux plaintes pour une seule cause enverraient chercher deux defauts.
+  defp ready_room_gap(rel, root, dossier) do
+    case File.read(Path.expand(rel, root)) do
+      {:ok, body} -> ready_room_verdict(rel, body, dossier)
+      _ -> []
+    end
+  end
+
+  defp ready_room_verdict(rel, body, dossier) do
+    if String.contains?(body, "\"#{dossier}\""),
+      do: [],
+      else: [{rel, "does not carry the literal #{inspect(dossier)}"}]
   end
 
   defp branch_freeze_gap(rel, root, expected) do
