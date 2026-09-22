@@ -112,7 +112,8 @@ setup() {
 # ⚠ LE COMPTEUR DECIDE, PAS ERREXIT. Le protocole compte les echecs (`p_fail`) et le module tourne
 # sous `set -e` : sans garde, le premier dossier refuse emporte le module, et l'init s'arrete avant
 # d'avoir seulement essaye les suivants. La regle vivait recopiee a chaque ligne de `layout` —
-# treize fois ; ce temoin la tient une fois, sur la table entiere.
+# une fois par ligne ; ce temoin la tient une fois, sur la table entiere. Le compte attendu se LIT
+# sur la table, il ne se recopie pas : une ligne ajoutee ne doit pas rougir ici, une ligne SAUTEE si.
 @test "layout : toute la table est jouee, et un dossier refuse est COMPTE sans emporter la suite" {
   local BLOC="$BATS_TEST_TMPDIR/layout.sh" LOG="$BATS_TEST_TMPDIR/poses"
   { sed -n '/^layout_table() {/,/^}/p' "$SUT"; sed -n '/^layout() {/,/^}/p' "$SUT"; } > "$BLOC"
@@ -124,10 +125,14 @@ setup() {
     ensure_dir() { printf '%s\n' \"\$1\" >> '$LOG'; [[ \"\$1\" != /etc/lcars ]] || { p_fail 'refus de decor'; return 1; }; return 0; }
     source '$BLOC'
     layout
-    printf 'FAILED=%s\n' \"\$LCARS_FAILED\""
+    printf 'FAILED=%s\n' \"\$LCARS_FAILED\"
+    printf 'LIGNES=%s\n' \"\$(layout_table | wc -l)\""
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"FAILED=1"* ]]
-  [ "$(wc -l < "$LOG")" -eq 13 ]
+  local lignes; lignes="$(sed -n 's/^LIGNES=//p' <<< "$output")"
+  # GARDE D'INSTRUMENT : sans lignes, ce temoin serait vert sur une table vide
+  [ "${lignes:-0}" -ge 12 ] || { echo "instrument casse : table de $lignes ligne(s)" >&2; return 1; }
+  [ "$(wc -l < "$LOG")" -eq "$lignes" ]
   grep -qx '/run/lock/lcars' "$LOG"   # la derniere ligne de la table est atteinte malgre le refus
   grep -qx "$LCARS_PRIVATE_DIR" "$LOG"
 }
