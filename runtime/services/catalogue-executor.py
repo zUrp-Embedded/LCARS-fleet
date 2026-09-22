@@ -95,7 +95,7 @@ REQUEST_TIMEOUT = int(os.environ.get("LCARS_CATALOGUE_REQUEST_TIMEOUT", "30"))
 #   · le depot du projet DOIT exister : on ne cree pas un depot de projet.
 #
 # Et le depot est ecrit AU NOM de cet humain (auteur du commit) par le compte systeme (committer).
-DEPOSIT_SOCKET_PATH = os.environ.get("LCARS_DEPOSIT_SOCKET", "/run/lcars/deposit/deposit.sock")
+DEPOSIT_SOCKET_PATH = lcars_facts.get("LCARS_DEPOSIT_SOCKET")
 # ⚠ LE GROUPE DE CE SERVICE, ET LE DECK LE RECOIT A L'EXEC. Trois groupes etaient possibles et deux
 # sont refuses : `fleet` donnerait au deck les jetons de role, et `lcars-console` ne s'accorde par
 # ADHESION a personne (MUR 5 ter : il se donne par `setpriv --groups`, jamais par `usermod -aG`).
@@ -104,8 +104,9 @@ DEPOSIT_SOCKET_PATH = os.environ.get("LCARS_DEPOSIT_SOCKET", "/run/lcars/deposit
 # `console-landing.sh` le passe au deck au lancement, comme il lui passe deja `lcars-console`.
 # D'ou le repertoire A PART : `lcars_socket.bind` donne au PARENT le groupe qu'on lui passe, donc
 # poser cette socket dans `/run/lcars/authority` retirerait `fleet` des deux autres portes.
-DEPOSIT_SOCKET_GROUP = os.environ.get("LCARS_AUTHORITY_GROUP", "lcars-authority")
-DEPOSIT_PEER = os.environ.get("LCARS_DECK_USER", "lcars-system")
+# LE GROUPE SE DERIVE DU COMPTE, il ne se declare pas une seconde fois (MUR 13).
+DEPOSIT_SOCKET_GROUP = lcars_facts.get("LCARS_AUTHORITY_USER")
+DEPOSIT_PEER = lcars_facts.get("LCARS_SYSTEM_USER")
 # LA DESTINATION EST LE DEPOT DU PROJET, ET SA FACE WORKSHOP. Un projet a UN depot sur la forge et
 # trois faces qui sont trois BRANCHES de ce depot (`lib/fleet/layout.ex`) ; la ready room est un
 # repertoire de la face workshop. Le chemin ne porte ni login ni horodatage : le commit porte deja
@@ -122,16 +123,16 @@ READY_ROOM_DIR = "ready-room"
 # rend que le slug : c'est ici qu'on retrouve l'org, en demandant a la forge lequel des catalogues
 # INSTALLES porte ce depot. Deviner l'org serait une table de correspondance, donc une seconde
 # verite ; demander a la forge ne peut pas deriver.
-CATALOGUES_DIR = os.environ.get("LCARS_CATALOGUES_DIR", "/opt/lcars/var/catalogues")
+CATALOGUES_DIR = lcars_facts.get("LCARS_CATALOGUES_DIR")
 # LA ZONE DE TRANSIT : le deck y ecrit le fichier, ce service l'y lit, et RIEN d'autre n'en sort.
 # Sur disque et jamais sous `/run` — c'est un tmpfs, donc 50 Mo de transit y seraient 50 Mo de RAM.
-DEPOSIT_SPOOL = os.environ.get("LCARS_DEPOSIT_SPOOL", "/var/tmp/lcars/deposit")
+DEPOSIT_SPOOL = lcars_facts.get("LCARS_DEPOSIT_SPOOL")
 # Le temps d'un depot n'est pas le temps d'une question : 50 Mo ne traversent pas en 15 secondes.
 DEPOSIT_HTTP_TIMEOUT = int(os.environ.get("LCARS_DEPOSIT_HTTP_TIMEOUT", "300"))
 # Le compte qui POUSSE. L'humain est l'auteur, ce compte est le committer : c'est exactement la
 # distinction que git porte depuis toujours — quelqu'un a fait le travail, quelqu'un d'autre l'a
 # applique — et elle dit la verite des deux cotes sans inventer de jeton personnel.
-SYSTEM_ACCOUNT = os.environ.get("LCARS_SYSTEM_ACCOUNT", "system_starfleet")
+SYSTEM_ACCOUNT = lcars_facts.get("LCARS_SYSTEM_ACCOUNT")
 SYSTEM_TOKEN_FILE = os.environ.get(
     "LCARS_SYSTEM_TOKEN_FILE", os.path.join(ROLE_TOKENS_DIR, f"{SYSTEM_ACCOUNT}.gitea_token"))
 # Le courriel decide de ce que la forge AFFICHE : un commit dont l'adresse d'auteur est celle du
@@ -141,7 +142,9 @@ HUMAN_EMAIL_DOMAIN = os.environ.get("LCARS_HUMAN_EMAIL_DOMAIN", "lcars.local")
 # 50 Mo, la meme borne des deux cotes. Elle vit dans le code des deux processus et se surcharge par
 # l'environnement : une borne que le deck croit plus haute que la porte ne fait que deplacer le
 # refus, elle ne laisse rien passer.
-DEPOSIT_MAX_BYTES = int(os.environ.get("LCARS_DEPOSIT_MAX_BYTES", str(50 * 1000 * 1000)))
+# ⚠ LE PLAFOND EST UN REGLAGE, PAS UNE RECOMPILATION : le fait porte le defaut, l'installeur le
+# transporte quand l'operateur le change, et l'environnement gagne sur le fait.
+DEPOSIT_MAX_BYTES = int(lcars_facts.get("LCARS_DEPOSIT_MAX_BYTES"))
 # UN NOM DE FICHIER, JAMAIS UN CHEMIN : le nom devient un segment d'URL et un chemin dans le depot.
 # Ni `/`, ni `..`, ni nom cache, et une longueur bornee.
 # Une ready room que personne ne purge finit par etre longue : on la parcourt page par page, mais

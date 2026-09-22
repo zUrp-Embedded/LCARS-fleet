@@ -137,12 +137,12 @@ STATIC_FILES = {
 # l'humain comme AUTEUR ; la poussee reste celle du compte systeme, parce qu'aucun jeton personnel
 # n'existe dans ce conteneur. C'est une trace pour savoir qui a depose quoi, pas une preuve
 # opposable a celui qui la conteste.
-DEPOSIT_SOCKET = os.environ.get("LCARS_DEPOSIT_SOCKET", "/run/lcars/deposit/deposit.sock")
+DEPOSIT_SOCKET = lcars_facts.get("LCARS_DEPOSIT_SOCKET")
 # Sur DISQUE, jamais sous `/run` : c'est un tmpfs, donc 50 Mo de transit y seraient 50 Mo de RAM.
-DEPOSIT_SPOOL = os.environ.get("LCARS_DEPOSIT_SPOOL", "/var/tmp/lcars/deposit")
+DEPOSIT_SPOOL = lcars_facts.get("LCARS_DEPOSIT_SPOOL")
 # La meme borne que la porte d'en face, et les deux se lisent : celle-ci refuse au fil de la
 # lecture, celle d'en face mesure le fichier qu'elle trouve.
-DEPOSIT_MAX_BYTES = int(os.environ.get("LCARS_DEPOSIT_MAX_BYTES", str(50 * 1000 * 1000)))
+DEPOSIT_MAX_BYTES = int(lcars_facts.get("LCARS_DEPOSIT_MAX_BYTES"))
 # Le temps d'un depot, pas celui d'une question : la porte pousse le fichier vers la forge pendant
 # que ce delai court.
 DEPOSIT_TIMEOUT = int(os.environ.get("LCARS_DEPOSIT_TIMEOUT", "600"))

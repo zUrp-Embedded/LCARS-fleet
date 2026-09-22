@@ -109,10 +109,9 @@ services_env_body() {
   # pendant que le master ne sert qu'aux questions d'autorité. Deux jetons, deux usages, un seul
   # chemin déclaré de chaque côté.
   echo "LCARS_SYSTEM_TOKEN_FILE=$PROV_SYSTEM_TOKEN_FILE"
-  # La boîte de dépôt : le deck écrit dans la zone de transit, la porte y lit et cherche l'org du
-  # projet parmi les catalogues installés. Deux daemons, une seule valeur pour chaque chemin.
-  echo "LCARS_DEPOSIT_SPOOL=$PROV_DEPOSIT_SPOOL"
-  echo "LCARS_CATALOGUES_DIR=$PROV_CATALOGUES_DIR"
+  # La boîte de dépôt : les CHEMINS sont des faits, les deux daemons les lisent eux-mêmes. Seul le
+  # plafond voyage — c'est un choix d'opérateur, et l'environnement gagne sur le fait.
+  echo "LCARS_DEPOSIT_MAX_BYTES=$PROV_DEPOSIT_MAX_BYTES"
   echo "LCARS_UID_MAP_FILE=$PROV_UID_MAP_FILE"
   echo "LCARS_CONSOLE_GROUP=$PROV_CONSOLE_GROUP"
   echo "LCARS_SYSTEM_ACCOUNT=$PROV_SYSTEM_ACCOUNT"

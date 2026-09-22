@@ -92,9 +92,11 @@ PROV_FACT_MIRRORS=(
   PROV_CATALOGUES_DIR=LCARS_CATALOGUES_DIR
   PROV_CATALOGUES_WORK=LCARS_CATALOGUES_WORK
   PROV_DECK_OIDC_FILE=LCARS_DECK_OIDC_FILE
-  # les deux que l'opérateur peut régler : le miroir porte sur le DÉFAUT, pas sur son choix
+  PROV_DEPOSIT_SPOOL=LCARS_DEPOSIT_SPOOL
+  # les trois que l'opérateur peut régler : le miroir porte sur le DÉFAUT, pas sur son choix
   PROV_FORGE_ORG_DEFAULT=LCARS_FORGE_ORG
   PROV_DECK_PORT_DEFAULT=LCARS_LANDING_PORT
+  PROV_DEPOSIT_MAX_BYTES_DEFAULT=LCARS_DEPOSIT_MAX_BYTES
 )
 prov_refuse_faits_divergents() { # rc 1 et la paire nommée si une constante ment sur son fait
   local p cst fait ecarts=()
@@ -123,6 +125,7 @@ prov_refuse_faits_divergents() { # rc 1 et la paire nommée si une constante men
 # le dépôt du système, dans l'org système : dérivé, jamais choisi à part (un choix à part diverge)
 : "${PROV_OPS_REPO:=$PROV_FORGE_ORG/_ops}"
 : "${PROV_DECK_PORT:=$PROV_DECK_PORT_DEFAULT}"
+: "${PROV_DEPOSIT_MAX_BYTES:=$PROV_DEPOSIT_MAX_BYTES_DEFAULT}"
 : "${PROV_SSH_PORT:=$PROV_SSH_PORT_DEFAULT}"
 : "${PROV_FORGE_HOST_PORT:=$PROV_FORGE_HOST_PORT_DEFAULT}"
 # LCARS_BUILTIN_HUMAN est un choix explicite : il gagne sur l'humain que le journal retient

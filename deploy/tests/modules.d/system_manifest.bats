@@ -52,9 +52,13 @@ resolu() { # le code qui pose, les constantes remplacées par leur valeur et « 
   # ⚖ décision 3 : le produit nomme ces chemins par leur FAIT (`runtime/etc/facts.env`) et non plus
   # par un littéral recopié. Les faits se résolvent donc comme les constantes — sans quoi un objet
   # de la table paraîtrait sans poseur alors que son poseur le nomme, mieux qu'avant.
+  # un fait s'écrit dans deux langues : `$FAIT` en shell, `lcars_facts.get("FAIT")` en python. Les
+  # deux nomment le même objet — le résolveur les tient toutes les deux, sinon la porte qui lit son
+  # fait au lieu de recopier un littéral paraîtrait ne rien poser.
   while IFS='=' read -r k v; do
     [[ "$k" =~ ^LCARS_[A-Z0-9_]+$ ]] || continue
     c="${c//\$\{$k\}/$v}"; c="${c//\$$k/$v}"
+    c="${c//lcars_facts.get(\"$k\")/$v}"
   done < <(sort -r "$BATS_TEST_DIRNAME/../../../runtime/etc/facts.env")
   sed -E 's/\$\(prov_decor "?([^")]*)"?\)/\1/g' <<<"$c"
 }

@@ -62,7 +62,7 @@ prov_dirs() {
     "$PROV_STORE_ROOT" \
     "$(prov_decor /var/tmp/lcars)" \
     "$(prov_decor /var/tmp/lcars/toolchain-work)" \
-    "$(prov_decor /var/tmp/lcars/deposit)" \
+    "$(prov_decor "$PROV_DEPOSIT_SPOOL")" \
     "$(prov_decor /etc/lcars)"
   prov_runtime_dirs
 }
