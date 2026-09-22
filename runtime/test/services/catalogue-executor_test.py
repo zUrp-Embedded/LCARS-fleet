@@ -34,6 +34,7 @@ import socket
 import sys
 import tempfile
 import threading
+import urllib.parse
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -81,6 +82,8 @@ ECRITS = []
 # et les depots dont la face workshop n'a jamais ete poussee.
 LUS = []
 SANS_WORKSHOP = set()
+# La taille d'une page du banc : petite, pour que la pagination se joue pour de vrai.
+PAGE = 50
 
 # Le faux geste PARLE, et son code de sortie est pilotable : le relais de sa sortie et la remontee
 # de son code sont deux promesses distinctes de l'executeur.
@@ -119,14 +122,25 @@ class Forge(BaseHTTPRequestHandler):
             if repo in SANS_WORKSHOP:
                 self.send_response(404); self.send_header("Content-Length", "0")
                 self.end_headers(); return
-            dedans = [{"name": c.split("/")[-1], "type": "file", "sha": v}
-                      for (r, c), v in FICHIERS.items()
-                      if r == repo and c.startswith(demande.rstrip("/") + "/")]
+            dedans = sorted(
+                [{"name": c.split("/")[-1], "type": "file", "sha": v}
+                 for (r, c), v in FICHIERS.items()
+                 if r == repo and c.startswith(demande.rstrip("/") + "/")],
+                key=lambda e: e["name"])
             if not dedans and (repo, demande) not in FICHIERS:
                 self.send_response(404); self.send_header("Content-Length", "0")
                 self.end_headers(); return
-            b = json.dumps(dedans).encode()
-            self.send_response(200); self.send_header("Content-Length", str(len(b)))
+            # ⚠ ELLE PAGINE, COMME LA VRAIE. Un banc qui rend tout d'un coup ne peut pas voir une
+            # troncature lue comme une absence — c'est exactement le defaut qu'on a corrige.
+            page = int(dict(urllib.parse.parse_qsl(self.path.partition("?")[2])).get("page", "1"))
+            tranche = dedans[(page - 1) * PAGE:page * PAGE]
+            b = json.dumps(tranche).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(b)))
+            if page * PAGE < len(dedans):
+                suivante = "%s&page=%d" % (self.path.split("&page=")[0], page + 1)
+                self.send_header("Link", '<http://127.0.0.1:%d%s>; rel="next"'
+                                 % (self.server.server_port, suivante))
             self.end_headers(); self.wfile.write(b); return
         # « CE DEPOT EXISTE-T-IL ? » — la resolution de l'org pose cette question a chaque catalogue.
         if chemin.startswith("/api/v1/repos/") and "/contents/" not in chemin:
@@ -799,6 +813,40 @@ check([e["methode"] for e in ECRITS] == ["POST", "PUT"],
 check(not [u for u in LUS if "/contents/ready-room/firmware.bin" in u],
       "depot: le sha vient du LISTAGE, jamais du contenu du fichier (%s)"
       % [u for u in LUS if "/contents/" in u][:2])
+
+# ─── 10 bis (pagination). UNE READY ROOM QUI DEPASSE UNE PAGE ───────────────────────────────────
+#
+# ⚠ LE DEFAUT QUE CE CAS FERME : une reponse tronquee lue comme complete rend « absent » pour un
+# fichier bien la, et le remplacement devient un refus de la forge. La porte suit `Link: rel="next"`
+# jusqu'au bout. Le banc pagine par 50 ; on en met 120 pour que la cible soit hors premiere page.
+for _i in range(120):
+    FICHIERS[("reverse/samyang-reverse", "ready-room/piece-%03d.bin" % _i)] = "blob-p%03d" % _i
+ECRITS.clear()
+_v = depose("alice", "samyang-reverse", contenu=b"firmware v4")
+check(_v.startswith("OK:"),
+      "depot: le remplacement traverse les pages du listage — %s" % _v[:40])
+check([e["methode"] for e in ECRITS] == ["POST", "PUT"],
+      "depot: et c'est bien un remplacement, pas un refus (%s)" % [e["methode"] for e in ECRITS])
+
+# ⚠ ET LA TRAVERSEE EST BORNEE : une ready room sans fin ne doit pas faire boucler ce service.
+# La cible trie APRES les pieces : sans ca elle tombe en premiere page et la borne n'est jamais
+# atteinte — le cas passerait au vert sans rien mesurer.
+FICHIERS[("reverse/samyang-reverse", "ready-room/zz-cible.bin")] = "blob-zz"
+_max_listing = mod.DEPOSIT_LISTING_MAX
+mod.DEPOSIT_LISTING_MAX = 60
+ECRITS.clear()
+_v = depose("alice", "samyang-reverse", contenu=b"cible v2", nom="zz-cible.bin")
+check(_v == "FAIL:listing_too_long",
+      "depot: au-dela de la borne du listage, la porte le DIT au lieu de boucler — %s" % _v)
+mod.DEPOSIT_LISTING_MAX = _max_listing
+# Et avec la vraie borne, la meme cible hors premiere page se remplace.
+ECRITS.clear()
+_v = depose("alice", "samyang-reverse", contenu=b"cible v3", nom="zz-cible.bin")
+check(_v.startswith("OK:") and [e["methode"] for e in ECRITS] == ["POST", "PUT"],
+      "depot: la meme cible, hors premiere page, se remplace — %s" % _v[:40])
+FICHIERS.pop(("reverse/samyang-reverse", "ready-room/zz-cible.bin"), None)
+for _i in range(120):
+    FICHIERS.pop(("reverse/samyang-reverse", "ready-room/piece-%03d.bin" % _i), None)
 
 # ─── 10 bis (fin). UNE FACE WORKSHOP JAMAIS POUSSEE SE NOMME ────────────────────────────────────
 # Le depot existe — la resolution vient de le prouver. Un 404 a l'ecriture parle donc de la BRANCHE,

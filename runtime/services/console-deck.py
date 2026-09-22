@@ -168,6 +168,7 @@ DEPOSIT_CAUSES = {
     "empty": "fichier vide",
     "unknown_project": "aucun catalogue installe ne porte ce projet sur la forge",
     "no_workshop_branch": "ce projet n'a pas encore de face workshop sur la forge — rien n'est depose",
+    "listing_too_long": "la ready room de ce projet est trop longue pour remplacer un fichier — fais le menage",
     "ambiguous_project": "ce nom de projet existe dans plusieurs catalogues — la porte ne choisit pas",
     "no_authority": "ce conteneur n'a pas de jeton utilisable pour deposer",
     "forge_unreachable": "la forge n'a pas repondu — rien n'est depose",

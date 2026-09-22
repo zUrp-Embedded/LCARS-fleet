@@ -144,6 +144,9 @@ HUMAN_EMAIL_DOMAIN = os.environ.get("LCARS_HUMAN_EMAIL_DOMAIN", "lcars.local")
 DEPOSIT_MAX_BYTES = int(os.environ.get("LCARS_DEPOSIT_MAX_BYTES", str(50 * 1000 * 1000)))
 # UN NOM DE FICHIER, JAMAIS UN CHEMIN : le nom devient un segment d'URL et un chemin dans le depot.
 # Ni `/`, ni `..`, ni nom cache, et une longueur bornee.
+# Une ready room que personne ne purge finit par etre longue : on la parcourt page par page, mais
+# pas indefiniment — au-dela, le remplacement se dit impossible plutot que de boucler.
+DEPOSIT_LISTING_MAX = int(os.environ.get("LCARS_DEPOSIT_LISTING_MAX", "5000"))
 DEPOSIT_NAME_RX = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 # Le login affirme devient lui aussi un segment de chemin : meme forme que partout ailleurs.
 LOGIN_RX = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
@@ -472,9 +475,13 @@ def blob_sha(repo, branch, dossier, nom):
     ⚠ LE LISTAGE DU REPERTOIRE, NI L'ARBRE NI LE CONTENU. Trois formes existaient, deux sont des
     pieges : `GET /contents/<fichier>` rendrait le fichier ENCODE — demander si un fichier de 50 Mo
     existe en le telechargeant ne se voit qu'en production ; `git/trees/<branche>?recursive` compte
-    TOUTE la face, se tronque au-dela d'une page, et rendrait alors « absent » pour un fichier bien
-    la — le remplacement se transformerait en `forge_refused:422` sur une face bien remplie. Le
-    listage d'un repertoire rend des noms et des sha, sans contenu, et ne parle que de la ready room.
+    TOUTE la face et se tronque au-dela d'une page, donc rendrait « absent » pour un fichier bien la.
+    Le listage d'un repertoire ne parle que de la ready room.
+
+    ⚠ ET IL SE PAGINE QUAND MEME. Une ready room que personne ne purge finit par depasser une page ;
+    une reponse tronquee lue comme complete rendrait « absent », et le remplacement deviendrait un
+    refus de la forge. On suit donc `Link: rel="next"` jusqu'au bout, comme le client de forge du
+    produit le fait de son cote.
 
     Un dossier absent (404) rend None : c'est un premier depot, pas une panne.
     """
@@ -482,21 +489,39 @@ def blob_sha(repo, branch, dossier, nom):
     url = (f"{FORGE_BASE_URL.rstrip('/')}/api/v1/repos/"
            f"{urllib.parse.quote(owner, safe='')}/{urllib.parse.quote(name, safe='')}/contents/"
            f"{urllib.parse.quote(dossier)}?ref={urllib.parse.quote(branch, safe='')}")
-    req = urllib.request.Request(url, headers={"Authorization": f"token {system_token()}"})
-    try:
-        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
-            entrees = json.load(resp)
-    except urllib.error.HTTPError as exc:
-        if exc.code == 404:
+    vues = 0
+    while url:
+        req = urllib.request.Request(url, headers={"Authorization": f"token {system_token()}"})
+        try:
+            with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
+                entrees = json.load(resp)
+                suivante = _lien_suivant(resp.headers.get("Link"))
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                return None
+            raise
+        # ⚠ UNE LISTE, PAS UN OBJET : la meme route rend un OBJET quand le chemin est un FICHIER. Si
+        # la ready room etait un fichier, on ne saurait pas quoi remplacer — et on ne le devine pas.
+        if not isinstance(entrees, list):
             return None
-        raise
-    # ⚠ UNE LISTE, PAS UN OBJET : la meme route rend un OBJET quand le chemin est un FICHIER. Si la
-    # ready room etait un fichier, on ne saurait pas quoi remplacer — et on ne le devine pas.
-    if not isinstance(entrees, list):
-        return None
-    for entree in entrees:
-        if entree.get("name") == nom and entree.get("type") == "file":
-            return entree.get("sha")
+        for entree in entrees:
+            if entree.get("name") == nom and entree.get("type") == "file":
+                return entree.get("sha")
+        vues += len(entrees)
+        # Une pagination qui ne s'arrete pas est une boucle : on la borne et on le dit.
+        if vues > DEPOSIT_LISTING_MAX:
+            log(f"depot: {repo} {dossier} depasse {DEPOSIT_LISTING_MAX} entrees — listage abandonne")
+            raise LookupError("listing_too_long")
+        url = suivante
+    return None
+
+
+def _lien_suivant(entete):
+    """L'URL de la page suivante d'un `Link:` RFC 8288, ou None. Rien d'autre n'est interprete."""
+    for morceau in (entete or "").split(","):
+        cible, _, params = morceau.partition(">")
+        if 'rel="next"' in params and "<" in cible:
+            return cible[cible.index("<") + 1:].strip()
     return None
 
 
@@ -695,7 +720,13 @@ def serve_deposit(conn):
             # distinguer un remplacement d'un ecrasement aveugle.
             if exc.code not in (409, 422):
                 raise
-            sha = blob_sha(repo, WORKSHOP_BRANCH, READY_ROOM_DIR, name)
+            try:
+                sha = blob_sha(repo, WORKSHOP_BRANCH, READY_ROOM_DIR, name)
+            except LookupError as trop:
+                # La ready room est trop longue pour qu'on affirme quoi que ce soit : on le DIT, au
+                # lieu de rendre « la forge refuse » sur une question qu'on n'a pas pu poser.
+                log(f"refus depot: {repo} — {trop.args[0]}")
+                return done(f"FAIL:{trop.args[0]}")
             if not sha:
                 raise
             log(f"depot: {path} existe deja dans {repo} — {login} le remplace")
