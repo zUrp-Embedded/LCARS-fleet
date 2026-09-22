@@ -59,6 +59,13 @@ defmodule Fleet.Layout do
   # declaree, et lui inventer un mode ici serait declarer une regle que personne n'a mesuree.
   @writer_face_modes %{"workshop" => 0o2775, "ops" => 0o2755}
 
+  # ⚠ LE NOM DE LA READY ROOM EST UN CHOIX DE CONCEPTION, PAS UN REGLAGE. C'est le repertoire de la
+  # face ATELIER ou la boite de depot du deck ecrit ce qu'un humain remet aux agents d'un projet.
+  # Trois lecteurs le portent : le modele de projet le CREE (les deux catalogues), la porte de depot
+  # y ecrit, et l'agent l'y lit. Le laisser se renommer par l'environnement rendrait ces trois-la
+  # muets l'un pour l'autre, sans qu'aucun message ne le dise — meme raison que pour les branches.
+  @ready_room_dir "ready-room"
+
   # ⚠ LCARS IS A PROJECT OF THE FLEET IT INSTALLS (⚖ user 2026-09-16). The tree a machine was
   # installed from is not a loose checkout beside the projects: it is the CODE FACE of a project
   # like any other, adopted onto the forge with its ops and workshop faces. Naming it here is what
@@ -146,6 +153,15 @@ defmodule Fleet.Layout do
   """
   @spec runtime_root() :: Path.t()
   def runtime_root, do: @runtime_root
+
+  @doc """
+  Directory of the WORKSHOP face where the deck's deposit tab writes (`ready-room`).
+
+  A human deposits a file for a project's agents; it lands here, on the workshop face, authored by
+  that human. The project template creates it, so the directory exists before the first deposit.
+  """
+  @spec ready_room_dir() :: String.t()
+  def ready_room_dir, do: @ready_room_dir
 
   @doc """
   Drafting root for backlog, plans, scratchpads and unfinished specs that do not ship.

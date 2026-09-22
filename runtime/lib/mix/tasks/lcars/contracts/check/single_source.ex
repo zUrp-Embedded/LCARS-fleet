@@ -132,43 +132,92 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
   end
 
   @doc """
-  Freezes the WORKSHOP face branch in its only mirror outside Elixir.
+  Freezes the two deposit names in their only mirror outside Elixir.
 
-  `Fleet.Layout` declares the three face branches; the deposit door writes on the workshop one and
-  carries the name. Same rule as the toolchain branch, for the same reason: a name half of the rail
-  can retune is a rail that splits in silence. The check requires a double-quoted literal and
-  rejects reading any BRANCH from the environment. Only the listed mirror is checked.
+  `Fleet.Layout` declares the face branches and the ready-room directory; the deposit door writes
+  on the workshop branch, into that directory, and carries both names. Same rule as the toolchain
+  branch, for the same reason: a name half of the rail can retune is a rail that splits in silence.
+  The check requires a double-quoted literal for each and rejects reading any BRANCH from the
+  environment. Only the listed mirror is checked; the project template is held by its own witness.
   """
-  @spec check_workshop_branch_single_source(String.t()) :: Support.result()
-  def check_workshop_branch_single_source(root) do
+  @spec check_deposit_names_single_source(String.t()) :: Support.result()
+  def check_deposit_names_single_source(root) do
     mirrors = ["services/catalogue-executor.py"]
 
     {checked, skipped} =
       Enum.split_with(mirrors, fn rel -> mirror_scope(rel, root) == :required end)
 
-    id = "layout.workshop_branch_single_source"
+    id = "layout.deposit_names_single_source"
 
     remediation =
-      "copy the literal from `Fleet.Layout.workshop_branch/0` into the door, and never read it " <>
-        "from the environment — the deposit lands on that branch, and a tunable name lands it " <>
-        "elsewhere without a word"
+      "copy the literals from `Fleet.Layout.workshop_branch/0` and `Fleet.Layout.ready_room_dir/0` " <>
+        "into the door, and never read them from the environment — the deposit lands on that " <>
+        "branch, in that directory, and a tunable name lands it elsewhere without a word"
 
-    expected =
+    branche =
       source_literal(
         root,
         "lib/fleet/layout.ex",
         ~r/@face_branches[^\n]*"workshop"\s*=>\s*"([^"]+)"/
       )
 
+    dossier = source_literal(root, "lib/fleet/layout.ex", ~r/@ready_room_dir\s+"([^"]+)"/)
+
     cond do
       checked == [] ->
         out_of_scope(id, "no mirror tree present", skipped)
 
-      is_nil(expected) ->
-        unreadable_authority(id, remediation, "lib/fleet/layout.ex", "@face_branches")
+      is_nil(branche) or is_nil(dossier) ->
+        unreadable_authority(
+          id,
+          remediation,
+          "lib/fleet/layout.ex",
+          "@face_branches/@ready_room_dir"
+        )
 
       true ->
-        branch_verdict(id, remediation, expected, checked, skipped, root)
+        deposit_names_verdict(id, remediation, {branche, dossier}, checked, skipped, root)
+    end
+  end
+
+  # Le meme verdict que la branche d'outillage, sur DEUX litteraux : un miroir qui n'en porte qu'un
+  # est un miroir a moitie faux, et c'est la moitie absente qui derive.
+  defp deposit_names_verdict(id, remediation, {branche, dossier}, checked, skipped, root) do
+    bad =
+      Enum.flat_map(checked, fn rel ->
+        branch_freeze_gap(rel, root, branche) ++
+          case File.read(Path.expand(rel, root)) do
+            {:ok, body} ->
+              if String.contains?(body, "\"#{dossier}\""),
+                do: [],
+                else: [{rel, "does not carry the literal #{inspect(dossier)}"}]
+
+            _ ->
+              []
+          end
+      end)
+
+    if bad == [] do
+      %{
+        id: id,
+        remediation: "—",
+        status: :pass,
+        evidence: checked,
+        note:
+          "#{inspect(branche)} and #{inspect(dossier)} declared by Fleet.Layout and copied by the " <>
+            "#{length(checked)} reader(s) that carry them; no tunable left" <>
+            skipped_note(skipped)
+      }
+    else
+      %{
+        id: id,
+        remediation: remediation,
+        status: :fail,
+        evidence: Enum.map(bad, &elem(&1, 0)),
+        note:
+          "authority says #{inspect(branche)} / #{inspect(dossier)} — " <>
+            Enum.map_join(bad, " · ", fn {f, why} -> "#{f}: #{why}" end) <> skipped_note(skipped)
+      }
     end
   end
 
