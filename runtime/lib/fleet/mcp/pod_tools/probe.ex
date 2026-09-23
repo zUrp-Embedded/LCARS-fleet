@@ -183,9 +183,11 @@ defmodule Fleet.MCP.PodTools.Probe do
     poll(repo, run_id, deadline, opts)
   end
 
+  # Gitea 1.26.1 reports a finished run as `status: "completed"` and puts the outcome in
+  # `conclusion` (capture: test/fixtures/forge/action_run.json). No other terminal status exists.
   defp poll(repo, run_id, deadline, opts) do
     case forge_actions().run(repo, run_id, forge_opts(opts)) do
-      {:ok, %{"status" => status} = run} when status in ~w(success failure cancelled skipped) ->
+      {:ok, %{"status" => "completed"} = run} ->
         # Preserve execution state even when no LCARS-PROBE lines were emitted.
         case forge_actions().run_logs(repo, run_id, forge_opts(opts)) do
           {:ok, logs} -> {:ok, logs, Map.take(run, ["status", "conclusion"])}
