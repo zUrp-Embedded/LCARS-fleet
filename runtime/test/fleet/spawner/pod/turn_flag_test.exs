@@ -58,4 +58,58 @@ defmodule Fleet.Spawner.Pod.TurnFlagTest do
     assert :ok = TurnFlag.reset(nil)
     assert :ok = TurnFlag.reset("/no/such/dir-#{System.unique_integer([:positive])}")
   end
+
+  # ── watch.sh itself, run for real ──
+  # The harness Monitor expires (30 min) and the agent re-arms it. Whatever was written to the flag
+  # in between must be DELIVERED at re-arm, never absorbed — and never marked seen unread.
+  describe "watch.sh on re-arm" do
+    @watch Path.expand("priv/spawner/watch.sh", File.cwd!())
+
+    defp watch_for(dir, seconds) do
+      {out, _} =
+        System.cmd("timeout", ["#{seconds}", "bash", @watch, Path.join(dir, "turn.flag")],
+          stderr_to_stdout: true
+        )
+
+      String.split(out, "\n", trim: true)
+    end
+
+    @tag :tmp_dir
+    test "a wake written while no Monitor was armed is EMITTED at re-arm, then marked seen", %{
+      tmp_dir: dir
+    } do
+      File.write!(Path.join(dir, "turn.flag.seen"), "tok-1\n")
+      File.write!(Path.join(dir, "turn.flag"), "tok-2\n")
+
+      lines = watch_for(dir, 3)
+
+      assert "ton tour" in lines, "the pending wake was absorbed: #{inspect(lines)}"
+      assert File.read!(Path.join(dir, "turn.flag.seen")) =~ "tok-2"
+    end
+
+    @tag :tmp_dir
+    test "an INFO written in the gap is delivered verbatim at re-arm", %{tmp_dir: dir} do
+      File.write!(Path.join(dir, "turn.flag.seen"), "tok-1\n")
+      File.write!(Path.join(dir, "turn.flag"), "tok-2 info : brique #21 LIVRÉE\n")
+
+      assert "info : brique #21 LIVRÉE" in watch_for(dir, 3)
+    end
+
+    @tag :tmp_dir
+    test "nothing new since the last delivery → no wake, only the arming line", %{tmp_dir: dir} do
+      File.write!(Path.join(dir, "turn.flag.seen"), "tok-1\n")
+      File.write!(Path.join(dir, "turn.flag"), "tok-1\n")
+
+      assert watch_for(dir, 3) == ["watch arme sur #{Path.join(dir, "turn.flag")}"]
+    end
+
+    @tag :tmp_dir
+    test "first arming of a pod life: the boot token is the baseline, and .seen marks the arming",
+         %{tmp_dir: dir} do
+      File.write!(Path.join(dir, "turn.flag"), "boot-kick\n")
+
+      assert watch_for(dir, 3) == ["watch arme sur #{Path.join(dir, "turn.flag")}"]
+      assert TurnFlag.monitor_armed?(dir)
+    end
+  end
 end

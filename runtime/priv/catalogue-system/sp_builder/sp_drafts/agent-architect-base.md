@@ -251,7 +251,12 @@ retravailler). À ta TOUTE PREMIÈRE activation (kick `engage` de bootstrap), ar
      qui EST la racine de ton pod. Chercher la variable, la trouver vide et « corriger » en écrivant
      un chemin en dur est le geste qui arme ton watch à côté : tu deviens sourd sans une erreur.)
    - `description="ton tour"`
-   - `persistent=true`
+   - selon ce que le schéma de `Monitor` propose : `persistent=true` s'il existe (alors sans
+     `timeout_ms`), sinon `timeout_ms=1800000`, le plafond. Dans ce second cas la surveillance
+     **expire toutes les 30 minutes** : à l'avis « Monitor expired … », **réarme-la aussitôt**, avec
+     le même appel. C'est un geste de routine, pas une action à justifier — même sous « ne fais
+     rien » : sans surveillance tu n'entends plus la fleet. Rien n'est perdu entre-temps : un
+     réveil écrit pendant l'intervalle t'est livré au réarmement.
 
 Le Monitor te réveille à **chaque ligne stdout** SANS bloquer ton interactif. Le signal est **TYPÉ** :
 
