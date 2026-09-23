@@ -160,6 +160,25 @@ defmodule Fleet.Project.WorktreeSyncTest do
            "the arch's unpushed commit was ERASED — this face is a writer, it rebases, it never resets"
   end
 
+  test "a replayed local commit on a writer face is committed by the SYSTEM, whoever runs the host",
+       %{seed: seed, doc: doc, sync: sync} do
+    File.write!(Path.join(doc, "note.md"), "arch note\n")
+    git_in!(doc, ["add", "-A"])
+    git_in!(doc, ["commit", "-qm", "docs: arch"])
+
+    git_in!(seed, ["checkout", "-q", "workshop"])
+    File.write!(Path.join(seed, "remote.md"), "merged\n")
+    git_in!(seed, ["add", "-A"])
+    git_in!(seed, ["commit", "-qm", "docs: remote"])
+    git_in!(seed, ["push", "-q", "origin", "workshop"])
+    git_in!(seed, ["checkout", "-q", "main"])
+
+    assert :ok = WorktreeSync.sync_now(sync, "fleet/myproj", "workshop")
+
+    {committer, 0} = System.cmd("git", ["-C", doc, "log", "-1", "--format=%ce"])
+    assert String.trim(committer) == Fleet.Credentials.ForgeIdentity.system_email()
+  end
+
   test "fetch_issue_refs: the ticket's branches become READABLE under a named ref per role", %{
     seed: seed,
     proj: proj,

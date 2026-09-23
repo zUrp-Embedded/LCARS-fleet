@@ -167,7 +167,15 @@ defmodule Fleet.Project.WorktreeSync do
   # is attempted but its result is ignored.
   defp align_writer(dir, branch) do
     with :ok <- GitOps.run(["-C", dir, "fetch", "origin", branch], auth: true) do
-      case GitOps.run(["-C", dir, "rebase", "--autostash", "FETCH_HEAD"], auth: false) do
+      # Replaying local commits needs a committer. Writer faces are published by the system, and
+      # their guard admits only its address: without it the rebase stops half-way on a host whose
+      # human has no Git identity (measured on a bench, 2026-09-23), or commits as `login@hostname`.
+      %{name: name, email: email} = Fleet.Credentials.ForgeIdentity.system_identity()
+      identity = ["-c", "user.name=#{name}", "-c", "user.email=#{email}"]
+
+      case GitOps.run(["-C", dir | identity] ++ ["rebase", "--autostash", "FETCH_HEAD"],
+             auth: false
+           ) do
         :ok ->
           :ok
 
