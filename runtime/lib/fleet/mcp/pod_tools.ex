@@ -209,8 +209,9 @@ defmodule Fleet.MCP.PodTools do
           "fleet then RETIRES the old ticket itself (system comment + close; never two live " <>
           "tickets for one brick, never close anything yourself — you have no close tool). " <>
           "Refused if the old ticket has a LIVE PR (let it land or escalate). The result echoes " <>
-          ~s({"supersedes":N}; a "supersede_warning" means the old ticket could NOT be closed — ) <>
-          "relay it to your human. " <>
+          ~s({"supersedes":N}; a "supersede_warning" means the retirement of the old ticket ) <>
+          "stopped at the step it names: the old ticket is stamped `stage/retired`, it will never " <>
+          "be dispatched again, and `issue_retire` on it finishes the retirement. " <>
           "ORDER between tickets: `depends_on: [N, ...]` — the fleet writes the edges and the " <>
           "admission holds the ticket back while a blocker is open. Declare the SAME constraint " <>
           "in the brief's precondition block: the edge binds the machine, the prose binds the " <>
@@ -1180,9 +1181,12 @@ defmodule Fleet.MCP.PodTools do
           "successor, this one LIFTS them. `number` = the issue number. `reason` = why, in one " <>
           "or two sentences — it is posted on the ticket and it is the only trace of your " <>
           "decision. What happens: the live pull request is closed, every ticket that depended " <>
-          "on this one is commented and released, the reason is posted, the ticket is closed as " <>
-          "`stage/retired` (NOT delivered) and its pods are reaped. Any failure ABORTS and leaves " <>
-          "the ticket open. An already-closed ticket returns \"retired\":false and changes " <>
+          "on this one is commented and released, the ticket's own blockers are lifted, it is " <>
+          "closed as `stage/retired` (NOT delivered), THEN the reason is posted, and its pods are " <>
+          "reaped. It is stamped `stage/retired` FIRST: if a step fails, the ticket stays open " <>
+          "but is never dispatched again, the failed step is named on the ticket and in the " <>
+          "error, and calling this tool again finishes the retirement. An already-closed ticket " <>
+          "returns \"retired\":false and changes " <>
           "nothing. Returns {\"issue\":N,\"retired\":true,\"released\":[...],\"pr_closed\":N|null}."
       )
     end

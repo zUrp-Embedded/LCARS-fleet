@@ -1,62 +1,194 @@
 defmodule Fleet.MCP.PodTools.Delegation.Retirement do
   @moduledoc """
-  Retires issues directly, through supersede, or in a project sweep.
-  PR closure precedes dependency work because pull processing can outlive the issue.
-  These are ordered effects, not transactions: errors can leave a closed PR, copied
-  edges or posted comments. Reaper results are ignored and callback exceptions propagate.
+  Retires issues directly, through supersede, or in a project sweep — through ONE ordered sequence.
+
+  1. Stamp `stage/retired` on the still-open ticket. `StepDispatcher.decide/1` skips it from here
+     on: whatever fails afterwards, the ticket is never dispatched again.
+  2. Close its live pull request (pull processing can outlive the issue).
+  3. Read its graph: what it waits on (blockers), what waits on it (dependents).
+  4. With a successor, give the successor the edges it lacks — decided by READING the successor's
+     graph, never by parsing a forge error. Without one, tell each dependent it is released.
+  5. Lift the ticket's own blockers. Gitea refuses to close an issue with open dependencies (HTTP
+     412): without this step a blocked ticket cannot be retired at all.
+  6. Close as retired, then lift the dependents' edges (closure already releases them for
+     admission, which counts open blockers only; the removal cleans the graph).
+  7. Only now say it on the ticket: the comment describes what happened, never what was intended.
+  8. Reap its pods.
+
+  A failure after step 1 stops the sequence, leaves the ticket stamped and open, and says which
+  step failed and why — on the ticket and in the result. Every step tolerates being replayed, so
+  the same call finishes the retirement. An already-closed ticket is a no-op.
+  These are ordered effects, not transactions. Reaper results are ignored and callback
+  exceptions propagate.
   """
 
   require Logger
 
   alias Fleet.MCP.PodTools.Delegation.{DependencyForge, Gate, IssuePR}
 
-  # Copy both dependency directions before closing the old ticket. Reading the graph is what can
-  # stop the retirement; a single edge that will not be written does NOT — it is reported.
-  #
-  # ⚠ MESURE DU 2026-09-16 : LE RETRAIT QUI ECHOUE EST PIRE QUE L'ARETE QU'IL PORTE. Gitea 1.26 rend
-  # 500 (pas 409) sur deux etats ordinaires de cette ecriture — « issue dependency does already
-  # exist » et « circular dependencies exists » — et ce code faisait alors avorter le retrait. Le
-  # ticket remplace restait OUVERT, la fleet le redispatchait, et la meme brique etait livree deux
-  # fois : mesure sur le banc beta, cinq supersedes en echec sur un projet, deux livraisons
-  # jumelles (#12 et #14, #19 et #20). Une arete non portee se DIT ; un zombie, personne ne le voit.
-  #
-  # ⚠ A SURVEILLER : si ces deux etats se mettent a rendre 409 ou 200, c'est que la forge a ete
-  # corrigee en amont — le code ci-dessous continuera de marcher, et cette note pourra partir.
-  defp carry_dependencies(forge, repo, old_n, new_n) do
-    with {:ok, _} <- Gate.conforming(DependencyForge, forge),
-         {:ok, blockers} <- forge.issue_dependencies(repo, old_n, []),
-         {:ok, blocked} <- forge.issue_blocks(repo, old_n, []) do
-      non_portees =
-        copy_edges(blockers, fn b -> forge.add_issue_dependency(repo, new_n, b, []) end) ++
-          copy_edges(blocked, fn b -> forge.add_issue_dependency(repo, b, new_n, []) end)
+  @retired_label Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_retired()
 
-      {:ok, non_portees}
+  @typedoc "What a retirement is for: a successor carries the work on, a reason ends it."
+  @type intent :: {:successor, pos_integer()} | {:reason, String.t()}
+
+  @doc """
+  Runs the retirement sequence on an open ticket. Returns the outcome map, or
+  `{:error, {:retire_incomplete, n, step, reason}}` with the ticket left stamped and open.
+  """
+  @spec retire(module(), String.t(), pos_integer(), :open | {:open, pos_integer()}, intent()) ::
+          {:ok, map()} | {:error, {:retire_incomplete, pos_integer(), atom(), term()}}
+  def retire(forge, repo, n, target, intent) do
+    pr = live_pr(target)
+
+    with {:ok, _} <- step(:stamp, forge.add_label(repo, n, @retired_label, [])),
+         :ok <- step(:pull_request, IssuePR.close_live_pr(forge, repo, pr)),
+         {:ok, blockers, dependents} <- read_graph(forge, repo, n),
+         {:ok, not_carried} <- hand_over(forge, repo, n, dependents, blockers, intent),
+         :ok <- lift(forge, repo, n, blockers),
+         {:ok, _} <- step(:close, forge.close_issue(repo, n, closure: :retired)) do
+      {released, unlifted} = lift_dependents(forge, repo, n, dependents)
+      said = say(forge, repo, n, closed_comment(intent, not_carried))
+      _ = pod_reaper().reap_issue(repo, n)
+
+      {:ok,
+       %{"issue" => n, "retired" => true, "released" => released, "pr_closed" => pr}
+       |> put_if("edges_not_lifted", unlifted)
+       |> put_if("edges_not_carried", not_carried)
+       |> put_if("comment_not_posted", if(said == :ok, do: [], else: [said]))}
     else
-      {:error, reason} -> {:error, {:dependencies_not_read, reason}}
+      {:error, {step, reason}} ->
+        Logger.error(
+          "Delegation: retirement of #{repo}##{n} INCOMPLETE at #{step} (#{inspect(reason)}) — " <>
+            "stamped #{@retired_label}, so never dispatched again; replaying the retirement finishes it"
+        )
+
+        _ = say(forge, repo, n, incomplete_comment(step, reason))
+        {:error, {:retire_incomplete, n, step, reason}}
     end
   end
 
-  # Rend la liste des aretes qui n'ont PAS ete portees, chacune avec sa cause.
-  defp copy_edges(issues, write_fun) do
-    Enum.flat_map(issues, &copy_one_edge(&1, write_fun))
-  end
+  defp live_pr({:open, pr}), do: pr
+  defp live_pr(_open), do: nil
 
-  defp copy_one_edge(issue, write_fun) do
-    case Map.get(issue, "number") do
-      n when is_integer(n) -> edge_written(n, write_fun.(n))
-      _ -> ["une arête sans numéro (#{inspect(issue)})"]
+  defp step(_name, :ok), do: :ok
+  defp step(_name, {:ok, _} = ok), do: ok
+  defp step(name, {:error, reason}), do: {:error, {name, reason}}
+
+  defp read_graph(forge, repo, n) do
+    with {:ok, blockers} <- step(:graph, numbers(forge.issue_dependencies(repo, n, []))),
+         {:ok, dependents} <- step(:graph, numbers(forge.issue_blocks(repo, n, []))) do
+      {:ok, blockers, dependents}
     end
   end
 
-  defp edge_written(_n, {:ok, _}), do: []
-  # 409, et 500 « does already exist » : l'arête EST portée, la forge le dit mal.
-  defp edge_written(_n, {:error, {:http, 409, _}}), do: []
-
-  defp edge_written(n, {:error, {:http, 500, %{"message" => m}}}) when is_binary(m) do
-    if String.contains?(m, "does already exist"), do: [], else: ["##{n} : #{m}"]
+  # An edge whose other end has no number cannot be carried nor lifted: stop rather than guess.
+  defp numbers({:ok, issues}) do
+    Enum.reduce_while(issues, {:ok, []}, fn issue, {:ok, acc} ->
+      case Map.get(issue, "number") do
+        d when is_integer(d) -> {:cont, {:ok, acc ++ [d]}}
+        _ -> {:halt, {:error, {:edge_without_number, issue}}}
+      end
+    end)
   end
 
-  defp edge_written(n, {:error, raison}), do: ["##{n} : #{inspect(raison)}"]
+  defp numbers({:error, _} = err), do: err
+
+  defp hand_over(forge, repo, n, dependents, blockers, {:successor, succ}) do
+    with {:ok, held} <- step(:carry, numbers(forge.issue_dependencies(repo, succ, []))),
+         {:ok, waiting} <- step(:carry, numbers(forge.issue_blocks(repo, succ, []))) do
+      to_hold = (blockers -- [succ, n]) -- held
+      to_wait = (dependents -- [succ, n]) -- waiting
+
+      # A refused edge is SAID (on the ticket and in the result), it does not stop the retirement:
+      # the successor exists already, and a zombie predecessor costs more than a missing edge.
+      not_carried =
+        Enum.flat_map(to_hold, &carry(forge.add_issue_dependency(repo, succ, &1, []), &1)) ++
+          Enum.flat_map(to_wait, &carry(forge.add_issue_dependency(repo, &1, succ, []), &1))
+
+      {:ok, not_carried}
+    end
+  end
+
+  defp hand_over(forge, repo, n, dependents, _blockers, {:reason, _}) do
+    Enum.reduce_while(dependents, {:ok, []}, fn d, acc ->
+      case forge.post_comment(repo, d, released_comment(n), []) do
+        {:ok, _} -> {:cont, acc}
+        {:error, err} -> {:halt, {:error, {:announce, {d, err}}}}
+      end
+    end)
+  end
+
+  defp carry({:ok, _}, _other), do: []
+  # 409: the edge appeared between the read and the write — it is carried.
+  defp carry({:error, {:http, 409, _}}, _other), do: []
+
+  defp carry({:error, {:http, _, %{"message" => m}}}, other) when is_binary(m) and m != "",
+    do: ["##{other} : #{m}"]
+
+  defp carry({:error, reason}, other), do: ["##{other} : #{inspect(reason)}"]
+
+  # The ticket's own blockers must go before the close: Gitea refuses to close an issue that still
+  # has open dependencies. Every removal is attempted; the first failure stops before the close.
+  defp lift(forge, repo, n, blockers) do
+    case Enum.reject(blockers, &match?({:ok, _}, forge.remove_issue_dependency(repo, n, &1, []))) do
+      [] -> :ok
+      left -> {:error, {:lift, {:blockers_not_lifted, left}}}
+    end
+  end
+
+  # After closure, attempt every removal and report failures rather than stopping at the first.
+  defp lift_dependents(forge, repo, n, dependents) do
+    Enum.reduce(dependents, {[], []}, fn d, {ok, ko} ->
+      case forge.remove_issue_dependency(repo, d, n, []) do
+        {:ok, _} ->
+          {ok ++ [d], ko}
+
+        {:error, err} ->
+          Logger.error(
+            "Delegation: #{repo}##{n} retired and closed, but the edge of dependent ##{d} could " <>
+              "not be lifted (#{inspect(err)}) — ##{d} is released anyway (admission counts open " <>
+              "blockers only); the stale edge remains to be cleaned by hand"
+          )
+
+          {ok, ko ++ [d]}
+      end
+    end)
+  end
+
+  defp say(forge, repo, n, body) do
+    case forge.post_comment(repo, n, body, []) do
+      {:ok, _} -> :ok
+      {:error, reason} -> inspect(reason)
+    end
+  end
+
+  defp put_if(map, _key, []), do: map
+  defp put_if(map, key, list), do: Map.put(map, key, list)
+
+  defp closed_comment({:reason, reason}, _not_carried) do
+    "Ticket retiré par l'architecte — aucun remplaçant, rien n'a été livré.\n\nMotif : #{reason}"
+  end
+
+  defp closed_comment({:successor, succ}, []) do
+    "Remplacé par ##{succ} (brief re-cadré) — ticket retiré et fermé par la fleet (supersede)."
+  end
+
+  defp closed_comment({:successor, succ}, not_carried) do
+    closed_comment({:successor, succ}, []) <>
+      "\n\n⚠ Dépendance(s) NON portée(s) vers ##{succ}, à reposer à la main si elles comptent :\n" <>
+      Enum.map_join(not_carried, "\n", &("- " <> &1))
+  end
+
+  defp incomplete_comment(step, reason) do
+    "Retrait INTERROMPU à l'étape `#{step}` (#{inspect(reason)}). Le ticket est tamponné " <>
+      "`#{@retired_label}` : il ne sera plus jamais dispatché. Il reste ouvert : relancer le " <>
+      "retrait (`issue_retire`) le termine."
+  end
+
+  defp released_comment(n) do
+    "Le bloqueur ##{n} a été retiré sans remplaçant : la dépendance est levée sur ce ticket. " <>
+      "Si ce travail restait nécessaire, il doit être redemandé — le retrait n'a rien livré."
+  end
 
   @doc """
   Sweeps issues in projects whose reported state is open, behind the onboarder gate.
@@ -119,26 +251,15 @@ defmodule Fleet.MCP.PodTools.Delegation.Retirement do
 
   defp stop_one(forge, repo, n, reason) do
     case IssuePR.target_state_preflight(forge, repo, n) do
-      {:ok, target} -> do_retire_issue(forge, repo, n, reason, target)
+      {:ok, target} -> retire_open(forge, repo, n, target, {:reason, reason})
       {:error, _} = err -> err
     end
   end
 
   @doc """
   Retires a bound-project ticket without creating a replacement. Requires a nonempty
-  reason; closure records retirement rather than delivery.
-
-  Order: close live PR, read/address dependents, announce their release, comment on
-  the target, close it, then attempt each edge removal and reap its pods. Closing
-  releases admission blockers because Lease counts only open issues; removing edges
-  afterwards cleans the graph. Announcements explain that necessary work must be requested again.
-
-  A returned failure before closure aborts remaining steps but does not undo earlier
-  effects. Edge-removal failures after closure are returned in edges_not_lifted;
-  released lists successful removals, not every dependent unblocked by closure.
-  An already-closed target is a no-op and does not retry edge cleanup or reaping.
-  Concurrent forge changes and ambiguous write failures can invalidate the logged
-  claim that an aborted target is still open.
+  reason; closure records retirement rather than delivery. Runs the sequence of the moduledoc;
+  an incomplete retirement is replayed by calling it again.
   """
   @spec retire_issue(integer(), String.t(), map()) :: {:ok, map()} | {:error, term()}
   def retire_issue(number, reason, state)
@@ -147,13 +268,13 @@ defmodule Fleet.MCP.PodTools.Delegation.Retirement do
          {:ok, forge} <- Gate.conforming_forge(),
          {:ok, _} <- Gate.conforming(DependencyForge, forge),
          {:ok, target} <- IssuePR.target_state_preflight(forge, repo, number) do
-      do_retire_issue(forge, repo, number, reason, target)
+      retire_open(forge, repo, number, target, {:reason, reason})
     end
   end
 
   def retire_issue(_number, _reason, _state), do: {:error, :invalid_arguments}
 
-  defp do_retire_issue(_forge, _repo, n, _reason, :closed) do
+  defp retire_open(_forge, _repo, n, :closed, _intent) do
     {:ok,
      %{
        "issue" => n,
@@ -162,142 +283,52 @@ defmodule Fleet.MCP.PodTools.Delegation.Retirement do
      }}
   end
 
-  defp do_retire_issue(forge, repo, n, reason, target) do
-    pr = if match?({:open, _}, target), do: elem(target, 1)
+  defp retire_open(forge, repo, n, target, intent), do: retire(forge, repo, n, target, intent)
 
-    with :ok <- IssuePR.close_live_pr(forge, repo, pr),
-         {:ok, dependents} <- forge.issue_blocks(repo, n, []),
-         {:ok, numbers} <- addressable_dependents(dependents),
-         :ok <- announce_release(forge, repo, n, numbers),
-         {:ok, _} <- forge.post_comment(repo, n, retire_comment(reason), []),
-         {:ok, _} <- forge.close_issue(repo, n, closure: :retired) do
-      # Closure already released admission blockers; report stale edges that could not be removed.
-      {released, unlifted} = lift_edges(forge, repo, n, numbers)
-
-      # Request immediate reaping after closure; the returned outcome is ignored.
-      _ = pod_reaper().reap_issue(repo, n)
-
-      result = %{"issue" => n, "retired" => true, "released" => released, "pr_closed" => pr}
-
-      {:ok, with_unlifted(result, unlifted)}
-    else
-      {:error, reason} ->
-        Logger.error(
-          "Delegation: retirement of #{repo}##{n} ABORTED (#{inspect(reason)}) — " <>
-            "the ticket is still OPEN and NOTHING was released: nothing to repair, re-emit"
-        )
-
-        {:error, {:retire_aborted, n, reason}}
-    end
-  end
-
-  # Validate dependent numbers before their announcements/target closure, but after PR closure.
-  defp addressable_dependents(dependents) do
-    Enum.reduce_while(dependents, {:ok, []}, fn dep, {:ok, acc} ->
-      case Map.get(dep, "number") do
-        d when is_integer(d) -> {:cont, {:ok, acc ++ [d]}}
-        _ -> {:halt, {:error, {:edge_without_number, dep}}}
-      end
-    end)
-  end
-
-  # Announce before closure releases blockers. A failed announcement stops remaining
-  # steps; earlier announcements are not rolled back and may repeat on retry.
-  defp announce_release(forge, repo, n, numbers) do
-    Enum.reduce_while(numbers, :ok, fn d, :ok ->
-      case forge.post_comment(repo, d, released_comment(n), []) do
-        {:ok, _} -> {:cont, :ok}
-        {:error, err} -> {:halt, {:error, {:dependent_not_announced, d, err}}}
-      end
-    end)
-  end
-
-  # After closure, attempt every removal and report failures rather than stopping at the first.
-  defp lift_edges(forge, repo, n, numbers) do
-    Enum.reduce(numbers, {[], []}, fn d, {ok, ko} ->
-      case forge.remove_issue_dependency(repo, d, n, []) do
-        {:ok, _} ->
-          {ok ++ [d], ko}
-
-        {:error, err} ->
-          Logger.error(
-            "Delegation: #{repo}##{n} RETIRE et ferme, mais l'arete du dependant ##{d} n'a pas pu " <>
-              "etre levee (#{inspect(err)}) — ##{d} est DEBLOQUE (l'admission ne compte que les " <>
-              "bloqueurs ouverts) et il a ete annonce ; l'arete perimee reste a nettoyer a la main"
-          )
-
-          {ok, ko ++ [d]}
-      end
-    end)
-  end
-
-  defp with_unlifted(result, []), do: result
-  defp with_unlifted(result, unlifted), do: Map.put(result, "edges_not_lifted", unlifted)
-
-  defp retire_comment(reason) do
-    "Ticket retiré par l'architecte — aucun remplaçant, rien n'a été livré.\n\nMotif : #{reason}"
-  end
-
-  defp released_comment(n) do
-    "Le bloqueur ##{n} a été retiré sans remplaçant : la dépendance est levée sur ce ticket. " <>
-      "Si ce travail restait nécessaire, il doit être redemandé — le retrait n'a rien livré."
-  end
-
-  # Supersede uses system-authored comment/closure and leaves the replacement intact
-  # on failure, returning supersede_warning. Public so tests can observe copy-before-close order.
-  # The awaits-arch label remains historical; closed issues leave open-only inboxes.
-  @doc false
+  @doc """
+  Retires the ticket a new one supersedes, handing its edges to the successor. Never fails the
+  creation of the successor: an incomplete retirement is reported in `supersede_warning`, the old
+  ticket stays stamped (never dispatched again) and the architect replays it with `issue_retire`.
+  """
   @spec retire_superseded(module(), String.t(), term(), term(), map()) :: map()
   def retire_superseded(_forge, _repo, nil, _target_state, result), do: result
 
   def retire_superseded(_forge, _repo, n, :closed, result),
     do: Map.put(result, "supersedes", n)
 
-  def retire_superseded(forge, repo, n, :open, result), do: do_retire(forge, repo, n, nil, result)
+  def retire_superseded(forge, repo, n, target, result) do
+    case Gate.conforming(DependencyForge, forge) do
+      {:ok, _} ->
+        superseded(forge, repo, n, target, result)
 
-  def retire_superseded(forge, repo, n, {:open, pr}, result),
-    do: do_retire(forge, repo, n, pr, result)
-
-  defp do_retire(forge, repo, n, pr, result) do
-    new_number = Map.get(result, "issue")
-
-    # Supersedes is an LCARS convention, not a forge graph operation. Copy what the old
-    # issue waits on and what waits on it before closure; otherwise dependents can be
-    # admitted in the gap or the replacement can lose its own prerequisites.
-    with :ok <- IssuePR.close_live_pr(forge, repo, pr),
-         {:ok, non_portees} <- carry_dependencies(forge, repo, n, new_number),
-         comment = supersede_comment(new_number, non_portees),
-         {:ok, _} <- forge.post_comment(repo, n, comment, []),
-         # Work moved to the replacement; retiring the old issue claims no delivery.
-         {:ok, _} <- forge.close_issue(repo, n, closure: :retired) do
-      # Request reaping after closure; callback failure does not undo forge effects.
-      _ = pod_reaper().reap_issue(repo, n)
-      Map.put(result, "supersedes", n)
-    else
-      err ->
-        Logger.error(
-          "Delegation: supersede retirement of #{repo}##{n} FAILED (#{inspect(err)}) — " <>
-            "##{new_number} created but ##{n} still open (zombie risk): close it manually"
-        )
-
-        result
-        |> Map.put("supersedes", n)
-        |> Map.put(
-          "supersede_warning",
-          "le retrait de ##{n} a échoué — il est encore ouvert, fais-le fermer par ton humain"
-        )
+      # The edges cannot be read, so nothing else is attempted — but the stamp is: the successor
+      # already exists, and an unstamped predecessor would be dispatched again beside it.
+      {:error, reason} ->
+        _ = forge.add_label(repo, n, @retired_label, [])
+        warn_superseded(result, n, {:dependency_surface, reason})
     end
   end
 
-  # Une arête non portée se dit SUR LE TICKET, pas seulement dans un journal que personne ne lit.
-  defp supersede_comment(new_number, []) do
-    "Remplacé par ##{new_number} (brief re-cadré) — ticket retiré par la fleet (supersede)."
+  defp superseded(forge, repo, n, target, result) do
+    case retire(forge, repo, n, target, {:successor, Map.get(result, "issue")}) do
+      {:ok, outcome} ->
+        result
+        |> Map.put("supersedes", n)
+        |> put_if("edges_not_carried", Map.get(outcome, "edges_not_carried", []))
+
+      {:error, {:retire_incomplete, ^n, step, reason}} ->
+        warn_superseded(result, n, {step, reason})
+    end
   end
 
-  defp supersede_comment(new_number, non_portees) do
-    "Remplacé par ##{new_number} (brief re-cadré) — ticket retiré par la fleet (supersede).\n\n" <>
-      "⚠ Dépendance(s) NON portée(s) vers ##{new_number}, à reposer à la main si elles comptent :\n" <>
-      Enum.map_join(non_portees, "\n", &("- " <> &1))
+  defp warn_superseded(result, n, {step, reason}) do
+    result
+    |> Map.put("supersedes", n)
+    |> Map.put(
+      "supersede_warning",
+      "le retrait de ##{n} s'est arrêté à l'étape #{step} (#{inspect(reason)}). Il est tamponné " <>
+        "retiré : il ne repartira pas. Termine-le avec issue_retire(#{n})."
+    )
   end
 
   # Upward reaper seam: keep the module in an attribute rather than a forbidden remote Pilot call.

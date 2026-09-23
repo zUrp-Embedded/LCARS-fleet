@@ -11,6 +11,11 @@ defmodule Fleet.MCP.SupersedeDependenciesTest do
 
   # Records the ORDER of the forge writes: that is the property under test, not just their presence.
   defmodule OrderForge do
+    def add_label(_repo, n, label, _opts) do
+      send(self(), {:stamp, n, label})
+      {:ok, :added}
+    end
+
     def issue_dependencies(_repo, 16, _opts), do: {:ok, [%{"number" => 4}]}
     def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
 
@@ -38,7 +43,13 @@ defmodule Fleet.MCP.SupersedeDependenciesTest do
   # The forge refuses one edge: the supersede must NOT close the old ticket. A half-rewired
   # supersede that closes anyway is the exact hole this carries.
   defmodule RefusingForge do
-    def issue_dependencies(_repo, _n, _opts), do: {:ok, [%{"number" => 4}]}
+    def add_label(_repo, n, label, _opts) do
+      send(self(), {:stamp, n, label})
+      {:ok, :added}
+    end
+
+    def issue_dependencies(_repo, 16, _opts), do: {:ok, [%{"number" => 4}]}
+    def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
     def issue_blocks(_repo, _n, _opts), do: {:ok, []}
     def remove_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
     def add_issue_dependency(_repo, _n, _b, _opts), do: {:error, {:http, 500, "boom"}}
@@ -56,6 +67,11 @@ defmodule Fleet.MCP.SupersedeDependenciesTest do
 
   # Gitea 1.26 rend 500, PAS 409, quand l'arete est deja la (mesure du 2026-09-16, banc 2002).
   defmodule AlreadyForge do
+    def add_label(_repo, n, label, _opts) do
+      send(self(), {:stamp, n, label})
+      {:ok, :added}
+    end
+
     def issue_dependencies(_repo, _n, _opts), do: {:ok, [%{"number" => 4}]}
     def issue_blocks(_repo, _n, _opts), do: {:ok, []}
     def remove_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
@@ -79,6 +95,11 @@ defmodule Fleet.MCP.SupersedeDependenciesTest do
 
   # HTTP 409 models replay success; this test does not verify whether an edge actually exists.
   defmodule ConflictForge do
+    def add_label(_repo, n, label, _opts) do
+      send(self(), {:stamp, n, label})
+      {:ok, :added}
+    end
+
     def issue_dependencies(_repo, _n, _opts), do: {:ok, [%{"number" => 4}]}
     def issue_blocks(_repo, _n, _opts), do: {:ok, []}
     def remove_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
@@ -168,6 +189,11 @@ defmodule Fleet.MCP.SupersedeDependenciesTest do
 
   # Pull processing is independent; retiring a ticket must also close its live PR.
   defmodule PrForge do
+    def add_label(_repo, n, label, _opts) do
+      send(self(), {:stamp, n, label})
+      {:ok, :added}
+    end
+
     def close_pr(_repo, pr, _opts) do
       send(self(), {:pr_closed, pr})
       {:ok, :closed}
@@ -190,6 +216,11 @@ defmodule Fleet.MCP.SupersedeDependenciesTest do
   end
 
   defmodule PrRefusingForge do
+    def add_label(_repo, n, label, _opts) do
+      send(self(), {:stamp, n, label})
+      {:ok, :added}
+    end
+
     def close_pr(_repo, _pr, _opts), do: {:error, {:http, 500, "boom"}}
     def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
     def issue_blocks(_repo, _n, _opts), do: {:ok, []}
@@ -212,11 +243,13 @@ defmodule Fleet.MCP.SupersedeDependenciesTest do
       assert_received {:close, 16, :retired}
     end
 
-    test "PR non fermable -> le ticket reste OUVERT : le geste incomplet ne s'execute pas a moitie" do
+    test "PR non fermable -> le ticket reste OUVERT mais TAMPONNE : il ne repart jamais" do
       result = retire_with_pr(PrRefusingForge)
 
       refute_received {:close, 16}
-      assert result["supersede_warning"] =~ "encore ouvert"
+      assert_received {:stamp, 16, "stage/retired"}
+      assert result["supersede_warning"] =~ "pull_request"
+      assert result["supersede_warning"] =~ "issue_retire(16)"
     end
 
     test "sans PR vivante, rien n'est ferme cote pulls" do
@@ -224,6 +257,88 @@ defmodule Fleet.MCP.SupersedeDependenciesTest do
       refute_received {:pr_closed, _}
     end
   end
+
+  # ── The 2026-09-23 case, replayed ──
+  # #12 waits on #13 (open). #14 supersedes it and ALREADY waits on #13 (created with depends_on).
+  # Two forge behaviours measured on that day, and nothing else invented:
+  #   - closing an issue that still has open dependencies → HTTP 412 with this exact message;
+  #   - writing an edge that already exists → HTTP 500 with an EMPTY message.
+  # Before: the retirement closed first (412), the ticket stayed open without any marker, and the
+  # warning said « Dépendance(s) NON portée(s) : - #13 : » — empty, and false.
+  defmodule Sept23Forge do
+    @moduledoc false
+    def edges, do: Process.get(:edges, MapSet.new([{12, 13}, {14, 13}]))
+    defp put_edges(e), do: Process.put(:edges, e)
+
+    def issue_dependencies(_repo, n, _opts),
+      do: {:ok, for({^n, b} <- edges(), do: %{"number" => b})}
+
+    def issue_blocks(_repo, n, _opts), do: {:ok, for({d, ^n} <- edges(), do: %{"number" => d})}
+
+    def add_issue_dependency(_repo, n, b, _opts) do
+      send(self(), {:edge, n, b})
+
+      if MapSet.member?(edges(), {n, b}),
+        do: {:error, {:http, 500, %{"message" => ""}}},
+        else: {:ok, put_edges(MapSet.put(edges(), {n, b}))}
+    end
+
+    def remove_issue_dependency(_repo, n, b, _opts) do
+      send(self(), {:lift, n, b})
+      {:ok, put_edges(MapSet.delete(edges(), {n, b}))}
+    end
+
+    def close_issue(_repo, n, _opts) do
+      if Enum.any?(edges(), &match?({^n, _}, &1)) do
+        {:error,
+         {:http, 412,
+          %{
+            "message" =>
+              "cannot close this issue or pull request because it still has open dependencies"
+          }}}
+      else
+        send(self(), {:close, n})
+        {:ok, :closed}
+      end
+    end
+
+    def add_label(_repo, n, label, _opts) do
+      send(self(), {:stamp, n, label})
+      {:ok, :added}
+    end
+
+    def post_comment(_repo, n, body, _opts) do
+      send(self(), {:comment, n, body})
+      {:ok, :posted}
+    end
+  end
+
+  describe "le cas du 2026-09-23, rejoué" do
+    test "un ticket bloqué par un ticket ouvert se retire : ses bloqueurs sont levés AVANT la fermeture" do
+      result = retire_sept23(Sept23Forge, 12, 14)
+
+      assert %{"supersedes" => 12} = result
+      refute Map.has_key?(result, "supersede_warning")
+      assert_received {:close, 12}
+      assert_received {:lift, 12, 13}
+      refute MapSet.member?(Sept23Forge.edges(), {12, 13})
+    end
+
+    test "l'arête que le successeur porte DÉJÀ n'est ni réécrite ni dite « non portée »" do
+      retire_sept23(Sept23Forge, 12, 14)
+
+      refute_received {:edge, 14, 13}
+      assert_received {:comment, 12, corps}
+      refute corps =~ "NON portée"
+      assert corps =~ "Remplacé par #14"
+    end
+  end
+
+  defp retire_sept23(forge, old, new),
+    do:
+      Fleet.MCP.PodTools.Delegation.Retirement.retire_superseded(forge, "fleet/p", old, :open, %{
+        "issue" => new
+      })
 
   # Drain same-process sends in order to compare call positions.
   defp drain_mailbox(acc \\ []) do
