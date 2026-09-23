@@ -225,7 +225,16 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     with {:ok, _} <- forge.add_label(repo, lock_target, @in_flight_label, forge_opts),
          _ = start_stopwatch_as_role(forge, repo, lock_target, profile, forge_opts, role),
          {:ok, _} <- maybe_spawn(spawner, alive_before?, profile, issue_id, spawn_opts),
-         :ok <- enqueue_brief(task_queue, pod_id, role, issue_id, issue_number, brief, spawn_opts) do
+         :ok <-
+           enqueue_brief(
+             task_queue,
+             pod_id,
+             role,
+             issue_id,
+             {repo, issue_number, lock_target},
+             brief,
+             spawn_opts
+           ) do
       # Preserve the recovery result: admission remains even when wake fails.
       # The caller must count the typed wake error rather than report a clean spawn.
       wake_recovery.(
@@ -333,7 +342,19 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
 
   # The pod pulls the prepared order through TaskQueue/get_work_item; raw issue text would
   # bypass judge framing. metadata.issue keeps the parent issue correlation.
-  defp enqueue_brief(task_queue, pod_id, role, issue_id, number, payload, spawn_opts) do
+  #
+  # When the lock sits on a PR (review, rework), the task says so: its pod may be named after the
+  # issue (`…-issue-7-engineer` reworking PR #8), and reconciliation reads lock ownership from the
+  # ASSIGNED task — otherwise a live rework loses its PR lock as an orphan within two ticks.
+  defp enqueue_brief(
+         task_queue,
+         pod_id,
+         role,
+         issue_id,
+         {repo, number, lock_target},
+         payload,
+         spawn_opts
+       ) do
     # Queue the final content, with pins in separate fields; do not reconstruct an ops-path instruction.
     attrs = %{
       issue_id: issue_id,
@@ -341,7 +362,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
       brief: payload,
       brief_ref: Keyword.get(spawn_opts, :brief_ref),
       brief_sha: Keyword.get(spawn_opts, :brief_sha),
-      metadata: %{"issue" => number}
+      metadata: lock_metadata(%{"issue" => number}, repo, number, lock_target)
     }
 
     case task_queue.enqueue(pod_id, attrs) do
@@ -349,6 +370,11 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
       {:error, reason} -> {:error, {:enqueue_failed, reason}}
     end
   end
+
+  defp lock_metadata(meta, _repo, number, number), do: meta
+
+  defp lock_metadata(meta, repo, _number, pr),
+    do: Map.merge(meta, %{"repo" => repo, "lock_pr" => pr})
 
   defp safe_wake(spawner, pod_id) do
     if Fleet.Opts.exported?(spawner, :wake_pod, 1), do: spawner.wake_pod(pod_id), else: :ok
