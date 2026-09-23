@@ -37,9 +37,8 @@ defmodule Fleet.MCP.PodTools.Probe do
   def run(pod_id, probe, inputs \\ %{}, opts \\ [])
       when is_binary(pod_id) and is_binary(probe) and is_map(inputs) do
     with {:ok, workflow} <- resolve_probe(probe),
-         {:ok, %{repo: repo}} <- identity(pod_id, opts),
-         {:ok, pr} <- pr_of(pod_id, repo),
-         {:ok, refs} <- forge().pr_refs(repo, pr, forge_opts(opts)),
+         {:ok, %{repo: repo, refs: refs}} <-
+           Fleet.MCP.PodTools.JudgeTarget.resolve(pod_id, forge(), forge_opts(opts)),
          {:ok, declared} <- declarations(repo, refs.head_sha, opts),
          :ok <- workflow_safe(repo, workflow, refs.base_ref, opts),
          {:ok, %{run_id: run_id}} <-
@@ -119,36 +118,6 @@ defmodule Fleet.MCP.PodTools.Probe do
       # Le refus ÉNUMÈRE, parce qu'un refus qui ne dit pas quoi écrire à la place renvoie l'appelant
       # par le même appel (même leçon que `declarable_card/3`).
       :error -> {:error, {:unknown_probe, probe, known()}}
-    end
-  end
-
-  # Dispatched pods can carry repo_id without repo; resolve the numeric id through
-  # the forge instead of rejecting the roles this tool serves.
-  defp identity(pod_id, opts) do
-    case Fleet.MCP.PodTools.PodResolver.resolved().(pod_id) do
-      {:ok, %{repo: repo}} when is_binary(repo) and repo != "" ->
-        {:ok, %{repo: repo}}
-
-      {:ok, %{repo_id: id}} when is_integer(id) and id > 0 ->
-        case forge().repo_full_name(id, forge_opts(opts)) do
-          {:ok, full} -> {:ok, %{repo: full}}
-          {:error, _} = err -> err
-        end
-
-      {:ok, _unbound} ->
-        {:error, :repo_unbound}
-
-      {:error, _} = err ->
-        err
-    end
-  end
-
-  # Parse the PR from the pod identity; issue-bound pods cannot select an arbitrary PR.
-  defp pr_of(pod_id, repo) do
-    case Fleet.PodId.parse_ref(pod_id, repo) do
-      {:ok, {:pr, n}} -> {:ok, n}
-      {:ok, {:issue, _}} -> {:error, :not_a_deliverable_judge}
-      :error -> {:error, :pr_unresolvable}
     end
   end
 
