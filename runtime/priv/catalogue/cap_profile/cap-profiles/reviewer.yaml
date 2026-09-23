@@ -61,6 +61,8 @@ spec:
       # aucun des deux n'a rien a mesurer — leur donner l'outil ouvrirait un dispatch de runner
       # pour une question qu'ils ne posent pas.
       - mcp__fleet__run_probe
+      # Ce que la CI a prouvé sur la tete jugee : l'environnement qui fait foi, lu, jamais rejoue.
+      - mcp__fleet__ci_results
     disallowedTools:
       - web_search
       - web_fetch

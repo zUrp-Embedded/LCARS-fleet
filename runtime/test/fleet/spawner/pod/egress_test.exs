@@ -124,6 +124,25 @@ defmodule Fleet.Spawner.Pod.EgressTest do
   end
 
   describe "start/3 — over a real unix socket" do
+    test "plain HTTP (an apt mirror) gets 501 that says WHERE to go: toolchain_request, or the CI",
+         %{tmp_dir: tmp} do
+      # 2026-09-23: two engineers tried `apt` in their pod for Chromium's dependencies, were refused,
+      # and never took the toolchain rail — the refusal told them what, not where.
+      path = sock(tmp)
+      {:ok, listen} = Egress.start(path, ["api.anthropic.com"], pod_id: "test")
+
+      c = connect(path)
+
+      :ok =
+        :gen_tcp.send(c, "GET http://archive.ubuntu.com/ubuntu/pool/main/n/nss/ HTTP/1.1\r\n\r\n")
+
+      assert {:ok, answer} = :gen_tcp.recv(c, 0, 2_000)
+      assert answer =~ "501 Not Implemented"
+      assert answer =~ "toolchain_request"
+      assert answer =~ "CI"
+      :gen_tcp.close(listen)
+    end
+
     test "a refused host gets 403 on the wire, and the connection closes", %{tmp_dir: tmp} do
       path = sock(tmp)
       {:ok, listen} = Egress.start(path, ["api.anthropic.com"], pod_id: "test")

@@ -31,7 +31,9 @@ defmodule Fleet.Spawner.Pod.Egress do
   # the sandbox’s refusal as destination authorization failure.
   @refuse_method "HTTP/1.1 501 Not Implemented\r\n\r\n" <>
                    "The LCARS pod proxy tunnels CONNECT only — plain HTTP is not proxied.\r\n" <>
-                   "This is the SANDBOX refusing, not the destination: nothing was sent.\r\n"
+                   "This is the SANDBOX refusing, not the destination: nothing was sent.\r\n" <>
+                   "A pod installs no system package (apt & co.): ask with the `toolchain_request` " <>
+                   "tool; a test suite that needs one is proved by the CI, not in the pod.\r\n"
   @connect_timeout_ms 10_000
 
   @doc """
