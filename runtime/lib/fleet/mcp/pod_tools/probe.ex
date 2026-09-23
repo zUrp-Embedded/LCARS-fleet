@@ -110,7 +110,7 @@ defmodule Fleet.MCP.PodTools.Probe do
   def declarations(repo, ref, opts \\ []) do
     case forge().get_file(repo, "CLAUDE.md", Keyword.put(forge_opts(opts), :ref, ref)) do
       {:ok, %{content: md}} ->
-        {:ok, %{harness: section(md, "Harness"), test_cmd: section(md, "Test")}}
+        {:ok, %{harness: section(md, "Harness"), test_cmd: command(md)}}
 
       {:error, :not_found} ->
         {:ok, %{harness: "", test_cmd: ""}}
@@ -123,7 +123,36 @@ defmodule Fleet.MCP.PodTools.Probe do
   # RepoSections has a separate whitelist for prompt content and excludes Harness.
   # Scan headings outside backtick fences but retain fenced section bodies: removing
   # all code blocks first would also erase a legitimate fenced test command.
-  defp section(md, name) do
+  defp section(md, name), do: md |> raw_section(name) |> strip_fences()
+
+  # `## Test` is read by two parties: producers get the whole section as documentation, the probe
+  # needs a command. The command is the section's fenced code; prose around it is documentation.
+  # A section without any fence is the command as a whole (the template's original contract).
+  # Prose once reached the probe as a command, and an apostrophe in it broke every probe run.
+  defp command(md) do
+    raw = raw_section(md, "Test")
+
+    case fenced_lines(raw) do
+      [] -> strip_fences(raw)
+      lines -> lines |> Enum.map_join("\n", &String.trim_trailing/1) |> String.trim()
+    end
+  end
+
+  defp fenced_lines(raw) do
+    raw
+    |> String.split("\n")
+    |> Enum.reduce({[], false}, fn line, {acc, inside?} ->
+      cond do
+        String.starts_with?(String.trim(line), "```") -> {acc, not inside?}
+        inside? -> {[line | acc], inside?}
+        true -> {acc, inside?}
+      end
+    end)
+    |> elem(0)
+    |> Enum.reverse()
+  end
+
+  defp raw_section(md, name) do
     md
     |> String.split("\n")
     |> Enum.reduce({[], false, :before}, &scan_line(&1, &2, name))
@@ -131,7 +160,6 @@ defmodule Fleet.MCP.PodTools.Probe do
     |> Enum.reverse()
     |> Enum.join("\n")
     |> String.trim()
-    |> strip_fences()
   end
 
   defp scan_line(_line, {acc, in_fence?, :done}, _name), do: {acc, in_fence?, :done}

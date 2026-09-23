@@ -38,10 +38,14 @@ defmodule Fleet.Project.ProbePredicateTest do
     Enum.map_join(lines, "\n", &String.replace_prefix(&1, prefix, ""))
   end
 
-  defp render(script, inputs) do
-    Enum.reduce(inputs, script, fn {k, v}, acc ->
-      String.replace(acc, "${{ inputs.#{k} }}", v)
-    end)
+  # The runner hands the inputs over through the step's `env:` (PROBE_*), never inside the script.
+  defp input_env(inputs) do
+    [
+      {"PROBE_HARNESS", inputs["harness"]},
+      {"PROBE_BASE", inputs["base_sha"]},
+      {"PROBE_HEAD", inputs["head_sha"]},
+      {"PROBE_TEST_CMD", inputs["test_cmd"]}
+    ]
   end
 
   # ── Fabrication d'un dépôt à deux états ───────────────────────────────────────────────────────
@@ -90,14 +94,14 @@ defmodule Fleet.Project.ProbePredicateTest do
   end
 
   defp sonde(tmp, %{origin: origin, base: base, head: head}, harness, test_cmd) do
-    script =
-      probe_script()
-      |> render(%{
-        "harness" => harness,
-        "base_sha" => base,
-        "head_sha" => head,
-        "test_cmd" => test_cmd
-      })
+    script = probe_script()
+
+    inputs = %{
+      "harness" => harness,
+      "base_sha" => base,
+      "head_sha" => head,
+      "test_cmd" => test_cmd
+    }
 
     path = Path.join(tmp, "sonde.sh")
     File.write!(path, script)
@@ -115,19 +119,20 @@ defmodule Fleet.Project.ProbePredicateTest do
     # Secrets factices : les noms en _KEY, DATABASE_URL et KUBECONFIG echappaient
     # au filtre par suffixe TOKEN/SECRET/PASSWORD. Le harnais compte toutes les
     # variables hors liste autorisee, pas seulement ces noms connus.
-    env = [
-      {"GITHUB_SERVER_URL", "file://" <> Path.dirname(origin)},
-      {"GITHUB_REPOSITORY", Path.basename(origin, ".git")},
-      {"FORGE_TOKEN", ""},
-      {"HOME", fake_home},
-      {"ACTIONS_RUNTIME_TOKEN", "runner-secret"},
-      {"NPM_TOKEN", "publish-secret"},
-      {"DB_PASSWORD", "hunter2"},
-      {"AWS_SECRET_ACCESS_KEY", "aws-secret"},
-      {"DEPLOY_KEY", "deploy-secret"},
-      {"DATABASE_URL", "postgres://u:hunter2@db/x"},
-      {"KUBECONFIG", "/etc/kube/admin.conf"}
-    ]
+    env =
+      [
+        {"GITHUB_SERVER_URL", "file://" <> Path.dirname(origin)},
+        {"GITHUB_REPOSITORY", Path.basename(origin, ".git")},
+        {"FORGE_TOKEN", ""},
+        {"HOME", fake_home},
+        {"ACTIONS_RUNTIME_TOKEN", "runner-secret"},
+        {"NPM_TOKEN", "publish-secret"},
+        {"DB_PASSWORD", "hunter2"},
+        {"AWS_SECRET_ACCESS_KEY", "aws-secret"},
+        {"DEPLOY_KEY", "deploy-secret"},
+        {"DATABASE_URL", "postgres://u:hunter2@db/x"},
+        {"KUBECONFIG", "/etc/kube/admin.conf"}
+      ] ++ input_env(inputs)
 
     {out, code} = System.cmd("sh", [path], cd: work, env: env, stderr_to_stdout: true)
     %{out: out, code: code, facts: Fleet.MCP.PodTools.Probe.facts(out)}
@@ -282,10 +287,11 @@ defmodule Fleet.Project.ProbePredicateTest do
       assert r.code == 0
     end
 
-    test "une commande qui COLLE au délimiteur du heredoc → inapplicable, pas une mesure partielle",
+    test "une commande n'est JAMAIS du script : délimiteur, apostrophe et $(…) passent tels quels",
          %{tmp_dir: tmp} do
-      # Une collision avec le delimiteur peut tronquer le fichier de commande.
-      # Le verdict doit signaler cette transcription incomplete avant de lancer la mesure.
+      # Les inputs étaient collés dans le script : une ligne égale au délimiteur tronquait la
+      # commande, une apostrophe (« C'est ») cassait le shell de la sonde à chaque run (2026-09-23).
+      # Par l'environnement, la commande est transcrite octet pour octet et mesurée entière.
       repo =
         build_repo(
           tmp,
@@ -293,13 +299,13 @@ defmodule Fleet.Project.ProbePredicateTest do
           %{"tests/run.sh" => @honest_test, "hello.sh" => @deliverable}
         )
 
-      r = sonde(tmp, repo, "tests/", "echo before\nLCARS_PROBE_CMD_EOF\nsh tests/run.sh")
+      cmd =
+        "echo 'C'\"'\"'est'\nLCARS_PROBE_CMD_EOF=1\n: \"$(echo pas-execute-a-la-lecture)\"\nsh tests/run.sh"
 
-      assert r.facts["verdict"] == "inapplicable"
-      assert r.facts["reason"] == "test-cmd-untranscribable"
+      r = sonde(tmp, repo, "tests/", cmd)
 
-      # Et surtout : AUCUNE mesure n'a été tentée sur la fraction transcrite.
-      refute Map.has_key?(r.facts, "witness_exit")
+      assert r.facts["verdict"] == "relevant"
+      refute r.out =~ "Syntax error"
       assert r.code == 0
     end
 

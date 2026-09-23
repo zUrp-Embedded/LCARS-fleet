@@ -235,6 +235,26 @@ defmodule Fleet.MCP.PodTools.ProbeTest do
       assert d.test_cmd == "make build\nmake test"
     end
 
+    test "la PROSE autour du bloc de code n'est pas la commande — seul le code l'est" do
+      # 2026-09-23: a `## Test` with a sentence after its fenced command reached the probe whole;
+      # the apostrophe of « C'est » broke the probe's shell on every run.
+      d =
+        declared(
+          "## Test\n\n```sh\nbash host/run_all.sh\n```\n\nC'est TOUTE la suite, et `host/run.sh` en fait partie.\n\n## Doc\n\nx\n"
+        )
+
+      assert d.test_cmd == "bash host/run_all.sh"
+    end
+
+    test "plusieurs blocs de code : la commande est leur contenu, dans l'ordre" do
+      d =
+        declared(
+          "## Test\n\nD'abord :\n\n```\nmake build\n```\n\npuis :\n\n```\nmake test\n```\n"
+        )
+
+      assert d.test_cmd == "make build\nmake test"
+    end
+
     test "section absente → chaîne vide, jamais une devinette" do
       d = declared("# projet\n\nrien de contractuel ici\n")
       assert d.harness == ""

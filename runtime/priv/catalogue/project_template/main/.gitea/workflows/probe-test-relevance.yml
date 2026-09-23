@@ -88,7 +88,17 @@ jobs:
       - name: Sonder
         env:
           FORGE_TOKEN: ${{ github.token }}
+          PROBE_HARNESS: ${{ inputs.harness }}
+          PROBE_BASE: ${{ inputs.base_sha }}
+          PROBE_HEAD: ${{ inputs.head_sha }}
+          PROBE_TEST_CMD: ${{ inputs.test_cmd }}
         run: |
+          # ⚠ LES INPUTS ARRIVENT PAR L'ENVIRONNEMENT (PROBE_*), JAMAIS DANS LE TEXTE DE CE SCRIPT.
+          # Collés ici par `${{ … }}`, ils étaient insérés AVANT que le shell lise le script : le
+          # texte d'un `CLAUDE.md` livré devenait du code (injection), et une apostrophe dans sa prose
+          # cassait la sonde à chaque run (`Syntax error: end of file unexpected`, 2026-09-23). Une
+          # variable d'environnement n'est jamais réinterprétée.
+          #
           # PAS de `set -e` ici, et c'est délibéré : ce script FAIT ÉCHOUER des commandes exprès —
           # l'échec de la suite EST la mesure. Un `set -e` avorterait au moment précis où le fait
           # apparaît, et la sonde rendrait une panne à la place de son résultat.
@@ -101,9 +111,9 @@ jobs:
           set -f
 
           fact() { echo "LCARS-PROBE $*"; }
-          harness="${{ inputs.harness }}"
-          base="${{ inputs.base_sha }}"
-          head="${{ inputs.head_sha }}"
+          harness="$PROBE_HARNESS"
+          base="$PROBE_BASE"
+          head="$PROBE_HEAD"
 
           fact "probe=test-relevance base=${base} head=${head}"
 
@@ -120,7 +130,7 @@ jobs:
           # sous-shell valide en POSIX et sort en 0 : le témoin passerait, la mesure passerait, et
           # la sonde annoncerait « la suite reste verte sans le code livré » à un projet qui n'a
           # aucune suite. C'est le seul mensonge que cette sonde pouvait produire.
-          if [ -z "${{ inputs.test_cmd }}" ]; then
+          if [ -z "$PROBE_TEST_CMD" ]; then
             fact "verdict=inapplicable reason=no-test-cmd"
             echo "Ce projet ne déclare aucune commande de test (section '## Test' de son CLAUDE.md)."
             exit 0
@@ -134,31 +144,10 @@ jobs:
           #
           # Écrite dans un fichier et jouée par `sh -e`, elle a la sémantique de la CI — première
           # erreur, arrêt — et le contrat du template exige justement que `## Test` et `ci.yml`
-          # portent la MÊME commande. Le délimiteur est quoté : rien n'est ré-interprété à l'écriture.
-          #
-          # ⚠ ET UNE TRANSCRIPTION PARTIELLE SERAIT PIRE QU'UN ÉCHEC. Un `## Test` contenant une
-          # ligne ÉGALE au délimiteur ferme le heredoc à cet endroit : le fichier ne reçoit que le
-          # début, le reste retombe dans CE shell (hors `set -e`, hors sous-shell), et la sonde rend
-          # un verdict sur une commande qui n'est pas celle du projet. Silencieux, donc inacceptable
-          # — c'est la même classe que la commande vide et que le `## Test` multi-lignes aplati.
-          #
-          # La SENTINELLE le rend visible : `:` est le no-op POSIX, elle ne change ni la sémantique
-          # ni le code de sortie (sous `sh -e`, un échec antérieur a déjà arrêté le script ; si tout
-          # passe, `:` rend 0 comme la dernière commande l'aurait fait). Absente du fichier, elle
-          # PROUVE que la transcription s'est arrêtée avant la fin.
+          # portent la MÊME commande. `printf '%s'` écrit la variable octet pour octet : rien n'est
+          # ré-interprété, et aucune ligne de la commande ne peut arrêter la transcription.
           cmd_file="$(pwd)/.lcars-probe-cmd.sh"
-          cat > "$cmd_file" <<'LCARS_PROBE_CMD_EOF'
-          ${{ inputs.test_cmd }}
-          : LCARS_PROBE_CMD_COMPLETE
-          LCARS_PROBE_CMD_EOF
-
-          if [ "$(tail -n 1 "$cmd_file")" != ": LCARS_PROBE_CMD_COMPLETE" ]; then
-            fact "verdict=inapplicable reason=test-cmd-untranscribable"
-            echo "La commande de test n'a pas pu être transcrite intégralement : une de ses lignes"
-            echo "entre en collision avec le délimiteur interne de la sonde (LCARS_PROBE_CMD_EOF)."
-            echo "Mesurer la fraction transcrite rendrait un verdict sur une AUTRE commande."
-            exit 0
-          fi
+          printf '%s\n' "$PROBE_TEST_CMD" > "$cmd_file"
 
           # ── LA RÉCUPÉRATION VIT ICI, ET PLUS DANS UNE ÉTAPE À PART ──
           #
