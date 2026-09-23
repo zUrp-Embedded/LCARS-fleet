@@ -115,6 +115,19 @@ account() { # account <full_name> <email>
   [[ "$output" == *"moi@ailleurs.net"* ]]
 }
 
+@test "compte EXISTANT dont l'adresse est MASQUEE : l'adresse du provisionnement, et la source dite" {
+  # 2026-09-23 : le compte systeme n'est pas admin, Gitea lui rend l'adresse vide. Le module lisait
+  # ca comme « pas de compte » et sortait muet a chaque passe : l'humain n'a jamais eu d'identite.
+  account "" ""
+  run_fn 'check_git_identity'
+  [[ "$output" == *"DRIFT"* ]]
+  run_fn 'apply_git_identity'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"provisionnement"* ]]
+  run git config --global --get user.email
+  [ "$output" = "$(id -un)@lcars.local" ]
+}
+
 @test "PAS de compte forge : MUET des deux cotes — ce fait appartient a 63-forge-tokens" {
   # Le cas de `root` sur un vrai conteneur. Deux voix sur un meme fait divergent le jour ou l'une
   # des deux change ; `63-forge-tokens` rapporte deja « compte forge absent pour « X » ».
