@@ -23,8 +23,8 @@ defmodule Fleet.MCP.PodTools do
 
   use ExMCP.Server
 
-  alias Fleet.MCP.PodTools.Delegation
   alias Fleet.MCP.PodTools.CiResults
+  alias Fleet.MCP.PodTools.Delegation
   alias Fleet.MCP.PodTools.Probe
   alias Fleet.MCP.PodTools.WorkItems
 
