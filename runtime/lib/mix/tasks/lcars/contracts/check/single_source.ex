@@ -132,13 +132,18 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
   end
 
   @doc """
-  Freezes the two deposit names in their only mirror outside Elixir.
+  Freezes the three deposit names in their only mirror outside Elixir.
 
   `Fleet.Layout` declares the face branches and the ready-room directory; the deposit door writes
   on the workshop branch, into that directory, and carries both names. Same rule as the toolchain
   branch, for the same reason: a name half of the rail can retune is a rail that splits in silence.
   The check requires a double-quoted literal for each and rejects reading any BRANCH from the
   environment. Only the listed mirror is checked; the project template is held by its own witness.
+
+  The third name is the bundled catalogue (`Fleet.Catalogue.bundled_name/0`): the door resolves a
+  project's org among the catalogues of the machine, and the bundled one lives in the release, which
+  the door cannot read. Its copy must be the assignment `BUNDLED_CATALOGUE = "<name>"` — without it,
+  every project of the default catalogue was refused as unknown.
   """
   @spec check_deposit_names_single_source(String.t()) :: Support.result()
   def check_deposit_names_single_source(root) do
@@ -152,7 +157,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
     remediation =
       "copy the literals from `Fleet.Layout.workshop_branch/0` and `Fleet.Layout.ready_room_dir/0` " <>
         "into the door, and never read them from the environment — the deposit lands on that " <>
-        "branch, in that directory, and a tunable name lands it elsewhere without a word"
+        "branch, in that directory, and a tunable name lands it elsewhere without a word; assign " <>
+        "`BUNDLED_CATALOGUE` the literal of `Fleet.Catalogue.bundled_name/0` — the door resolves " <>
+        "a project's org among the bundled and installed catalogues, as the product does"
 
     branche =
       source_literal(
@@ -162,6 +169,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
       )
 
     dossier = source_literal(root, "lib/fleet/layout.ex", ~r/@ready_room_dir\s+"([^"]+)"/)
+    livre = source_literal(root, "lib/fleet/catalogue.ex", ~r/@bundled_name\s+"([^"]+)"/)
 
     cond do
       checked == [] ->
@@ -175,17 +183,21 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
           "@face_branches/@ready_room_dir"
         )
 
+      is_nil(livre) ->
+        unreadable_authority(id, remediation, "lib/fleet/catalogue.ex", "@bundled_name")
+
       true ->
-        deposit_names_verdict(id, remediation, {branche, dossier}, checked, skipped, root)
+        deposit_names_verdict(id, remediation, {branche, dossier, livre}, checked, skipped, root)
     end
   end
 
   # Le meme verdict que la branche d'outillage, sur DEUX litteraux : un miroir qui n'en porte qu'un
   # est un miroir a moitie faux, et c'est la moitie absente qui derive.
-  defp deposit_names_verdict(id, remediation, {branche, dossier}, checked, skipped, root) do
+  defp deposit_names_verdict(id, remediation, {branche, dossier, livre}, checked, skipped, root) do
     bad =
       Enum.flat_map(checked, fn rel ->
-        branch_freeze_gap(rel, root, branche) ++ ready_room_gap(rel, root, dossier)
+        branch_freeze_gap(rel, root, branche) ++
+          ready_room_gap(rel, root, dossier) ++ bundled_gap(rel, root, livre)
       end)
 
     if bad == [] do
@@ -195,7 +207,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
         status: :pass,
         evidence: checked,
         note:
-          "#{inspect(branche)} and #{inspect(dossier)} declared by Fleet.Layout and copied by the " <>
+          "#{inspect(branche)} and #{inspect(dossier)} declared by Fleet.Layout, " <>
+            "#{inspect(livre)} by Fleet.Catalogue, and copied by the " <>
             "#{length(checked)} reader(s) that carry them; no tunable left" <>
             skipped_note(skipped)
       }
@@ -219,6 +232,20 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
     case File.read(Path.expand(rel, root)) do
       {:ok, body} -> ready_room_verdict(rel, body, dossier)
       _ -> []
+    end
+  end
+
+  # An ASSIGNMENT, not a literal anywhere: `"fleet"` appears in the door for other reasons, and a
+  # mirror that kept it only in a comment would pass.
+  defp bundled_gap(rel, root, livre) do
+    case File.read(Path.expand(rel, root)) do
+      {:ok, body} ->
+        if Regex.match?(~r/^BUNDLED_CATALOGUE = "#{Regex.escape(livre)}"$/m, body),
+          do: [],
+          else: [{rel, "does not assign BUNDLED_CATALOGUE = #{inspect(livre)}"}]
+
+      _ ->
+        []
     end
   end
 

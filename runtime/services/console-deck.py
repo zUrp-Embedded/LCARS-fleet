@@ -166,7 +166,7 @@ DEPOSIT_CAUSES = {
     "hash_mismatch": "le contenu recu ne correspond pas a son empreinte — rien n'est depose",
     "too_big": "fichier trop gros pour la boite de depot",
     "empty": "fichier vide",
-    "unknown_project": "aucun catalogue installe ne porte ce projet sur la forge",
+    "unknown_project": "aucun catalogue de cette machine ne porte ce projet sur la forge",
     "no_workshop_branch": "ce projet n'a pas encore de face workshop sur la forge — rien n'est depose",
     "listing_too_long": "la ready room de ce projet est trop longue pour remplacer un fichier — fais le menage",
     "ambiguous_project": "ce nom de projet existe dans plusieurs catalogues — la porte ne choisit pas",
@@ -1301,7 +1301,10 @@ function depositPanel(s) {
     "La poussée reste celle du compte système : ce conteneur n'a pas de jeton personnel. " +
     "C'est une <b>trace</b> de qui a déposé quoi, vérifiable dans l'historique.<br><br>" +
     "Taille maximale : <b>" + Math.floor(max / 1000000) + " Mo</b>. " +
-    "Un fichier du même nom est <b>remplacé</b> : l'ancien reste dans l'historique du dépôt.";
+    "Un fichier du même nom est <b>remplacé</b> : l'ancien reste dans l'historique du dépôt.<br><br>" +
+    "Le fichier arrive dans l'atelier du projet, <b>là où l'architecte le voit, au plus tard une " +
+    "minute après</b>. Un <code>CLAUDE.md</code> ou un <code>AGENTS.md</code> est déposé sous " +
+    "<code>&lt;nom&gt;.safety</code> : sous son vrai nom, l'agent le chargerait comme consignes.";
   wrap.appendChild(n);
 
   const choix = document.createElement('select');
@@ -1346,7 +1349,8 @@ function depositPanel(s) {
       });
       const j = await rep.json().catch(() => ({}));
       if (rep.ok && j.ok) {
-        say('depose : ' + j.repo + ' ' + j.path + ' (commit ' + String(j.sha).slice(0, 12) + ')');
+        say('depose : ' + j.repo + ' ' + j.path + ' (commit ' + String(j.sha).slice(0, 12) +
+            ') — dans l\'atelier de l\'architecte d\'ici une minute');
         pick.value = '';
       } else {
         say('refuse : ' + (j.why || j.error || rep.status), true);
