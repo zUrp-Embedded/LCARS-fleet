@@ -91,6 +91,36 @@ defmodule Fleet.Project.TemplateMaterialTest do
     end
   end
 
+  # ⚠ LE PROJET NAIT AVEC SA READY ROOM, ET C'EST LE MODELE QUI LA POSE. La boite de depot du deck
+  # ECRIT dans ce repertoire de la face atelier ; si le modele ne le porte pas, le premier depot
+  # cree un chemin que personne n'a declare, et le nom vit alors dans la porte SEULE. Le nom se lit
+  # ici chez son autorite — l'ecrire en clair dans ce temoin serait la copie qu'on veut interdire.
+  test "chaque modele porte la ready room de la face atelier, et elle est SUIVIE par git" do
+    dossier = Fleet.Layout.ready_room_dir()
+
+    {priv, seeds} = shipped_template_roots()
+
+    roots =
+      case seeds do
+        {:ok, dirs} ->
+          [priv | dirs]
+
+        # Un arbre sans graines ne se mesure pas ; il le DIT, il ne passe pas en silence.
+        {:skipped, why} ->
+          IO.puts("template_material: graines NON MESUREES ici — #{why}") && [priv]
+      end
+
+    manquants =
+      Enum.reject(roots, fn root ->
+        chemin = Path.join([root, "workshop", dossier])
+        File.dir?(chemin) and Path.wildcard(Path.join(chemin, "*")) != []
+      end)
+
+    assert manquants == [],
+           "ces modeles n'ont pas de `workshop/#{dossier}/` non vide — un depot y creerait un " <>
+             "repertoire que le modele ne declare pas :\n" <> Enum.join(manquants, "\n")
+  end
+
   test "TEMOIN de non-vacuite : la graine web-demo est bien mesuree quand l'arbre est la" do
     # When seeds are found, require web-demo and a known variable-bearing file.
     # A glob returning no seeds still takes the allowed skipped branch.

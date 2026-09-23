@@ -24,6 +24,7 @@
 #     qui n'est pas casse.
 
 import grp
+import hashlib
 import importlib.util
 import json
 import os
@@ -33,6 +34,7 @@ import socket
 import sys
 import tempfile
 import threading
+import urllib.parse
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -61,8 +63,27 @@ TOKEN = os.path.join(WORK, "master.token")
 GESTURES = os.path.join(WORK, "gestures.sh")
 
 TOKEN_VALUE = "banc-master-token"
+# Le jeton du compte SYSTEME est distinct du master : le service les lit dans deux fichiers, et un
+# depot ecrit avec le master passerait inapercu si le banc n'en avait qu'un.
+SYSTEM_VALUE = "banc-system-token"
 with open(TOKEN, "w") as fh:
     fh.write(TOKEN_VALUE + "\n")
+SYSTEM_TOKEN = os.path.join(WORK, "system.token")
+with open(SYSTEM_TOKEN, "w") as fh:
+    fh.write(SYSTEM_VALUE + "\n")
+
+# ── LA BOITE DE DEPOT : l'etat de la forge de banc ──────────────────────────────────────────────
+# `REPOS` dit quels depots existent (la resolution de l'org les interroge un par un), `FICHIERS`
+# ce que chaque depot porte deja (pour le remplacement), `ECRITS` ce que la forge a recu.
+REPOS = set()
+FICHIERS = {}
+ECRITS = []
+# Les GET recus (pour epingler que le service NE TELECHARGE PAS le fichier qu'il remplace)
+# et les depots dont la face workshop n'a jamais ete poussee.
+LUS = []
+SANS_WORKSHOP = set()
+# La taille d'une page du banc : petite, pour que la pagination se joue pour de vrai.
+PAGE = 50
 
 # Le faux geste PARLE, et son code de sortie est pilotable : le relais de sa sortie et la remontee
 # de son code sont deux promesses distinctes de l'executeur.
@@ -80,6 +101,7 @@ os.chmod(GESTURES, 0o755)
 ADMINS = set()
 WORKERS = set()
 ASKED = []
+# La boite de depot : ce que la forge a recu, et un interrupteur pour jouer « depot absent ».
 
 
 class Forge(BaseHTTPRequestHandler):
@@ -88,6 +110,44 @@ class Forge(BaseHTTPRequestHandler):
     def do_GET(self):
         login = self.path.rsplit("/", 1)[-1]
         ASKED.append((login, self.headers.get("Authorization")))
+        chemin = self.path.split("?")[0]
+        LUS.append(self.path)
+        # LE LISTAGE D'UN REPERTOIRE : des noms et des sha, jamais de contenu. La forge rend une
+        # LISTE pour un repertoire et un OBJET pour un fichier — le banc rend les deux formes, sinon
+        # le service pourrait confondre les deux sans que rien ne rougisse.
+        if "/contents/" in chemin:
+            bouts = chemin.strip("/").split("/")
+            repo = "/".join(bouts[3:5])
+            demande = chemin.split("/contents/", 1)[1]
+            if repo in SANS_WORKSHOP:
+                self.send_response(404); self.send_header("Content-Length", "0")
+                self.end_headers(); return
+            dedans = sorted(
+                [{"name": c.split("/")[-1], "type": "file", "sha": v}
+                 for (r, c), v in FICHIERS.items()
+                 if r == repo and c.startswith(demande.rstrip("/") + "/")],
+                key=lambda e: e["name"])
+            if not dedans and (repo, demande) not in FICHIERS:
+                self.send_response(404); self.send_header("Content-Length", "0")
+                self.end_headers(); return
+            # ⚠ ELLE PAGINE, COMME LA VRAIE. Un banc qui rend tout d'un coup ne peut pas voir une
+            # troncature lue comme une absence — c'est exactement le defaut qu'on a corrige.
+            page = int(dict(urllib.parse.parse_qsl(self.path.partition("?")[2])).get("page", "1"))
+            tranche = dedans[(page - 1) * PAGE:page * PAGE]
+            b = json.dumps(tranche).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(b)))
+            if page * PAGE < len(dedans):
+                suivante = "%s&page=%d" % (self.path.split("&page=")[0], page + 1)
+                self.send_header("Link", '<http://127.0.0.1:%d%s>; rel="next"'
+                                 % (self.server.server_port, suivante))
+            self.end_headers(); self.wfile.write(b); return
+        # « CE DEPOT EXISTE-T-IL ? » — la resolution de l'org pose cette question a chaque catalogue.
+        if chemin.startswith("/api/v1/repos/") and "/contents/" not in chemin:
+            bouts = chemin.strip("/").split("/")
+            if len(bouts) == 5:
+                self.send_response(200 if "/".join(bouts[3:5]) in REPOS else 404)
+                self.send_header("Content-Length", "0"); self.end_headers(); return
         # ⚠ ELLE REFUSE UN JETON QUI N'EST PAS LE SIEN, comme la vraie. Une forge de banc qui dit
         # « oui » a n'importe quel en-tete ne peut pas voir le cas du jeton vide ou revoque — et
         # c'est exactement le cas qui etait confondu avec « forge muette ».
@@ -112,6 +172,57 @@ class Forge(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    # ── LES TROIS ROUTES DU DEPOT ──────────────────────────────────────────────────────────────
+    #   GET  /repos/<org>/<slug>                      « ce depot existe-t-il ? » (resolution de l'org)
+    #   GET  /repos/<o>/<r>/git/trees/<branche>       le sha du blob en place, SANS son contenu
+    #   POST /repos/<o>/<r>/contents/<chemin>         creation ; 422 si le chemin est pris
+    #   PUT  /repos/<o>/<r>/contents/<chemin>         remplacement, avec le sha du blob
+    def _depot(self):
+        """Rend (owner, name) pour une route de depot, ou None."""
+        bouts = self.path.split("?")[0].strip("/").split("/")
+        if len(bouts) >= 5 and bouts[2] == "repos":
+            return bouts[3], bouts[4]
+        return None
+
+    def _rendre(self, code, charge=None):
+        corps = json.dumps(charge).encode() if charge is not None else b""
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(corps)))
+        self.end_headers()
+        if corps:
+            self.wfile.write(corps)
+
+    def _ecriture(self, methode):
+        length = int(self.headers.get("Content-Length", "0"))
+        brut = self.rfile.read(length) if length else b""
+        depot = self._depot()
+        if not depot:
+            return self._rendre(404)
+        repo = "/".join(depot)
+        chemin = self.path.split("/contents/", 1)[1] if "/contents/" in self.path else ""
+        corps = json.loads(brut.decode("utf-8"))
+        ECRITS.append({"methode": methode, "repo": repo, "chemin": chemin, "corps": corps,
+                       "auth": self.headers.get("Authorization"),
+                       "longueur_annoncee": length, "longueur_recue": len(brut)})
+        if (self.headers.get("Authorization") or "").removeprefix("token ").strip() != SYSTEM_VALUE:
+            return self._rendre(401)
+        if repo not in REPOS or repo in SANS_WORKSHOP:
+            return self._rendre(404)
+        deja = FICHIERS.get((repo, chemin))
+        if methode == "POST" and deja:
+            return self._rendre(422, {"message": "path already exists"})
+        if methode == "PUT" and corps.get("sha") != deja:
+            return self._rendre(409, {"message": "sha mismatch"})
+        FICHIERS[(repo, chemin)] = "blob-" + hashlib.sha256(brut).hexdigest()[:8]
+        return self._rendre(201, {"commit": {"sha": "cafe1234cafe1234cafe1234cafe1234cafe1234"}})
+
+    def do_POST(self):
+        self._ecriture("POST")
+
+    def do_PUT(self):
+        self._ecriture("PUT")
+
     def log_message(self, *a):
         pass
 
@@ -127,6 +238,12 @@ os.environ.update(
     # Un groupe qui n'existe pas : le banc n'est pas root, et l'executeur doit RESSERRER plutot que
     # d'ouvrir a un groupe qu'il n'a pas pu nommer.
     LCARS_FLEET_GROUP="lcars-banc-groupe-absent",
+    # LA BOITE DE DEPOT : son jeton est celui du compte SYSTEME, distinct du master — le banc les
+    # separe parce que le service les separe, et un depot ecrit avec le master passerait inapercu.
+    LCARS_SYSTEM_TOKEN_FILE=SYSTEM_TOKEN,
+    LCARS_READY_ROOM_REPO="fleet/ready-room",
+    LCARS_DEPOSIT_SOCKET=os.path.join(WORK, "deposit.sock"),
+    LCARS_CONSOLE_GROUP="lcars-banc-groupe-absent",
 )
 
 spec = importlib.util.spec_from_file_location("catexec", SRC)
@@ -580,6 +697,219 @@ try:
           "bind: le repertoire porte EXACTEMENT le mode de la table (0%o)" % (_st_dir.st_mode & 0o777))
 finally:
     _srv.close()
+
+# ─── 10. LA BOITE DE DEPOT — LA DESTINATION EST LE DEPOT DU PROJET ──────────────────────────────
+#
+# CE QUI EST EPINGLE ICI :
+#   · le fichier ne passe pas par le fil : la porte lit la ZONE DE TRANSIT, et rien d'autre ;
+#   · un chemin hors de cette zone est refuse — sans cette garde, la porte commiterait un jeton ;
+#   · l'org du projet se resout parmi les catalogues INSTALLES, et l'ambiguite est un refus ;
+#   · l'humain est l'AUTEUR du commit, le compte systeme le COMMITTER, la branche est `workshop` ;
+#   · le chemin ne porte ni login ni horodatage — le commit les porte deja ;
+#   · un nom deja pris est REMPLACE : second commit, sha du blob en place, historique conserve ;
+#   · le contenu n'est jamais charge en memoire : la longueur annoncee vaut celle d'un base64.
+DEPOT = os.path.join(WORK, "deposit.sock")
+SPOOL = os.path.join(WORK, "spool")
+CATS = os.path.join(WORK, "catalogues")
+os.makedirs(SPOOL, exist_ok=True)
+for _cat in ("fleet", "reverse"):
+    os.makedirs(os.path.join(CATS, _cat), exist_ok=True)
+    with open(os.path.join(CATS, _cat, "catalogue.yaml"), "w") as fh:
+        fh.write("api: 1\nname: %s\n" % _cat)
+
+mod.DEPOSIT_SOCKET_PATH = DEPOT
+mod.DEPOSIT_SPOOL = SPOOL
+mod.CATALOGUES_DIR = CATS
+mod.SYSTEM_TOKEN_FILE = SYSTEM_TOKEN
+# Le pair de cette porte est le DECK, et le banc n'a qu'un uid : le sien. On nomme donc le compte du
+# banc comme etant celui du deck — ce qui EPINGLE la regle « un seul compte relaie ».
+mod.DEPOSIT_PEER = MOI
+_srv_depot = mod.bind(DEPOT, "lcars-banc-groupe-absent")
+threading.Thread(target=mod.serve_forever, args=(_srv_depot, mod.serve_deposit),
+                 daemon=True).start()
+
+
+def transit(contenu):
+    """Un fichier dans la zone de transit, comme le deck l'y pose. Rend (chemin, taille, sha)."""
+    import hashlib as _h
+    brut = contenu if isinstance(contenu, bytes) else contenu.encode("utf-8")
+    fd, chemin = tempfile.mkstemp(prefix="depot-", dir=SPOOL)
+    with os.fdopen(fd, "wb") as fh:
+        fh.write(brut)
+    return chemin, len(brut), _h.sha256(brut).hexdigest()
+
+
+def depose(login, slug, contenu=b"firmware", nom="firmware.bin",
+           empreinte=None, taille=None, chemin=None, timeout=20):
+    """Un depot sur la porte, et son verdict."""
+    spool, reelle, digest = transit(contenu)
+    c = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    c.settimeout(timeout)
+    c.connect(DEPOT)
+    f = c.makefile("rw", encoding="utf-8", newline="\n")
+    f.write("deposit %s %s %s %s %s\n%s\n" % (
+        login, slug, empreinte or digest, reelle if taille is None else taille, nom,
+        chemin or spool))
+    f.flush()
+    rep = (f.readline() or "").rstrip("\n")
+    c.close()
+    return rep
+
+
+REPOS.add("reverse/samyang-reverse")
+ECRITS.clear()
+_v = depose("alice", "samyang-reverse")
+check(_v.startswith("OK:"), "depot: le fichier part dans le depot du projet — %s" % _v[:70])
+check(len(ECRITS) == 1, "depot: une seule ecriture sur la forge (%d)" % len(ECRITS))
+if ECRITS:
+    _e = ECRITS[0]
+    check(_e["repo"] == "reverse/samyang-reverse",
+          "depot: l'org vient du catalogue qui porte le projet (%s)" % _e["repo"])
+    check(_e["corps"].get("branch") == "workshop",
+          "depot: la branche est celle de la face workshop (%s)" % _e["corps"].get("branch"))
+    check(_e["chemin"] == "ready-room/firmware.bin",
+          "depot: le chemin ne porte ni login ni horodatage (%s)" % _e["chemin"])
+    check(_e["corps"].get("author", {}).get("name") == "alice",
+          "depot: l'AUTEUR du commit est l'humain (%s)" % _e["corps"].get("author"))
+    check(_e["corps"].get("committer", {}).get("name") == "system_starfleet",
+          "depot: le COMMITTER est le compte systeme, celui qui pousse")
+    check(_e["auth"] == "token " + SYSTEM_VALUE,
+          "depot: la poussee presente le jeton SYSTEME, pas le master")
+    check("Deposited-by: alice" in _e["corps"].get("message", ""),
+          "depot: la remorque nomme le deposant — seconde trace, lisible sans la forge")
+    # ⚠ LA LONGUEUR ANNONCEE EST CELLE DU CORPS RECU : c'est ce qui prouve que le contenu a ete
+    # STREAME sans etre charge — un calcul faux se verrait ici, pas en production.
+    check(_e["longueur_annoncee"] == _e["longueur_recue"],
+          "depot: la longueur annoncee vaut celle du corps recu (%s vs %s)"
+          % (_e["longueur_annoncee"], _e["longueur_recue"]))
+
+# ─── 10 bis. LE MEME NOM EST REMPLACE, PAS REFUSE ───────────────────────────────────────────────
+# git garde l'historique : le second depot est un commit de plus, et le sha du blob en place est ce
+# que l'API exige pour distinguer un remplacement d'un ecrasement aveugle.
+ECRITS.clear()
+_v = depose("alice", "samyang-reverse", contenu=b"firmware v2")
+check(_v.startswith("OK:"), "depot: un nom deja pris est remplace — %s" % _v[:40])
+check([e["methode"] for e in ECRITS] == ["POST", "PUT"],
+      "depot: creation tentee, puis remplacement (%s)" % [e["methode"] for e in ECRITS])
+check(ECRITS[-1]["corps"].get("sha"), "depot: le remplacement porte le sha du blob en place")
+
+# ─── 10 bis (suite). LE REMPLACEMENT TIENT SUR UNE READY ROOM BIEN REMPLIE ──────────────────────
+#
+# ⚠ LE PIEGE QUE CE CAS FERME : chercher le sha du blob dans `git/trees/<branche>?recursive` compte
+# TOUTE la face et se tronque au-dela d'une page. Au-dela, le sha revenait « absent », le 422 du
+# depart etait relance, et l'operateur lisait `forge_refused:422` pour un fichier bien la. Le
+# listage du REPERTOIRE ne parle que de la ready room, et ne se tronque pas sur la taille de la face.
+for _i in range(1200):
+    FICHIERS[("reverse/samyang-reverse", "docs/note-%04d.md" % _i)] = "blob-%04d" % _i
+ECRITS.clear()
+LUS.clear()
+_v = depose("alice", "samyang-reverse", contenu=b"firmware v3")
+check(_v.startswith("OK:"),
+      "depot: le remplacement tient quand la face porte 1200 fichiers de plus — %s" % _v[:40])
+check([e["methode"] for e in ECRITS] == ["POST", "PUT"],
+      "depot: et c'est bien un remplacement (%s)" % [e["methode"] for e in ECRITS])
+# ⚠ ET LE FICHIER N'EST JAMAIS TELECHARGE POUR SAVOIR S'IL EXISTE : on liste le repertoire, on ne
+# demande pas le blob. Un `GET /contents/ready-room/firmware.bin` ici rendrait 50 Mo en base64.
+check(not [u for u in LUS if "/contents/ready-room/firmware.bin" in u],
+      "depot: le sha vient du LISTAGE, jamais du contenu du fichier (%s)"
+      % [u for u in LUS if "/contents/" in u][:2])
+
+# ─── 10 bis (pagination). UNE READY ROOM QUI DEPASSE UNE PAGE ───────────────────────────────────
+#
+# ⚠ LE DEFAUT QUE CE CAS FERME : une reponse tronquee lue comme complete rend « absent » pour un
+# fichier bien la, et le remplacement devient un refus de la forge. La porte suit `Link: rel="next"`
+# jusqu'au bout. Le banc pagine par 50 ; on en met 120 pour que la cible soit hors premiere page.
+for _i in range(120):
+    FICHIERS[("reverse/samyang-reverse", "ready-room/piece-%03d.bin" % _i)] = "blob-p%03d" % _i
+ECRITS.clear()
+_v = depose("alice", "samyang-reverse", contenu=b"firmware v4")
+check(_v.startswith("OK:"),
+      "depot: le remplacement traverse les pages du listage — %s" % _v[:40])
+check([e["methode"] for e in ECRITS] == ["POST", "PUT"],
+      "depot: et c'est bien un remplacement, pas un refus (%s)" % [e["methode"] for e in ECRITS])
+
+# ⚠ ET LA TRAVERSEE EST BORNEE : une ready room sans fin ne doit pas faire boucler ce service.
+# La cible trie APRES les pieces : sans ca elle tombe en premiere page et la borne n'est jamais
+# atteinte — le cas passerait au vert sans rien mesurer.
+FICHIERS[("reverse/samyang-reverse", "ready-room/zz-cible.bin")] = "blob-zz"
+_max_listing = mod.DEPOSIT_LISTING_MAX
+mod.DEPOSIT_LISTING_MAX = 60
+ECRITS.clear()
+_v = depose("alice", "samyang-reverse", contenu=b"cible v2", nom="zz-cible.bin")
+check(_v == "FAIL:listing_too_long",
+      "depot: au-dela de la borne du listage, la porte le DIT au lieu de boucler — %s" % _v)
+mod.DEPOSIT_LISTING_MAX = _max_listing
+# Et avec la vraie borne, la meme cible hors premiere page se remplace.
+ECRITS.clear()
+_v = depose("alice", "samyang-reverse", contenu=b"cible v3", nom="zz-cible.bin")
+check(_v.startswith("OK:") and [e["methode"] for e in ECRITS] == ["POST", "PUT"],
+      "depot: la meme cible, hors premiere page, se remplace — %s" % _v[:40])
+FICHIERS.pop(("reverse/samyang-reverse", "ready-room/zz-cible.bin"), None)
+for _i in range(120):
+    FICHIERS.pop(("reverse/samyang-reverse", "ready-room/piece-%03d.bin" % _i), None)
+
+# ─── 10 bis (fin). UNE FACE WORKSHOP JAMAIS POUSSEE SE NOMME ────────────────────────────────────
+# Le depot existe — la resolution vient de le prouver. Un 404 a l'ecriture parle donc de la BRANCHE,
+# et le dire evite d'envoyer l'operateur chercher du cote du fichier.
+REPOS.add("reverse/sans-face")
+SANS_WORKSHOP.add("reverse/sans-face")
+_v = depose("alice", "sans-face")
+check(_v == "FAIL:no_workshop_branch",
+      "depot: un projet sans face workshop se nomme, au lieu de « la forge refuse » — %s" % _v)
+SANS_WORKSHOP.discard("reverse/sans-face")
+REPOS.discard("reverse/sans-face")
+
+# ─── 10 ter. LA ZONE DE TRANSIT EST UNE FRONTIERE ───────────────────────────────────────────────
+# ⚠ SANS CETTE GARDE, LA PORTE COMMITERAIT CE QU'ON LUI DESIGNE : elle tourne avec l'autorite du
+# conteneur, et un chemin non borne pourrait nommer le fichier de jetons.
+ECRITS.clear()
+_v = depose("alice", "samyang-reverse", chemin=TOKEN)
+check(_v == "FAIL:bad_spool", "depot: un chemin hors de la zone de transit est refuse — %s" % _v)
+check(not ECRITS, "depot: et rien ne part vers la forge")
+_lien = os.path.join(SPOOL, "lien-vers-jeton")
+os.path.islink(_lien) or os.symlink(TOKEN, _lien)
+_v = depose("alice", "samyang-reverse", chemin=_lien)
+check(_v == "FAIL:bad_spool", "depot: un lien symbolique DANS la zone est refuse aussi — %s" % _v)
+
+# ─── 10 quater. L'ORG SE RESOUT, ET L'AMBIGUITE EST UN REFUS ────────────────────────────────────
+_v = depose("alice", "projet-inconnu")
+check(_v == "FAIL:unknown_project", "depot: un projet qu'aucun catalogue ne porte est refuse — %s" % _v)
+REPOS.add("fleet/samyang-reverse")
+ECRITS.clear()
+_v = depose("alice", "samyang-reverse")
+check(_v == "FAIL:ambiguous_project",
+      "depot: le meme slug dans deux catalogues — la porte ne choisit pas — %s" % _v)
+check(not ECRITS, "depot: et rien n'est ecrit tant que l'org est ambigue")
+REPOS.discard("fleet/samyang-reverse")
+
+# ─── 10 quinquies. CE QUE LA PORTE GARDE POUR ELLE ──────────────────────────────────────────────
+mod.DEPOSIT_PEER = "un-autre-service"
+_v = depose("alice", "samyang-reverse")
+check(_v == "FAIL:not_the_deck", "depot: un pair qui n'est pas le deck est refuse — %s" % _v)
+mod.DEPOSIT_PEER = MOI
+
+for _nom, _label in ((".." , "deux points"), ("a/b", "une barre"), (".cache", "un nom cache")):
+    _v = depose("alice", "samyang-reverse", nom=_nom)
+    check(_v == "FAIL:bad_name", "depot: « %s » refuse (%s) — %s" % (_nom, _label, _v))
+_v = depose("alice", "samyang-reverse", empreinte="0" * 64)
+check(_v == "FAIL:hash_mismatch", "depot: une empreinte qui ne correspond pas refuse le depot — %s" % _v)
+_v = depose("alice", "samyang-reverse", taille=3)
+check(_v == "FAIL:size_mismatch", "depot: une taille qui ne correspond pas au fichier — %s" % _v)
+_v = depose("alice", "samyang-reverse", contenu=b"")
+check(_v == "FAIL:empty", "depot: un fichier vide est refuse — %s" % _v)
+_max = mod.DEPOSIT_MAX_BYTES
+mod.DEPOSIT_MAX_BYTES = 8
+_v = depose("alice", "samyang-reverse", contenu=b"beaucoup trop long")
+check(_v == "FAIL:too_big", "depot: au-dela de la borne, refus — %s" % _v)
+mod.DEPOSIT_MAX_BYTES = _max
+
+# ─── 10 sexies. SANS JETON SYSTEME, LA CAUSE EST L'AUTORITE ─────────────────────────────────────
+# Et surtout pas « la forge n'a pas repondu » : l'une se repare en reposant un jeton, l'autre en
+# attendant. Le service demarre quand meme — deux portes sur trois n'en ont aucun usage.
+mod.SYSTEM_TOKEN_FILE = os.path.join(WORK, "system-absent.token")
+_v = depose("alice", "samyang-reverse")
+check(_v == "FAIL:no_authority", "depot: sans jeton systeme, la cause est l'autorite — %s" % _v)
+mod.SYSTEM_TOKEN_FILE = SYSTEM_TOKEN
 
 shutil.rmtree(WORK, ignore_errors=True)
 sys.exit(0 if ok else 1)

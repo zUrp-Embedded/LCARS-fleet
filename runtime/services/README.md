@@ -11,7 +11,11 @@
 Le code qui tourne **après** l'install, hors du checkout, la plupart du temps en root. Ce n'est ni
 du provisionnement (`deploy/`) ni le runtime BEAM (`lib/`) : ce sont les **services de la machine**.
 
-Il porte les deux chaînes d'escalade du conteneur, et c'est ce qui justifie qu'on puisse les trouver :
+Il porte les chaînes d'escalade du conteneur, et c'est ce qui justifie qu'on puisse les trouver.
+La dernière est la seule dont l'identité n'est **pas** établie par le noyau : le deck a authentifié
+la personne à sa porte OIDC et l'affirme sur le fil ; la porte d'en face vérifie que ce login est
+bien de l'équipe, mais elle croit le deck sur *qui est devant l'écran*. C'est une **trace**, pas une
+preuve opposable, et le service le dit dans son en-tête :
 
 ```
 lcars catalogue install                 l'humain
@@ -22,6 +26,12 @@ lcars catalogue install                 l'humain
 lcars-authority-ask <compte>            un shell, un rail
   → roles.sock, SO_PEERCRED             le meme service, appartenance a `humans` demandee a la forge
   → le jeton du role, une ligne
+
+onglet « boite de depot » du deck       l'humain, identifie par la forge (OIDC)
+  → deposit.sock, login SUR LE FIL      le noyau enonce le DECK ; l'humain est affirme, puis
+                                        reverifie aupres de la forge (equipe `humans`)
+  → catalogue-executor.py               lcars-authority, ecrit par l'API de contenu de la forge
+  → le commit : l'humain AUTEUR, le compte systeme COMMITTER et pousseur
 
 Fleet.Admiral.ToolchainReconciler       le BEAM, sous l'humain
   → toolchain.sock (rien sur le fil)    la socket dit le verbe, la forge dit le contenu

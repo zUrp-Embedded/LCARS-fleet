@@ -48,6 +48,9 @@ dir       /var/lib/lcars                              0755  root:root           
 # relu à chaque passe, sinon le premier venu possède le dossier où root télécharge puis exécute
 dir       /var/tmp/lcars                               0755  root:root           any
 dir       /var/tmp/lcars/toolchain-work                0700  root:root           any
+# la zone de transit de la boîte de dépôt : le DECK y écrit, la PORTE y lit. sgid, pour que le
+# fichier naisse au groupe de la porte sans que le deck ait à le donner.
+dir       /var/tmp/lcars/deposit                       2750  lcars-system:lcars-authority  any
 
 dir       /opt/lcars/var                               0755  root:root           any
 dir       /opt/lcars/var/tofu                          0700  lcars-authority:lcars-authority  wsl+linux
@@ -108,6 +111,13 @@ runtime   /run/lcars/toolchain                         2775  root:fleet         
 runtime   /run/lcars/authority                         0750  lcars-authority:fleet  any
 runtime   /run/lcars/authority/catalogue.sock          0660  lcars-authority:fleet  any
 runtime   /run/lcars/authority/roles.sock              0660  lcars-authority:fleet  any
+# la porte de dépôt du deck, dans un répertoire à part : le cycle de vie partagé donne au parent le
+# groupe de la socket qu'on y pose, et l'y mêler aux deux portes d'au-dessus leur retirerait `fleet`.
+# Son groupe est celui de l'AUTORITÉ, et le deck le reçoit à l'exec (`console-landing.sh`, setpriv
+# --groups) : `lcars-console` ne se donne par adhésion à personne (MUR 5 ter), et `fleet` donnerait
+# au deck les jetons de rôle.
+runtime   /run/lcars/deposit                           0750  lcars-authority:lcars-authority  any
+runtime   /run/lcars/deposit/deposit.sock              0660  lcars-authority:lcars-authority  any
 runtime   /run/lcars/privileged                        0750  root:fleet          any
 runtime   /run/lcars/privileged/toolchain.sock         0660  root:fleet          any
 runtime   /run/lcars-converger.refused                 0644  root:root           any

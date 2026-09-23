@@ -17,6 +17,7 @@
 
 import html
 import http.client
+import hashlib
 import json
 import os
 import re
@@ -24,6 +25,7 @@ import secrets
 import select
 import socket
 import subprocess
+import tempfile
 import sys
 import threading
 import time
@@ -118,18 +120,65 @@ STATIC_FILES = {
     "xterm.css": "text/css; charset=utf-8",
     "addon-fit.js": "application/javascript; charset=utf-8",
 }
-# L'ADMINITE EST UNE NOTION DE LA FORGE, ET ELLE N'EN A QU'UNE. Une equipe (`<org>:admins`) lue
-# dans les `groups` deja en main serait gratuite, et une SECONDE source de verite pour un fait que
-# la forge sait dire elle-meme. Deux sources sur le meme fait ne restent
-# d'accord que tant que personne ne touche a l'une des deux, et celle qui derive est toujours celle
-# qu'on ne relit pas.
+
+# ── LA BOITE DE DEPOT ───────────────────────────────────────────────────────────────────────────
 #
-# Le cout de la source unique est UN appel, et il est paye la ou il est le moins cher : au callback
-# OIDC, ou le jeton d'acces est deja en main pour l'appel `userinfo` qui le precede. Rien de plus
-# n'est stocke — ni le jeton, ni un credential de service : seul le booleen entre en session.
+# CE SERVEUR N'ECRIT QUE DANS SA ZONE DE TRANSIT, ET C'EST LE POINT. Il tourne sous `lcars-system`,
+# avec deux groupes accordes A L'EXEC (console-landing.sh) et aucun par adhesion : `lcars-console`
+# pour joindre les consoles, et celui du service d'autorite pour joindre la porte de depot. Il ne
+# peut ecrire ni dans `/home`, ni la ou vivent les jetons.
 #
-# ⚠ Ce qui existe ici est le MECANISME (l'acheminement de l'identite, la route, l'onglet) — pas les
-# POUVOIRS de l'admin, qui demandent chacun un endpoint systeme qui n'existe pas encore.
+# LE FICHIER NE TRAVERSE PAS LA MEMOIRE. Le corps de la requete est ECRIT AU FIL DE L'EAU dans la
+# zone de transit, l'empreinte se calcule pendant l'ecriture, et ce qui part sur la socket est le
+# CHEMIN. Un base64 dans un corps JSON aurait coute un tiers de plus sur le fil et trois copies du
+# fichier en memoire — tenable a 8 Mio, absurde a 50 Mo.
+#
+# ⚠ L'ATTRIBUTION EST DECLARATIVE, ET ELLE EST DITE TELLE QUELLE DANS L'ONGLET. Le commit porte
+# l'humain comme AUTEUR ; la poussee reste celle du compte systeme, parce qu'aucun jeton personnel
+# n'existe dans ce conteneur. C'est une trace pour savoir qui a depose quoi, pas une preuve
+# opposable a celui qui la conteste.
+DEPOSIT_SOCKET = lcars_facts.get("LCARS_DEPOSIT_SOCKET")
+# Sur DISQUE, jamais sous `/run` : c'est un tmpfs, donc 50 Mo de transit y seraient 50 Mo de RAM.
+DEPOSIT_SPOOL = lcars_facts.get("LCARS_DEPOSIT_SPOOL")
+# La meme borne que la porte d'en face, et les deux se lisent : celle-ci refuse au fil de la
+# lecture, celle d'en face mesure le fichier qu'elle trouve.
+DEPOSIT_MAX_BYTES = int(lcars_facts.get("LCARS_DEPOSIT_MAX_BYTES"))
+# Le temps d'un depot, pas celui d'une question : la porte pousse le fichier vers la forge pendant
+# que ce delai court.
+DEPOSIT_TIMEOUT = int(os.environ.get("LCARS_DEPOSIT_TIMEOUT", "600"))
+# ⚠ NI LA BRANCHE NI LE REPERTOIRE NE SONT RECOPIES ICI. Ce serveur ne decide pas de la
+# destination : il relaie, et la porte lui REND le depot et le chemin qu'elle a ecrits. Une copie de
+# plus du nom de la branche serait un miroir que rien ne tient — l'autorite est
+# `Fleet.Layout.workshop_branch/0`, et le seul miroir est la porte, tenu par un mur.
+# Les causes que la porte rend sont des JETONS ; les phrases sont ici, parce que c'est cette page
+# que l'operateur regarde. Une cause inconnue se montre telle quelle plutot que d'etre lissee en
+# « erreur » : un jeton qu'on n'a pas prevu se cherche dans les logs, une phrase vague ne se cherche
+# nulle part.
+DEPOSIT_CAUSES = {
+    "not_the_deck": "ce conteneur refuse le relais du deck — le service de depot ne le reconnait pas",
+    "bad_request": "le deck a mal formule la demande",
+    "bad_login": "le deck a relaye un login que la porte refuse",
+    "bad_project": "nom de projet refuse",
+    "bad_name": "nom de fichier refuse : lettres, chiffres, point, tiret et souligne, 128 au plus",
+    "bad_digest": "empreinte du fichier illisible",
+    "bad_spool": "le fichier de transit n'est pas la ou la porte l'attend",
+    "size_mismatch": "la taille annoncee et le fichier ne concordent pas — rien n'est depose",
+    "hash_mismatch": "le contenu recu ne correspond pas a son empreinte — rien n'est depose",
+    "too_big": "fichier trop gros pour la boite de depot",
+    "empty": "fichier vide",
+    "unknown_project": "aucun catalogue installe ne porte ce projet sur la forge",
+    "no_workshop_branch": "ce projet n'a pas encore de face workshop sur la forge — rien n'est depose",
+    "listing_too_long": "la ready room de ce projet est trop longue pour remplacer un fichier — fais le menage",
+    "ambiguous_project": "ce nom de projet existe dans plusieurs catalogues — la porte ne choisit pas",
+    "no_authority": "ce conteneur n'a pas de jeton utilisable pour deposer",
+    "forge_unreachable": "la forge n'a pas repondu — rien n'est depose",
+    "unknown_peer": "la porte de depot ne sait pas qui frappe",
+    # Les trois dernieres ne viennent pas de la porte : c'est CE serveur qui les nomme, quand la
+    # porte ne repond pas. Un depot refuse et un depot non tente appellent des gestes opposes.
+    "porte_fermee": "le service de depot de ce conteneur est eteint — rien n'est depose",
+    "porte_muette": "le service de depot accepte et se tait — rien n'est confirme",
+    "verdict_illisible": "la porte de depot a repondu quelque chose d'inattendu",
+}
 
 # Nature d'une cible par-humain -> nom de la socket dans son repertoire.
 PER_HUMAN_TARGETS = {"console": "console.sock", "pod": "pod.sock"}
@@ -181,6 +230,95 @@ def unix_get(sock_path, path, timeout=2):
         return r.status, r.read()
     finally:
         conn.close()
+
+
+def deposit(login, projet, name, spool, taille, digest):
+    """
+    Un depot relaye a la porte qui detient le jeton. Rend `(ok, detail_ou_cause)`.
+
+    LE FIL EST VOLONTAIREMENT BETE, comme celui des deux autres portes : une ligne de requete, une
+    ligne qui donne le CHEMIN du fichier de transit, une ligne de verdict. Le fichier lui-meme ne
+    passe pas par la socket — il est deja sur le disque, ecrit au fil de l'eau par la route qui l'a
+    recu.
+
+    ⚠ L'EMPREINTE EST CALCULEE ICI ET VERIFIEE LA-BAS. Ce n'est pas une ceinture de plus : c'est ce
+    qui rend les deux journaux independants. Celui-ci ecrit ce qu'il a lu du navigateur, celui d'en
+    face ce qu'il trouve sur le disque ; un transit altere se denonce.
+    """
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.settimeout(DEPOSIT_TIMEOUT)
+            sock.connect(DEPOSIT_SOCKET)
+            wire = sock.makefile("rw", encoding="utf-8", newline="\n")
+            wire.write(f"deposit {login} {projet} {digest} {taille} {name}\n{spool}\n")
+            wire.flush()
+            verdict = (wire.readline() or "").rstrip("\r\n")
+    except (ConnectionRefusedError, FileNotFoundError):
+        # PERSONNE N'ECOUTE = LE SERVICE EST ETEINT, et c'est une mesure, pas une supposition. La
+        # meme distinction que pour les decks des humains : un refus de connexion se nomme, un
+        # silence se nomme autrement.
+        print(f"[lcars-deck] depot impossible : rien n'ecoute sur {DEPOSIT_SOCKET}",
+              file=sys.stderr, flush=True)
+        return False, "porte_fermee"
+    except (socket.timeout, TimeoutError):
+        print(f"[lcars-deck] depot: {DEPOSIT_SOCKET} accepte et se tait", file=sys.stderr, flush=True)
+        return False, "porte_muette"
+    except OSError as exc:
+        print(f"[lcars-deck] depot: {DEPOSIT_SOCKET} ({exc})", file=sys.stderr, flush=True)
+        return False, "porte_fermee"
+
+    if verdict.startswith("OK:"):
+        sha, _, reste = verdict[3:].partition(" ")
+        repo, _, chemin = reste.partition(" ")
+        print(f"[lcars-deck] depot de {login} : « {name} » ({taille} o, sha256 {digest[:12]}…) "
+              f"-> {repo} {chemin} (commit {sha[:12]})", file=sys.stderr, flush=True)
+        return True, {"sha": sha, "repo": repo, "path": chemin, "sha256": digest}
+    cause = verdict[5:] if verdict.startswith("FAIL:") else "verdict_illisible"
+    print(f"[lcars-deck] depot de {login} REFUSE : {cause}", file=sys.stderr, flush=True)
+    return False, cause
+
+
+def spool_write(source, annonce):
+    """
+    Ecrit le corps de la requete dans la zone de transit, par tranches. Rend `(chemin, taille, sha)`.
+
+    ⚠ LA BORNE S'APPLIQUE AU FIL DE LA LECTURE, pas seulement sur la taille annoncee : un client qui
+    ment sur `Content-Length` ne doit pas pouvoir remplir le disque parce qu'on l'a cru. On lit ce
+    qui est annonce, on s'arrete a la borne, et le fichier part avec.
+
+    Le fichier nait dans un repertoire `setgid` : il herite du groupe de la porte, qui doit le LIRE.
+    Le mode est resserre a `0640` — le deck l'ecrit, la porte le lit, personne d'autre.
+    """
+    os.makedirs(DEPOSIT_SPOOL, exist_ok=True)
+    fd, chemin = tempfile.mkstemp(prefix="depot-", dir=DEPOSIT_SPOOL)
+    h = hashlib.sha256()
+    taille = 0
+    try:
+        os.fchmod(fd, 0o640)
+        with os.fdopen(fd, "wb") as sortie:
+            reste = annonce
+            while reste > 0:
+                morceau = source.read(min(1024 * 1024, reste))
+                if not morceau:
+                    break
+                taille += len(morceau)
+                if taille > DEPOSIT_MAX_BYTES:
+                    raise ValueError("depasse la borne")
+                h.update(morceau)
+                sortie.write(morceau)
+                reste -= len(morceau)
+    except BaseException:
+        spool_remove(chemin)
+        raise
+    return chemin, taille, h.hexdigest()
+
+
+def spool_remove(chemin):
+    """Le transit ne survit pas au depot, reussi ou non — sinon le disque se remplit en silence."""
+    try:
+        os.unlink(chemin)
+    except OSError as exc:
+        print(f"[lcars-deck] transit non nettoye : {chemin} ({exc})", file=sys.stderr, flush=True)
 
 
 def parse_target(path):
@@ -574,7 +712,12 @@ def state(only=None, admin=False, people=None):
                 "project": p.get("project_slug"),
             })
         hs.append(h)
-    return {"hostname": socket.gethostname(), "humans": hs, "admin": bool(admin)}
+    # `deposit` voyage pour que la page sache QUOI DIRE — la borne et la destination — jamais pour
+    # decider : la porte d'en face lit les memes variables et retranche sur ce qu'elle lit, elle.
+    # LE PROJET, LUI, NE VOYAGE PAS ICI : la page le tire des pods qu'elle recoit deja, comme elle
+    # en tire les groupes de sa barre laterale. Une seconde liste serait une seconde verite.
+    return {"hostname": socket.gethostname(), "humans": hs, "admin": bool(admin),
+            "deposit": {"max_bytes": DEPOSIT_MAX_BYTES}}
 
 
 # ── THE THREE PAGES THAT ARE NOT THE DECK ───────────────────────────────────────────────────────
@@ -779,6 +922,9 @@ PAGE = r"""<!doctype html>
 // PAS DE `HOST` : aucune cible n'a d'adresse. Un `http://<hote>:<port>` par onglet serait la
 // seconde origine, en une ligne.
 let current = null;
+// Ecrit par le serveur dans CETTE page, pour CETTE session : le seul moyen d'en obtenir
+// un est d'avoir recu la page, donc d'avoir passe la porte.
+const CSRF = '%(csrf)s';
 
 // ⚠ `stage` ET `panel` SONT AU SCOPE DU MODULE, JAMAIS DANS `show()`. `termPane()`, defini au meme
 // niveau que `show()`, les utilise (`stage.appendChild(host)`) — et JavaScript resout les noms
@@ -1130,6 +1276,90 @@ function adminPanel() {
   return wrap;
 }
 
+function depositPanel(s) {
+  const wrap = el('div');
+  const cfg = s.deposit || {};
+  const max = cfg.max_bytes || 0;
+
+  // LES PROJETS OUVERTS SORTENT DES PODS QU'ON A DEJA, comme les groupes de la barre laterale : un
+  // projet est ouvert quand un de ses pods vit, et l'ouvrir lance son architecte. Une seconde liste,
+  // calculee autrement, divergerait de ce que le rail affiche a gauche.
+  const ouverts = [...new Set(
+    (s.humans || []).flatMap(h => (h.pods || []).map(p => p.project).filter(Boolean))
+  )].sort();
+
+  const n = el('div', 'note');
+  if (!ouverts.length) {
+    n.innerHTML = "<b>Aucun projet ouvert.</b> Un dépôt vise le dépôt d'un projet dont la fleet " +
+      "porte au moins un pod ; ouvre un projet, son architecte se lance, et il apparaîtra ici.";
+    wrap.appendChild(n);
+    return wrap;
+  }
+  n.innerHTML = "Le fichier part dans le dépôt du projet, <b>dans la ready room de sa face " +
+    "workshop</b>, avec <b>toi comme auteur du commit</b>. Le chemin exact est celui que la porte " +
+    "renvoie, et il s'affiche ici après le dépôt. " +
+    "La poussée reste celle du compte système : ce conteneur n'a pas de jeton personnel. " +
+    "C'est une <b>trace</b> de qui a déposé quoi, vérifiable dans l'historique.<br><br>" +
+    "Taille maximale : <b>" + Math.floor(max / 1000000) + " Mo</b>. " +
+    "Un fichier du même nom est <b>remplacé</b> : l'ancien reste dans l'historique du dépôt.";
+  wrap.appendChild(n);
+
+  const choix = document.createElement('select');
+  choix.style.cssText = 'background:#111;color:var(--or);border:2px solid var(--or);padding:6px 10px;margin-right:12px';
+  for (const proj of ouverts) {
+    const o = document.createElement('option');
+    o.value = proj; o.textContent = proj;
+    choix.appendChild(o);
+  }
+  const pick = document.createElement('input');
+  pick.type = 'file';
+  const go = el('button', 'tab', 'Deposer');
+  go.style.cssText = 'width:auto;padding:8px 18px;border:2px solid var(--or);margin:14px 0';
+  const out = el('div', 'note');
+  out.style.display = 'none';
+  const ligne = el('div');
+  ligne.appendChild(choix); ligne.appendChild(pick);
+  wrap.appendChild(ligne); wrap.appendChild(go); wrap.appendChild(out);
+
+  const say = (txt, bad) => {
+    out.style.display = '';
+    out.style.borderLeftColor = bad ? '#c33' : 'var(--or)';
+    out.textContent = txt;
+  };
+
+  go.onclick = async () => {
+    const f = pick.files && pick.files[0];
+    if (!f) { say('choisis un fichier', true); return; }
+    if (max && f.size > max) { say('ce fichier depasse la borne du depot', true); return; }
+    go.disabled = true;
+    say('depot en cours…');
+    try {
+      // LE FICHIER EST LE CORPS, TEL QUEL. `fetch` prend l'objet File : le navigateur le lit depuis
+      // le disque en le transmettant, sans le charger en memoire, et le serveur l'ecrit au fil de
+      // l'eau. Le nom et le projet voyagent dans la ligne de requete.
+      const url = '/deposit?project=' + encodeURIComponent(choix.value) +
+                  '&name=' + encodeURIComponent(f.name);
+      const rep = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/octet-stream', 'X-Deck-Csrf': CSRF },
+        body: f,
+      });
+      const j = await rep.json().catch(() => ({}));
+      if (rep.ok && j.ok) {
+        say('depose : ' + j.repo + ' ' + j.path + ' (commit ' + String(j.sha).slice(0, 12) + ')');
+        pick.value = '';
+      } else {
+        say('refuse : ' + (j.why || j.error || rep.status), true);
+      }
+    } catch (e) {
+      say('depot interrompu : ' + e, true);
+    } finally {
+      go.disabled = false;
+    }
+  };
+  return wrap;
+}
+
 function build(s) {
   const rail = document.getElementById('rail');
   const tabs = [];
@@ -1156,6 +1386,10 @@ function build(s) {
   // Dockerfile pose la doc au meme titre que le runtime) — et il CACHERAIT une image cassee au lieu
   // de la montrer. Doc absente = image ratee : l'onglet s'ouvre, la route rend 404, ca se voit.
   add(null, 'Doc', 'cette version', { key: 'doc', crumb: 'DOC', frame: '/doc/' });
+  // BOITE DE DEPOT : un onglet pour tout le monde, parce que tout visiteur d'ici est de l'equipe
+  // humans — la porte l'a deja etabli, et la porte d'en face le redemande a la forge.
+  add(null, 'Boite de depot', 'vers un projet ouvert',
+      { key: 'deposit', crumb: 'BOITE DE DEPOT', render: () => depositPanel(s) });
   // Cache l'ONGLET, pas le pouvoir : le serveur re-tranche sur la session a chaque cible. Retirer ce
   // `if` depuis la console du navigateur ne ferait apparaitre qu'un onglet — et 404 sur ce qu'il
   // ouvre. Un rail qui se dessine sur une reponse du serveur est un confort de lecture ; s'il etait
@@ -1369,7 +1603,13 @@ class Deck(BaseHTTPRequestHandler):
 
         sid = secrets.token_urlsafe(32)
         with _lock:
+            # ⚠ LE JETON ANTI-REJEU NAIT AVEC LA SESSION, ET IL NE VOYAGE PAS DANS LE COOKIE.
+            # `SameSite=Lax` empeche deja un POST venu d'un autre site d'emporter le cookie ; ce
+            # jeton ferme ce que Lax laisse — une page de ce meme deck, ouverte ailleurs, et les
+            # navigateurs qui n'appliquent pas Lax. Il est lu dans un en-tete, que seule une
+            # requete ecrite par cette page peut poser.
             _sessions[sid] = {"login": login, "groups": groups, "admin": admin,
+                              "csrf": secrets.token_urlsafe(32),
                               "exp": time.time() + SESSION_TTL}
         # No `Secure`: the deck serves plain HTTP on a LAN port by design (there is no TLS to opt
         # into here). `HttpOnly` + `SameSite=Lax` still hold -- they cost nothing and remove the
@@ -1401,6 +1641,96 @@ class Deck(BaseHTTPRequestHandler):
                 _sessions.pop(sess["sid"], None)
         where = f"{cfg['public_url'].rstrip('/')}/user/logout" if cfg else "/"
         self._redirect(where, f"{SESSION_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0")
+
+    # ─── LA SEULE ROUTE QUI ECRIT ───────────────────────────────────────────────────────────────
+    #
+    # ⚠ ELLE N'ECRIT QUE DANS LA ZONE DE TRANSIT. Le deck pose le fichier sur le disque, en donne le
+    # chemin a la porte qui detient le jeton, et le retire ensuite. Ce process reste sans jeton,
+    # sans groupe `fleet`, et sans rien a ecrire ailleurs.
+    #
+    # ⚠ LE CORPS EST LE FICHIER, BRUT. Le nom et le projet voyagent dans la ligne de requete : un
+    # corps JSON aurait impose du base64, donc un tiers de plus sur le fil et trois copies en
+    # memoire. A 50 Mo, c'est la difference entre un depot et un incident.
+    #
+    # ⚠ `Content-Length` SUR CHAQUE SORTIE, y compris les refus : la classe est en HTTP/1.1, une
+    # reponse sans longueur laisserait le navigateur attendre une fin qui ne vient pas.
+    def do_POST(self):
+        path, _, query = self.path.partition("?")
+        if path != "/deposit":
+            self._send(404, "not found\n", "text/plain; charset=utf-8")
+            return
+
+        def refuse(code, why):
+            self._send(code, json.dumps({"ok": False, "why": why}),
+                       "application/json; charset=utf-8")
+
+        sess = session_of(self.headers.get("Cookie"))
+        if not sess:
+            refuse(401, "session expiree — recharge la page")
+            return
+        # ⚠ UNE SESSION SANS JETON NE VAUT PAS UN JETON VIDE. `compare_digest("", "")` rend VRAI :
+        # une session nee avant ce champ — ou fabriquee par un test qui l'ignore — aurait accepte
+        # une requete sans en-tete du tout. L'absence de reponse est un refus, ici comme ailleurs.
+        # La comparaison, elle, est a temps constant : elle porte sur un secret de session.
+        attendu = sess.get("csrf") or ""
+        if not attendu or not secrets.compare_digest(self.headers.get("X-Deck-Csrf", ""), attendu):
+            refuse(403, "jeton de page invalide — recharge la page")
+            return
+
+        params = urllib.parse.parse_qs(query)
+        projet = (params.get("project") or [""])[0].strip()
+        # LE NOM EST REDUIT A SA DERNIERE COMPOSANTE : un navigateur rend `photo.png`, mais rien
+        # n'oblige un client a le faire. La porte refuse de toute facon ce qui n'est pas un nom
+        # simple ; ici on ne veut pas refuser un depot legitime pour un chemin que le systeme de
+        # l'humain a colle devant.
+        name = os.path.basename((params.get("name") or [""])[0].replace("\\", "/")).strip()
+        if not projet or not name:
+            refuse(400, "projet ou nom de fichier manquant")
+            return
+
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            refuse(400, "requete illisible")
+            return
+        if length <= 0:
+            refuse(400, "fichier vide ou sans nom")
+            return
+        if length > DEPOSIT_MAX_BYTES:
+            # On ne draine pas un corps qu'on refuse : la connexion ne peut pas resservir.
+            self.close_connection = True
+            refuse(413, "fichier trop gros pour la boite de depot")
+            return
+
+        try:
+            spool, taille, digest = spool_write(self.rfile, length)
+        except ValueError:
+            self.close_connection = True
+            refuse(413, "fichier trop gros pour la boite de depot")
+            return
+        except OSError as exc:
+            print(f"[lcars-deck] transit impossible ({DEPOSIT_SPOOL}) : {exc}",
+                  file=sys.stderr, flush=True)
+            refuse(503, "ce conteneur n'a pas de zone de transit ecrivable")
+            return
+
+        try:
+            if taille == 0:
+                refuse(400, "fichier vide ou sans nom")
+                return
+            ok, detail = deposit(sess["login"], projet, name, spool, taille, digest)
+        finally:
+            spool_remove(spool)
+
+        if ok:
+            self._send(200, json.dumps({"ok": True, "sha": detail["sha"], "repo": detail["repo"],
+                                        "path": detail["path"], "sha256": detail["sha256"]}),
+                       "application/json; charset=utf-8")
+            return
+        # La cause est un jeton ; la phrase vit dans `DEPOSIT_CAUSES`, ici, parce que c'est cette
+        # page que l'operateur regarde. Ce qui n'y est pas se montre tel quel.
+        code = 502 if detail in ("porte_fermee", "porte_muette", "forge_unreachable") else 422
+        refuse(code, DEPOSIT_CAUSES.get(detail, f"refus de la porte de depot : {detail}"))
 
     def do_GET(self):
         path, _, query = self.path.partition("?")
@@ -1589,6 +1919,7 @@ class Deck(BaseHTTPRequestHandler):
             self._send(200, PAGE % {
                 "host": html.escape(socket.gethostname()),
                 "who": html.escape(sess["login"]),
+                "csrf": html.escape(sess.get("csrf", "")),
             }, "text/html; charset=utf-8")
         else:
             self._send(404, "not found\n", "text/plain; charset=utf-8")

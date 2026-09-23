@@ -84,7 +84,10 @@ under_mount() { # under_mount <chemin> — sous la cible d'un volume du conteneu
   local n; n="$(grep -c . <<<"$chemins")"
   [ "$n" -ge 12 ] || { echo "seulement $n chemins derives — l'instrument ne lit plus init.sh ni le protocole" >&2; return 1; }
 
-  local exceptions=" /etc/lcars /etc/lcars/seat.uid /var/lib/lcars /var/tmp/lcars /var/tmp/lcars/toolchain-work /usr/local/bin "
+  # ⚠ LES EXCEPTIONS SONT DU TRAVAIL, PAS DE L'ETAT. `/var/tmp/lcars/deposit` est la zone de
+  # transit de la boite de depot : le deck y ecrit le fichier, la porte le lit, et il est retire
+  # tout de suite. La faire survivre a un redemarrage serait un defaut, pas un service rendu.
+  local exceptions=" /etc/lcars /etc/lcars/seat.uid /var/lib/lcars /var/tmp/lcars /var/tmp/lcars/toolchain-work /var/tmp/lcars/deposit /usr/local/bin "
   local p rompu=0
   while read -r p; do
     [ -n "$p" ] || continue

@@ -209,10 +209,12 @@ layout_table() { # chemin mode proprietaire — les memes que deploy/system.mani
     "/var/lib/lcars 0755 root:root" \
     "/var/tmp/lcars 0755 root:root" \
     "/var/tmp/lcars/toolchain-work 0700 root:root" \
+    "$LCARS_DEPOSIT_SPOOL 2750 $LCARS_SYSTEM_USER:$LCARS_AUTHORITY_USER" \
     "/etc/lcars 0755 root:root" \
     "/run/lcars 0755 root:root" \
     "/run/lcars/toolchain 2775 root:$LCARS_FLEET_GROUP" \
     "/run/lcars/authority 0750 $LCARS_AUTHORITY_USER:$LCARS_FLEET_GROUP" \
+    "/run/lcars/deposit 0750 $LCARS_AUTHORITY_USER:$LCARS_AUTHORITY_USER" \
     "/run/lcars/privileged 0750 root:$LCARS_FLEET_GROUP" \
     "/run/lock/lcars 0700 root:root"
 }

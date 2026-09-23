@@ -36,6 +36,7 @@ prov_runtime_dirs() {
     "$(prov_decor /run/lcars/console)" \
     "$(prov_decor '/run/lcars/console/<human>')" \
     "$(prov_decor /run/lcars/authority)" \
+    "$(prov_decor /run/lcars/deposit)" \
     "$(prov_decor /run/lcars/privileged)" \
     "$(prov_decor /run/lcars/toolchain)"
 }
@@ -61,6 +62,7 @@ prov_dirs() {
     "$PROV_STORE_ROOT" \
     "$(prov_decor /var/tmp/lcars)" \
     "$(prov_decor /var/tmp/lcars/toolchain-work)" \
+    "$PROV_DEPOSIT_SPOOL" \
     "$(prov_decor /etc/lcars)"
   prov_runtime_dirs
 }

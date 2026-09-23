@@ -244,14 +244,15 @@ I18_RE='(^|[^0-9])(1000|60000)([^0-9]|$)'
 #
 # Ce qui GARDE le mot, a dessein, et que le mur ecarte par motif :
 #   - « boite de reception » (l'inbox d'admiral, skill system-issues), « boite aux lettres »
-#     (le dépôt du système, ops-repo) et « ta boîte » (les tickets d'un agent, vitrine MCP) ;
+#     (le dépôt du système, ops-repo), « ta boîte » (les tickets d'un agent, vitrine MCP) et
+#     « boîte de dépôt » (l'onglet du deck qui remet un fichier à un projet) ;
 #   - la boite FERMEE du siege reserve vulcan (« the box is closed », « closed box », « the box
 #     opens », « opening the box », « la boîte s'ouvre », « on ouvrira sa boite ») ;
 #   - `box-sizing` / `border-box` / `box-shadow` (le CSS du deck, dans console-deck.py) ;
 #   - « mail-in-a-box » et « out of the box » (idiomes), et les cadres ASCII `_box_*` de l'installeur.
 # `sandbox`, `bwrap`, `mailbox`, `checkbox`, `toolbox` ne sont pas le mot entier : le grep ne les voit pas.
 I20_RE='(^|[^[:alpha:]])(box|bo[iîÎ]te)([^[:alpha:]]|$)'
-I20_EXCL='box-(sizing|shadow)|border-box|mail-in-a-box|out of the box|bo[iîÎ]tes? de r[éeÉE]ception|bo[iîÎ]tes? aux lettres|_box_(emit|plain|pad)|_prov_box_pad|ta bo[iîÎ]te|box is closed|closed box|box opens|opening the box|bo[iîÎ]te s.ouvre|ouvrira sa bo[iîÎ]te'
+I20_EXCL='box-(sizing|shadow)|border-box|mail-in-a-box|out of the box|bo[iîÎ]tes? de r[éeÉE]ception|bo[iîÎ]tes? aux lettres|bo[iîÎ]tes? de d[éeÉE]p[oôÔ]t|_box_(emit|plain|pad)|_prov_box_pad|ta bo[iîÎ]te|box is closed|closed box|box opens|opening the box|bo[iîÎ]te s.ouvre|ouvrira sa bo[iîÎ]te'
 I20_PERIMETRE=(runtime/services runtime/bin runtime/lib runtime/priv runtime/config runtime/etc runtime/test/services)
 
 i20_hits() { # <chemin>… -> les lignes qui portent encore le mot, hors motifs ecartes (vide = propre)
