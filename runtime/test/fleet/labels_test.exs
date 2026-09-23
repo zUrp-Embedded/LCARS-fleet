@@ -26,7 +26,7 @@ defmodule Fleet.LabelsTest do
       end
     end
 
-    test "les DOUZE silences sont NOMMÉS un par un — un nil par décision n'est pas un nil par oubli" do
+    test "les TREIZE silences sont NOMMÉS un par un — un nil par décision n'est pas un nil par oubli" do
       # These nils are policy choices documented beside their clauses.
       for reason <- [
             # déjà porté par un label existant → une seconde vérité
@@ -39,6 +39,8 @@ defmodule Fleet.LabelsTest do
             # transitions et terminaux
             :onboarded,
             :merged,
+            # un ticket retiré (tamponné avant sa fermeture) ne se rattend pas
+            :retired,
             {:cancelled, 7},
             # escalades DÉJÀ résolues (elles posent `lcars-awaits-arch` elles-mêmes)
             {:rework_exhausted_escalated, 7},

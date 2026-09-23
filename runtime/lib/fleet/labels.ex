@@ -158,6 +158,7 @@ defmodule Fleet.Labels do
   # Onboarding is a transition; merged/cancelled are terminal.
   def wait_for(:onboarded), do: nil
   def wait_for(:merged), do: nil
+  def wait_for(:retired), do: nil
   def wait_for({:cancelled, _pr}), do: nil
 
   # These paths already post the awaits-arch escalation label; the issue itself is not resolved.

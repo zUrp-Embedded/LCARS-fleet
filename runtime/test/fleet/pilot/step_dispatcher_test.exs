@@ -47,6 +47,13 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       payload = eng_issue(%{"labels" => [%{"name" => "stage/merged"}]})
       assert {:skip, :merged} = StepDispatcher.decide(payload)
     end
+
+    test "stage/retired on an OPEN ticket → {:skip, :retired} — a retirement that could not close never re-dispatches" do
+      # 2026-09-23: #12, retired by a supersede whose close was refused (412), was dispatched again
+      # once its blocker merged. The stamp comes first now; the dispatcher must honour it alone.
+      payload = eng_issue(%{"labels" => [%{"name" => "stage/retired"}]})
+      assert {:skip, :retired} = StepDispatcher.decide(payload)
+    end
   end
 
   describe "dispatch_issue/2 (effects, stubbed seams)" do
