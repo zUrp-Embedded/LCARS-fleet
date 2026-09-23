@@ -69,7 +69,7 @@ jobs:
     runs-on: shell
     # ⚠ LE PLAFOND PROTÈGE TON PROJET, PAS LA FLOTTE. La sonde joue TA suite, deux fois. Une suite
     # qui ne termine jamais — boucle, attente réseau, prompt — ferait tourner ce job indéfiniment
-    # sur TON runner : le rail, lui, abandonne son attente au bout de deux minutes et n'a aucun
+    # sur TON runner : le rail, lui, abandonne son attente au bout de vingt minutes et n'a aucun
     # moyen d'arrêter ce qui tourne ici.
     #
     # 15 min couvre deux exécutions d'une suite ordinaire avec une marge large. Si ta suite en

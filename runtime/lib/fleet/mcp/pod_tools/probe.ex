@@ -21,7 +21,10 @@ defmodule Fleet.MCP.PodTools.Probe do
 
   @fact_prefix "LCARS-PROBE"
   @poll_ms 1_000
-  @max_wait_ms 120_000
+  # The wait covers the queue AND the job: the template caps the job at 15 minutes
+  # (`timeout-minutes: 15`), and on a single runner the probe queues behind the PR's own CI jobs.
+  # 120 s was shorter than a real probe (119–127 s measured on 2026-09-23). Tunable per machine.
+  @default_max_wait_ms 20 * 60 * 1000
 
   @doc "Les noms de sondes que le rail sait résoudre."
   @spec known() :: [String.t()]
@@ -38,6 +41,7 @@ defmodule Fleet.MCP.PodTools.Probe do
          {:ok, pr} <- pr_of(pod_id, repo),
          {:ok, refs} <- forge().pr_refs(repo, pr, forge_opts(opts)),
          {:ok, declared} <- declarations(repo, refs.head_sha, opts),
+         :ok <- workflow_safe(repo, workflow, refs.base_ref, opts),
          {:ok, %{run_id: run_id}} <-
            forge_actions().dispatch_workflow(
              repo,
@@ -55,7 +59,56 @@ defmodule Fleet.MCP.PodTools.Probe do
         |> Map.put("run_id", run_id)
 
       {:ok, facts}
+    else
+      {:unsafe_workflow, file, lines} -> {:ok, unsafe_facts(probe, file, lines)}
+      other -> other
     end
+  end
+
+  # ── Le workflow qu'on s'apprête à lancer ────────────────────────────────────────────────────────
+
+  # The project's copy of the workflow runs, not the template's. A copy that still writes
+  # `${{ inputs.* }}` into a script turns the delivered CLAUDE.md into code; it is never dispatched.
+  # The only accepted use is an env mapping (`NAME: ${{ inputs.x }}`), which the shell never re-reads.
+  @env_mapping ~r/^\s*[A-Za-z_][A-Za-z0-9_]*:\s*\$\{\{\s*inputs\.[A-Za-z_][A-Za-z0-9_]*\s*\}\}\s*$/
+
+  defp workflow_safe(repo, workflow, ref, opts) do
+    path = ".gitea/workflows/" <> workflow
+
+    case forge().get_file(repo, path, Keyword.put(forge_opts(opts), :ref, ref)) do
+      {:ok, %{content: yaml}} ->
+        case unsafe_lines(yaml) do
+          [] -> :ok
+          lines -> {:unsafe_workflow, workflow, lines}
+        end
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  @doc false
+  @spec unsafe_lines(String.t()) :: [String.t()]
+  def unsafe_lines(yaml) do
+    yaml
+    |> String.split("\n")
+    |> Enum.reject(&String.starts_with?(String.trim_leading(&1), "#"))
+    |> Enum.filter(&(String.contains?(&1, "inputs.") and String.contains?(&1, "${{")))
+    |> Enum.reject(&Regex.match?(@env_mapping, &1))
+    |> Enum.map(&String.trim/1)
+  end
+
+  defp unsafe_facts(probe, workflow, lines) do
+    %{
+      "probe" => probe,
+      "verdict" => "inapplicable",
+      "reason" => "probe-workflow-unsafe",
+      "detail" =>
+        "le workflow #{workflow} de ce projet colle ses inputs dans son script " <>
+          "(#{Enum.join(Enum.take(lines, 3), " | ")}) : la commande de test d'un CLAUDE.md livré " <>
+          "y deviendrait du code. La sonde n'est pas lancée. Le modèle livré passe les inputs par " <>
+          "`env:` : il faut remettre ce workflow à jour depuis le modèle."
+    }
   end
 
   # ── Résolution ─────────────────────────────────────────────────────────────────────────────────
@@ -207,7 +260,11 @@ defmodule Fleet.MCP.PodTools.Probe do
   # Poll within the tool call, not the shared Pilot tick. The deadline is checked
   # between forge calls; it does not interrupt a blocked call.
   defp await_logs(repo, run_id, opts) do
-    deadline = System.monotonic_time(:millisecond) + Keyword.get(opts, :max_wait_ms, @max_wait_ms)
+    max_wait =
+      Keyword.get(opts, :max_wait_ms) ||
+        Application.get_env(:lcars_fleet, :mcp_probe_max_wait_ms, @default_max_wait_ms)
+
+    deadline = System.monotonic_time(:millisecond) + max_wait
     poll(repo, run_id, deadline, opts)
   end
 

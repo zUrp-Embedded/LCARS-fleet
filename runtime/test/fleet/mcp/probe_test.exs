@@ -272,6 +272,58 @@ defmodule Fleet.MCP.PodTools.ProbeTest do
     end
   end
 
+  describe "le workflow du PROJET est vérifié avant d'être lancé" do
+    @template "priv/catalogue/project_template/main/.gitea/workflows/probe-test-relevance.yml"
+
+    test "le modèle livré passe ses inputs par `env:` — rien à redire" do
+      assert Probe.unsafe_lines(File.read!(Path.join(File.cwd!(), @template))) == []
+    end
+
+    test "une copie qui colle un input dans son script est dénoncée, ligne à l'appui" do
+      # Lignes exactes de la copie de basilisk sur le banc (2026-09-23), celle qui a cassé la sonde.
+      old = """
+          steps:
+            - name: Sonder
+              env:
+                FORGE_TOKEN: ${{ github.token }}
+              run: |
+                harness="${{ inputs.harness }}"
+                if [ -z "${{ inputs.test_cmd }}" ]; then
+      """
+
+      assert Probe.unsafe_lines(old) == [
+               ~s(harness="${{ inputs.harness }}"),
+               ~s(if [ -z "${{ inputs.test_cmd }}" ]; then)
+             ]
+    end
+
+    defmodule UnsafeWorkflowForge do
+      @moduledoc false
+      def repo_full_name(_id, _opts), do: {:ok, "fleet/chifoumi"}
+
+      def pr_refs(_repo, _pr, _opts),
+        do:
+          {:ok,
+           %{base_ref: "main", base_sha: "b", head_ref: "lcars/issue-3-engineer", head_sha: "h"}}
+
+      def get_file(_repo, "CLAUDE.md", _opts),
+        do: {:ok, %{content: "## Test\n\n```\nsh t.sh\n```\n\n## Harness\n\nt/\n", sha: "x"}}
+
+      def get_file(_repo, ".gitea/workflows/" <> _, _opts),
+        do: {:ok, %{content: "run: |\n  cmd=\"${{ inputs.test_cmd }}\"\n", sha: "y"}}
+    end
+
+    test "une copie dangereuse n'est JAMAIS lancée : la sonde rend `inapplicable`, avec la cause" do
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :mcp_probe_forge_client, UnsafeWorkflowForge)
+
+      assert {:ok, facts} = Probe.run(judge_pod_id(), "test-relevance")
+      assert facts["verdict"] == "inapplicable"
+      assert facts["reason"] == "probe-workflow-unsafe"
+      assert facts["detail"] =~ "env:"
+      refute_received {:dispatch, _, _, _, _}
+    end
+  end
+
   describe "facts/1 — on rapporte, on n'interprète pas" do
     test "les lignes tardives gagnent, et rien d'autre n'est décidé" do
       facts =
