@@ -42,7 +42,7 @@ defmodule Fleet.Pilot.ArchWake do
     |> normalize()
     |> Enum.group_by(fn {repo, _n} -> repo end)
     |> Enum.map(fn {repo, pairs} ->
-      offer_one(task_queue, spawner, repo, Enum.min(pairs), via, ensure)
+      offer_one(task_queue, spawner, repo, pairs, via, ensure)
     end)
     |> aggregate()
   end
@@ -50,7 +50,11 @@ defmodule Fleet.Pilot.ArchWake do
   defp normalize({repo, n}) when is_binary(repo), do: [{repo, n}]
   defp normalize(%MapSet{} = awaits), do: MapSet.to_list(awaits)
 
-  defp offer_one(task_queue, spawner, repo, {repo, n}, via, ensure) do
+  # The smallest number is offered; the others travel IN the mandate, so the architect knows what
+  # waits behind the escalation it holds — a queue it cannot see is a queue it can block.
+  defp offer_one(task_queue, spawner, repo, pairs, via, ensure) do
+    {^repo, n} = Enum.min(pairs)
+    behind = for({^repo, m} <- pairs, m != n, do: m) |> Enum.sort()
     pod_id = ProjectArchitect.pod_id_for(repo)
 
     case task_queue.pod_status(pod_id) do
@@ -66,13 +70,13 @@ defmodule Fleet.Pilot.ArchWake do
         end
 
       _free_or_terminal_or_never ->
-        offer_fresh_mandate(task_queue, spawner, repo, n, pod_id, via, ensure)
+        offer_fresh_mandate(task_queue, spawner, repo, {n, behind}, pod_id, via, ensure)
     end
   end
 
   # Enqueue before any bootstrap/explicit wake to avoid a signal-without-content race.
-  defp offer_fresh_mandate(task_queue, spawner, repo, n, pod_id, via, ensure) do
-    case enqueue_mandate(task_queue, pod_id, repo, n) do
+  defp offer_fresh_mandate(task_queue, spawner, repo, {n, behind}, pod_id, via, ensure) do
+    case enqueue_mandate(task_queue, pod_id, repo, n, behind) do
       :ok ->
         ensure_arch(ensure, repo, spawner, via)
 
@@ -160,7 +164,7 @@ defmodule Fleet.Pilot.ArchWake do
     end
   end
 
-  defp enqueue_mandate(task_queue, pod_id, repo, n) do
+  defp enqueue_mandate(task_queue, pod_id, repo, n, behind) do
     attrs = %{
       issue_id: "issue-#{n}",
       # Resolve the mandate role from the same capability authority as architect ensure.
@@ -168,9 +172,12 @@ defmodule Fleet.Pilot.ArchWake do
       brief:
         "Arbitrage requis : escalade sur l'issue `##{n}` de ton projet. Lis-la (`escalation_list` / " <>
           "`issue_status`), tranche avec ton humain, puis dis ta décision sur le fil " <>
-          "(`issue_comment`) ou corrige+re-délègue (`issue_create` avec `supersedes: #{n}` — la " <>
+          "(`issue_comment`), ou corrige+re-délègue (`issue_create` avec `supersedes: #{n}` — la " <>
           "fleet retire l'ancien ticket elle-même ; sans ça il repart en dispatch après ton " <>
-          "submit_result).\n\n⚠ CE QUI RÉSOUT L'ESCALADE EST `submit_result`, ET RIEN D'AUTRE. " <>
+          "submit_result), ou retire-le s'il ne doit plus tourner (`issue_retire`). Ne garde pas " <>
+          "ce mandat ouvert pour bloquer un ticket : tant qu'il vit, ta file ne tourne pas." <>
+          queue_section(behind) <>
+          "\n\n⚠ CE QUI RÉSOUT L'ESCALADE EST `submit_result`, ET RIEN D'AUTRE. " <>
           "Commenter, c'est parler ; c'est `submit_result` sur CE work-item qui draine le label " <>
           "`lcars-awaits-arch` et rend la main au poller. Si tu commentes et que tu t'arrêtes, le " <>
           "ticket reste en attente et la fleet te relance dessus indéfiniment — en croyant que tu " <>
@@ -183,6 +190,14 @@ defmodule Fleet.Pilot.ArchWake do
       {:ok, _} -> :ok
       {:error, reason} -> {:error, reason}
     end
+  end
+
+  defp queue_section([]), do: ""
+
+  defp queue_section(behind) do
+    "\n\nEn attente derrière celle-ci : " <>
+      Enum.map_join(behind, ", ", &"##{&1}") <>
+      " — elles t'arrivent une par une après ton `submit_result` (`escalation_list` pour les lire)."
   end
 
   # Only wake_pod's :ok permits a success outcome; it is not an end-to-end delivery acknowledgment.
