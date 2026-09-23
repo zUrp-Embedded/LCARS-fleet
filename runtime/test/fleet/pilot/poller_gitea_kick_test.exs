@@ -134,4 +134,36 @@ defmodule Fleet.Pilot.PollerGiteaKickTest do
 
     GenServer.stop(pid)
   end
+
+  # ── The workshop face follows the forge: a deposit lands there without any merge ──
+
+  test "a REGULAR tick asks each repo's workshop face to follow the forge; a kick does not" do
+    name = :"workshop_refresh_#{System.unique_integer([:positive])}"
+    test_pid = self()
+
+    {:ok, pid} =
+      Poller.start_link(
+        name: name,
+        human: "test-human",
+        start_tick?: false,
+        protection_reconciler: fn _repo, _opts -> :ok end,
+        architect_keeper: fn _repo, _opts -> {:ok, :stub} end,
+        workshop_refresher: fn repo, branch -> send(test_pid, {:refresh, repo, branch}) end,
+        step_dispatch?: true,
+        forge_client: OneOrphanForge,
+        forge_opts: [],
+        spawner: NoPodsSpawner,
+        task_queue: NoEvalsTaskQueue
+      )
+
+    Poller.force_poll(name)
+    assert_received {:refresh, "o/r", "workshop"}
+
+    # A webhook kick is a dispatch accelerator: it must not add a second pass over the faces.
+    send(pid, gitea_event(:"gitea.push"))
+    Process.sleep(@debounce_wait)
+    refute_received {:refresh, _, _}
+
+    GenServer.stop(pid)
+  end
 end

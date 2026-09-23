@@ -40,6 +40,10 @@ defmodule Fleet.MCP.PodTools.Delegation.Scratchpad do
     path = Path.join(dir, @scratch_file)
 
     if File.dir?(dir) do
+      # The face follows the forge first: a deck deposit landed there without a merge, and a push
+      # that never saw it would be refused. A failure does not hold the note back — it stays local.
+      _ = Workshop.align(repo, dir)
+
       case File.write(path, scratch_block(role, note), [:append]) do
         :ok ->
           _ = scratch_publish(dir, repo, role)

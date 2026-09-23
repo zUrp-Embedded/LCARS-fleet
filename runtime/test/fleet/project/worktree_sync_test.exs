@@ -247,6 +247,97 @@ defmodule Fleet.Project.WorktreeSyncTest do
     assert head(proj) == before, "a non-face branch must not have touched a worktree"
   end
 
+  # ── A writer face ALSO moves without a merge: the deck's deposit door commits on the forge ──
+
+  test "DEPOSIT: a commit landed on the forge's workshop WITHOUT a merge reaches the face at refresh",
+       %{seed: seed, doc: doc, sync: sync} do
+    deposit!(seed, "ready-room/passation.zip", "PK\x03\x04")
+    refute File.exists?(Path.join(doc, "ready-room/passation.zip"))
+
+    WorktreeSync.refresh(sync, "fleet/myproj", "workshop")
+    # A call behind the cast: the GenServer serializes, so the refresh has run.
+    _ = :sys.get_state(sync)
+
+    assert File.exists?(Path.join(doc, "ready-room/passation.zip")),
+           "the deposited file must be on the face — where the architect's pod sees it"
+
+    assert head(doc) == remote_head(seed, "workshop")
+  end
+
+  test "refresh leaves a face that has EVERYTHING untouched — no fetch, the live tree is not stashed",
+       %{doc: doc, sync: sync} do
+    # The architect edits this face live; rebasing it every tick for nothing would race its editor.
+    File.write!(Path.join(doc, "in-progress.md"), "half written\n")
+    before = head(doc)
+
+    WorktreeSync.refresh(sync, "fleet/myproj", "workshop")
+    _ = :sys.get_state(sync)
+
+    refute File.exists?(Path.join(doc, ".git/FETCH_HEAD")),
+           "an up-to-date face must be settled by ls-remote alone, never by a fetch"
+
+    assert head(doc) == before
+    assert File.read!(Path.join(doc, "in-progress.md")) == "half written\n"
+  end
+
+  test "refresh keeps the architect's unpushed commit AND brings the deposit down (rebase, not reset)",
+       %{seed: seed, doc: doc, sync: sync} do
+    File.write!(Path.join(doc, "note-arch.md"), "not pushed yet\n")
+    git_in!(doc, ["add", "-A"])
+    git_in!(doc, ["commit", "-qm", "docs: arch"])
+    deposit!(seed, "ready-room/passation.zip", "PK")
+
+    WorktreeSync.refresh(sync, "fleet/myproj", "workshop")
+    _ = :sys.get_state(sync)
+
+    assert File.exists?(Path.join(doc, "ready-room/passation.zip"))
+    assert File.exists?(Path.join(doc, "note-arch.md"))
+  end
+
+  test "refresh on the CODE branch touches nothing — its aligner resets, it is not a writer face",
+       %{seed: seed, proj: proj, sync: sync} do
+    before = head(proj)
+    commit_push!(seed, "hello.sh", "echo hi\n", "feat: hello")
+
+    WorktreeSync.refresh(sync, "fleet/myproj", "main")
+    _ = :sys.get_state(sync)
+
+    assert head(proj) == before
+  end
+
+  test "align_before_push brings the deposit down, through the server or inline without one",
+       %{seed: seed, doc: doc, sync: sync} do
+    deposit!(seed, "ready-room/a.bin", "a")
+    assert :ok = WorktreeSync.align_before_push(sync, doc, "workshop")
+    assert File.exists?(Path.join(doc, "ready-room/a.bin"))
+    assert :up_to_date = WorktreeSync.align_before_push(sync, doc, "workshop")
+
+    # No server under that name (a test, a runtime still booting): the same act, inline.
+    deposit!(seed, "ready-room/b.bin", "b")
+
+    assert :ok =
+             WorktreeSync.align_before_push(:"absent_#{System.unique_integer()}", doc, "workshop")
+
+    assert File.exists?(Path.join(doc, "ready-room/b.bin"))
+  end
+
+  # What the deposit door does through the forge's content API: one commit on workshop, no PR.
+  defp deposit!(seed, rel, content) do
+    git_in!(seed, ["checkout", "-q", "workshop"])
+    File.mkdir_p!(Path.dirname(Path.join(seed, rel)))
+    File.write!(Path.join(seed, rel), content)
+    git_in!(seed, ["add", "-A"])
+    git_in!(seed, ["commit", "-qm", "depot(captain): " <> Path.basename(rel)])
+    git_in!(seed, ["push", "-q", "origin", "workshop"])
+    git_in!(seed, ["checkout", "-q", "main"])
+  end
+
+  defp remote_head(seed, branch),
+    do:
+      System.cmd("git", ["-C", seed, "rev-parse", "origin/" <> branch])
+      |> elem(0)
+      |> String.trim()
+
   defp commit_push!(dir, file, content, msg) do
     File.write!(Path.join(dir, file), content)
     git_in!(dir, ["add", "-A"])

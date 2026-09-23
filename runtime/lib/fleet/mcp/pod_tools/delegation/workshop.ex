@@ -56,10 +56,36 @@ defmodule Fleet.MCP.PodTools.Delegation.Workshop do
     end
   end
 
+  @doc """
+  Brings the workshop face level with the forge before a local writer commits and pushes there.
+
+  ⚠ THE FORGE ALSO MOVES WITHOUT A MERGE: the deck's deposit door commits into the ready room
+  through the forge's API. Without this step the architect's next push is refused
+  (non-fast-forward) until the next merge — silently for the scratchpad. A failure is logged and
+  blocks nothing: the push that follows says so itself if it does not go through.
+  """
+  @spec align(String.t(), String.t()) :: :ok | :up_to_date | {:error, term()}
+  def align(repo, dir) do
+    case Fleet.Project.WorktreeSync.align_before_push(dir, Fleet.Layout.workshop_branch()) do
+      {:error, reason} = err ->
+        Logger.warning(
+          "Delegation: workshop face of #{repo} could not follow the forge before writing " <>
+            "(#{inspect(reason)}) — the push that follows may be refused"
+        )
+
+        err
+
+      ok ->
+        ok
+    end
+  end
+
   defp publish_face(repo, role, message) do
     dir = lot_workspace(repo)
 
     if File.dir?(dir) do
+      _ = align(repo, dir)
+
       with :ok <- GitOps.run(["-C", dir, "add", "-A", "--", "."], auth: false),
            {:ok, files} <- staged_files(dir) do
         publish_staged(dir, repo, role, message, files)

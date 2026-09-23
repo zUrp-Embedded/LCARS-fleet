@@ -10,7 +10,8 @@ defmodule Fleet.Pilot.Poller do
   Reconciliation owns lock decisions; this process retains suspects across polls.
 
   Regular ticks take one pod snapshot, reconcile locks, keep registered architects,
-  offer awaits-arch work and recheck branch protection. Webhook hints ignore payload
+  offer awaits-arch work, recheck branch protection and ask each workshop face to
+  follow the forge (a deposit lands there without a merge). Webhook hints ignore payload
   and debounce into a separate dispatch poll; they neither start a recurring timer
   chain nor advance reconciliation observations. force_poll/1 performs a full tick.
 
@@ -92,6 +93,8 @@ defmodule Fleet.Pilot.Poller do
     protection_reconciler: nil,
     # Architect keeper seam; nil selects Project.Architect.ensure_alive/2.
     architect_keeper: nil,
+    # Workshop realignment seam; nil selects Project.WorktreeSync.refresh/2 (a cast per repo).
+    workshop_refresher: nil,
     # Per-repository monotonic stamps; restart makes checks due again.
     protection_rechecked: %{},
     # A scheduled accelerated poll coalesces subsequent webhook hints.
@@ -160,7 +163,8 @@ defmodule Fleet.Pilot.Poller do
       escalate_fun: Keyword.get(opts, :escalate_fun),
       substrate_present_fun: Keyword.get(opts, :substrate_present_fun),
       protection_reconciler: Keyword.get(opts, :protection_reconciler),
-      architect_keeper: Keyword.get(opts, :architect_keeper)
+      architect_keeper: Keyword.get(opts, :architect_keeper),
+      workshop_refresher: Keyword.get(opts, :workshop_refresher)
     }
 
     _ =
@@ -351,6 +355,9 @@ defmodule Fleet.Pilot.Poller do
         # Reconcile protection against current policy beyond the one-time onboarding write.
         base = if mode == :tick, do: maybe_recheck_protection(base, repos), else: base
 
+        # A deposit lands on the forge's workshop face without a merge: nothing else brings it down.
+        :ok = refresh_workshops(base, repos, mode)
+
         emit_cycle(started, mode, state.orgs, :ok, repos)
 
         {tally, %{base | orphan_lock_suspects: suspects, last_tally_errors: tally.errors}}
@@ -394,6 +401,18 @@ defmodule Fleet.Pilot.Poller do
       },
       %{status: status, mode: mode, orgs: orgs}
     )
+  end
+
+  # Casts only: WorktreeSync reads each forge head and touches a face only when it is behind, so
+  # the tick neither waits on git nor rewrites an architect's live tree for nothing.
+  defp refresh_workshops(_state, _repos, :kick), do: :ok
+
+  defp refresh_workshops(%__MODULE__{} = state, repos, :tick) do
+    refresh = state.workshop_refresher || (&Fleet.Project.WorktreeSync.refresh/2)
+
+    for repo <- repos, onboarded?(repo), do: refresh.(repo, Fleet.Layout.workshop_branch())
+
+    :ok
   end
 
   # Successful protection checks are throttled; returned errors retry next regular tick.
