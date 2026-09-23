@@ -48,8 +48,10 @@ usage() {
 internal_ident_re() { # <system_email>
   printf '@lcars\.local|%s|@[^.@]+$' "$(printf '%s' "$1" | sed 's/[.[\*^$]/\\&/g')"
 }
-is_internal_email() { # <email> <system_email>
-  printf '%s\n' "$1" | grep -qiE "$(internal_ident_re "$2")"
+is_internal_email() { # <email> <system_email> — capturer, puis tester (MUR I16)
+  local trouve
+  trouve="$(printf '%s\n' "$1" | grep -iE "$(internal_ident_re "$2")" || true)"
+  [[ -n "$trouve" ]]
 }
 # ⚠ `\s` ET NON `[[:space:]]` : ce motif est lu par DEUX moteurs. La classe POSIX est valide en ERE
 # (grep) et n'existe PAS en Python, qui la lit comme un ensemble imbrique et emet un `FutureWarning`
