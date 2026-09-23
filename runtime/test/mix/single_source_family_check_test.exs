@@ -539,4 +539,58 @@ defmodule Mix.Tasks.Lcars.Contracts.SingleSourceFamilyCheckTest do
       assert %{status: :pass} = SingleSource.check_facts_no_literal_alias(root)
     end
   end
+
+  describe "layout.deposit_names_single_source — the door's copy of the three deposit names" do
+    defp layout,
+      do:
+        {"runtime/lib/fleet/layout.ex",
+         """
+         defmodule Fleet.Layout do
+           @face_branches %{"code" => "main", "workshop" => "workshop", "ops" => "ops"}
+           @ready_room_dir "ready-room"
+         end
+         """}
+
+    defp catalogue(nom),
+      do:
+        {"runtime/lib/fleet/catalogue.ex",
+         "defmodule Fleet.Catalogue do\n  @bundled_name \"#{nom}\"\nend\n"}
+
+    defp porte(livre),
+      do:
+        {"runtime/services/catalogue-executor.py",
+         ~s[WORKSHOP_BRANCH = "workshop"\nREADY_ROOM_DIR = "ready-room"\n] <> livre}
+
+    test "the three names copied → pass, and the note names the bundled catalogue" do
+      root = depot([layout(), catalogue("fleet"), porte(~s[BUNDLED_CATALOGUE = "fleet"\n])])
+
+      assert %{status: :pass, note: note} = SingleSource.check_deposit_names_single_source(root)
+      assert note =~ ~s["fleet" by Fleet.Catalogue]
+    end
+
+    test "a bundled name that drifted is named — the door would resolve no project of it" do
+      root = depot([layout(), catalogue("fleet"), porte(~s[BUNDLED_CATALOGUE = "flotte"\n])])
+
+      assert %{status: :fail, note: note} = SingleSource.check_deposit_names_single_source(root)
+      assert note =~ "BUNDLED_CATALOGUE"
+    end
+
+    test "the literal elsewhere is not the assignment — a comment keeping \"fleet\" does not pass" do
+      root =
+        depot([
+          layout(),
+          catalogue("fleet"),
+          porte(~s[# the bundled catalogue is "fleet"\nBUNDLED_CATALOGUE = NAME\n])
+        ])
+
+      assert %{status: :fail} = SingleSource.check_deposit_names_single_source(root)
+    end
+
+    test "an unreadable @bundled_name → nothing was compared, and the wall says so" do
+      root = depot([layout(), porte(~s[BUNDLED_CATALOGUE = "fleet"\n])])
+
+      assert %{status: :fail, note: note} = SingleSource.check_deposit_names_single_source(root)
+      assert note =~ "@bundled_name"
+    end
+  end
 end

@@ -1302,8 +1302,10 @@ function depositPanel(s) {
     "C'est une <b>trace</b> de qui a déposé quoi, vérifiable dans l'historique.<br><br>" +
     "Taille maximale : <b>" + Math.floor(max / 1000000) + " Mo</b>. " +
     "Un fichier du même nom est <b>remplacé</b> : l'ancien reste dans l'historique du dépôt.<br><br>" +
-    "Le fichier arrive dans l'atelier du projet, <b>là où l'architecte le voit, au plus tard une " +
-    "minute après</b>. Un <code>CLAUDE.md</code> ou un <code>AGENTS.md</code> est déposé sous " +
+    "L'atelier du projet, là où l'architecte le voit, le reçoit <b>au passage suivant du " +
+    "pilote</b> (toutes les 30 s environ, tant que la fleet tourne). Si l'architecte y modifie " +
+    "un fichier du même nom, l'atelier <b>attend</b> plutôt que d'écraser son travail. " +
+    "Un <code>CLAUDE.md</code> ou un <code>AGENTS.md</code> est déposé sous " +
     "<code>&lt;nom&gt;.safety</code> : sous son vrai nom, l'agent le chargerait comme consignes.";
   wrap.appendChild(n);
 
@@ -1349,8 +1351,8 @@ function depositPanel(s) {
       });
       const j = await rep.json().catch(() => ({}));
       if (rep.ok && j.ok) {
-        say('depose : ' + j.repo + ' ' + j.path + ' (commit ' + String(j.sha).slice(0, 12) +
-            ') — dans l\'atelier de l\'architecte d\'ici une minute');
+        say('depose sur la forge : ' + j.repo + ' ' + j.path + ' (commit ' +
+            String(j.sha).slice(0, 12) + ') — l\'atelier suit la forge au passage du pilote');
         pick.value = '';
       } else {
         say('refuse : ' + (j.why || j.error || rep.status), true);

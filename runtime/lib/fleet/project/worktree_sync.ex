@@ -14,7 +14,8 @@ defmodule Fleet.Project.WorktreeSync do
 
   ⚠ A WRITER FACE ALSO MOVES WITHOUT A MERGE. The deck's deposit door commits into the
   workshop face through the forge's content API: no PR, so no merge-triggered sync ever
-  brings the file down, and the architect's next push is refused as non-fast-forward.
+  brings the file down, and the architect's next publication is rejected (seen on a bench,
+  2026-09-23: the push was refused as `stale info` until the face caught up).
   `refresh/3` (cast by the poller each regular tick) and `align_before_push/3` (called by
   the architect's own writers) cover that: both read the forge's head first and touch the
   face only when it is behind.
@@ -272,19 +273,52 @@ defmodule Fleet.Project.WorktreeSync do
   end
 
   # Writer faces keep local commits through rebase. FETCH_HEAD works even when a
-  # single-branch clone does not maintain origin/<branch>. Autostash is not a guarantee
-  # of conflict-free restoration. Any rebase error is tagged rebase_conflict; abort
-  # is attempted but its result is ignored.
+  # single-branch clone does not maintain origin/<branch>. Any rebase error is tagged
+  # rebase_conflict; abort is attempted but its result is ignored.
+  #
+  # ⚠ A FAILED AUTOSTASH EXITS 0. When the incoming commits touch a file the writer has
+  # modified, `rebase --autostash` succeeds, keeps the edit in the stash and leaves conflict
+  # markers in the file; an ignored file on an incoming path is overwritten without a word.
+  # The rebase is therefore refused BEFORE it starts when an incoming path carries local work,
+  # and an unmerged path left after it is reported, never read as success.
   defp align_writer(dir, branch) do
-    with :ok <- GitOps.run(["-C", dir, "fetch", "origin", branch], auth: true) do
+    with :ok <- GitOps.run(["-C", dir, "fetch", "origin", branch], auth: true),
+         :ok <- refuse_if_local_work_in_the_way(dir, branch) do
       case GitOps.run(["-C", dir, "rebase", "--autostash", "FETCH_HEAD"], auth: false) do
         :ok ->
-          :ok
+          refuse_if_unmerged(dir, branch)
 
         {:error, reason} ->
           _ = GitOps.run(["-C", dir, "rebase", "--abort"], auth: false)
           {:error, {:rebase_conflict, branch, reason}}
       end
+    end
+  end
+
+  defp refuse_if_local_work_in_the_way(dir, branch) do
+    with {:ok, incoming} <- paths(dir, ["diff", "--name-only", "-z", "HEAD...FETCH_HEAD"]),
+         {:ok, changed} <- paths(dir, ["diff", "--name-only", "-z", "HEAD"]),
+         {:ok, others} <- paths(dir, ["ls-files", "--others", "-z"]) do
+      in_the_way = MapSet.intersection(MapSet.new(incoming), MapSet.new(changed ++ others))
+
+      if MapSet.size(in_the_way) == 0,
+        do: :ok,
+        else:
+          {:error, {:local_work_in_the_way, branch, in_the_way |> Enum.sort() |> Enum.take(10)}}
+    end
+  end
+
+  defp refuse_if_unmerged(dir, branch) do
+    case paths(dir, ["diff", "--name-only", "-z", "--diff-filter=U"]) do
+      {:ok, []} -> :ok
+      {:ok, unmerged} -> {:error, {:unmerged_after_rebase, branch, Enum.take(unmerged, 10)}}
+      {:error, _} = err -> err
+    end
+  end
+
+  defp paths(dir, args) do
+    with {:ok, out} <- GitOps.read(["-C", dir | args], auth: false) do
+      {:ok, String.split(out, <<0>>, trim: true)}
     end
   end
 

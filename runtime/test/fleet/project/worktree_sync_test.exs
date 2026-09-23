@@ -321,6 +321,83 @@ defmodule Fleet.Project.WorktreeSyncTest do
     assert File.exists?(Path.join(doc, "ready-room/b.bin"))
   end
 
+  # ── A face whose writer is in the middle of something is REFUSED, never clobbered ──
+  # Measured with git 2.53: `rebase --autostash` exits 0 when the stash does not re-apply, and
+  # leaves conflict markers in the writer's file. Each case below would pass for success without
+  # the guard.
+
+  test "an UNCOMMITTED edit on a path the forge changed: refused, the edit intact, no stash",
+       %{seed: seed, doc: doc, sync: sync} do
+    File.write!(Path.join(doc, "backlog.md"), "the arch is editing\n")
+    deposit!(seed, "backlog.md", "replaced on the forge\n")
+    before = head(doc)
+
+    assert {:error, {:local_work_in_the_way, "workshop", ["backlog.md"]}} =
+             WorktreeSync.align_before_push(sync, doc, "workshop")
+
+    assert File.read!(Path.join(doc, "backlog.md")) == "the arch is editing\n"
+    assert head(doc) == before
+    assert git_out(doc, ["stash", "list"]) == ""
+  end
+
+  test "an UNTRACKED file on the deposited path: refused, the local file intact",
+       %{seed: seed, doc: doc, sync: sync} do
+    File.mkdir_p!(Path.join(doc, "ready-room"))
+    File.write!(Path.join(doc, "ready-room/p.zip"), "local")
+    deposit!(seed, "ready-room/p.zip", "deposited")
+
+    assert {:error, {:local_work_in_the_way, "workshop", ["ready-room/p.zip"]}} =
+             WorktreeSync.align_before_push(sync, doc, "workshop")
+
+    assert File.read!(Path.join(doc, "ready-room/p.zip")) == "local"
+  end
+
+  test "an IGNORED file on the deposited path is not overwritten either",
+       %{seed: seed, doc: doc, sync: sync} do
+    File.write!(Path.join(doc, ".git/info/exclude"), "*.bin\n")
+    File.mkdir_p!(Path.join(doc, "ready-room"))
+    File.write!(Path.join(doc, "ready-room/fw.bin"), "local build")
+    deposit!(seed, "ready-room/fw.bin", "deposited")
+
+    assert {:error, {:local_work_in_the_way, "workshop", ["ready-room/fw.bin"]}} =
+             WorktreeSync.align_before_push(sync, doc, "workshop")
+
+    assert File.read!(Path.join(doc, "ready-room/fw.bin")) == "local build"
+  end
+
+  test "a local COMMIT that conflicts with the forge: rebase aborted, the commit kept, nothing half-done",
+       %{seed: seed, doc: doc, sync: sync} do
+    File.write!(Path.join(doc, "backlog.md"), "arch commit\n")
+    git_in!(doc, ["commit", "-qam", "docs: arch"])
+    before = head(doc)
+    deposit!(seed, "backlog.md", "forge commit\n")
+
+    assert {:error, {:rebase_conflict, "workshop", _}} =
+             WorktreeSync.align_before_push(sync, doc, "workshop")
+
+    assert head(doc) == before
+    assert File.read!(Path.join(doc, "backlog.md")) == "arch commit\n"
+    refute File.exists?(Path.join(doc, ".git/rebase-merge"))
+    refute File.exists?(Path.join(doc, ".git/rebase-apply"))
+  end
+
+  test "refresh remembers a refused face, and forgets it once the face follows again",
+       %{seed: seed, doc: doc, sync: sync} do
+    File.write!(Path.join(doc, "backlog.md"), "the arch is editing\n")
+    deposit!(seed, "backlog.md", "replaced on the forge\n")
+
+    WorktreeSync.refresh(sync, "fleet/myproj", "workshop")
+    assert MapSet.member?(:sys.get_state(sync).refresh_failed, "fleet/myproj")
+
+    git_in!(doc, ["checkout", "--", "backlog.md"])
+    WorktreeSync.refresh(sync, "fleet/myproj", "workshop")
+    refute MapSet.member?(:sys.get_state(sync).refresh_failed, "fleet/myproj")
+    assert File.read!(Path.join(doc, "backlog.md")) == "replaced on the forge\n"
+  end
+
+  defp git_out(dir, args),
+    do: System.cmd("git", ["-C", dir | args]) |> elem(0) |> String.trim()
+
   # What the deposit door does through the forge's content API: one commit on workshop, no PR.
   defp deposit!(seed, rel, content) do
     git_in!(seed, ["checkout", "-q", "workshop"])

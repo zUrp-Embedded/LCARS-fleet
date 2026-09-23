@@ -60,9 +60,10 @@ defmodule Fleet.MCP.PodTools.Delegation.Workshop do
   Brings the workshop face level with the forge before a local writer commits and pushes there.
 
   ⚠ THE FORGE ALSO MOVES WITHOUT A MERGE: the deck's deposit door commits into the ready room
-  through the forge's API. Without this step the architect's next push is refused
-  (non-fast-forward) until the next merge — silently for the scratchpad. A failure is logged and
-  blocks nothing: the push that follows says so itself if it does not go through.
+  through the forge's API. Without this step the architect's next publication is rejected until
+  the face catches up (seen on a bench, 2026-09-23: `stale info`). A failure here is logged and
+  blocks nothing; the push that follows may then be refused — `publish/2` says so in its receipt,
+  the scratchpad keeps its note local.
   """
   @spec align(String.t(), String.t()) :: :ok | :up_to_date | {:error, term()}
   def align(repo, dir) do
