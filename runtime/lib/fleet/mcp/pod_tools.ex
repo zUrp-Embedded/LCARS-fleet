@@ -207,7 +207,7 @@ defmodule Fleet.MCP.PodTools do
           "\"title\":<echoed as registered — confirm your number-to-title association on it>}. " <>
           "REWORK of a rejected/abandoned ticket: pass `supersedes: <old issue number>` — the " <>
           "fleet then RETIRES the old ticket itself (system comment + close; never two live " <>
-          "tickets for one brick, never close anything yourself — you have no close tool). " <>
+          "tickets for one brick; a ticket with no successor is retired with `issue_retire`). " <>
           "Refused if the old ticket has a LIVE PR (let it land or escalate). The result echoes " <>
           ~s({"supersedes":N}; a "supersede_warning" means the retirement of the old ticket ) <>
           "stopped at the step it names: the old ticket is stamped `stage/retired`, it will never " <>

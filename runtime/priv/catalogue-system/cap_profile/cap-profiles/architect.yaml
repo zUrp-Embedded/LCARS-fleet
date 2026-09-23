@@ -154,6 +154,7 @@ spec:
       - mcp__fleet__issue_list       # read channel (BL-6-28): the project's open-ticket board — the write channel had no read half
       - mcp__fleet__issue_get         # read channel (BL-6-28): ONE ticket in full (body + comment thread)
       - mcp__fleet__issue_comment     # return channel: replies on an in-flight ticket (in the role's name)
+      - mcp__fleet__issue_retire      # the one closing gesture: retires a ticket that must not run again (no successor)
       # Rail toolchain (chantier admiral 2026-08-19) : l'arch peut demander un outillage AVANT que
       # les producers butent dessus (anticiper une toolchain, un essai voulu par l'humain). La
       # demande reste une PR vers `tool_request` qu'un admin signe — le grant n'installe rien.
