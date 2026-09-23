@@ -12,6 +12,19 @@ defmodule Fleet.MCP.ProjectPublishTest do
 
   defp call(args, state), do: PodTools.handle_tool_call("project_publish", args, state)
 
+  describe "publish_identity/1 — the public identity travels with the binding" do
+    test "a binding that declares it hands it to the rail" do
+      assert ProjectPublish.publish_identity(%{
+               "publish_name" => "Lord Zurp",
+               "publish_email" => "lord@zurp.example"
+             }) == ["--publish-name", "Lord Zurp", "--publish-email", "lord@zurp.example"]
+    end
+
+    test "no declared identity → nothing passed: the transform refuses, it never guesses" do
+      assert ProjectPublish.publish_identity(%{"host" => "github"}) == []
+    end
+  end
+
   describe "binding_key/1 — org-qualified, homonyms do not collide (defect #2)" do
     test "owner/name -> owner__name, and two orgs of the same name stay apart" do
       assert ProjectPublish.binding_key("fleet/demo") == "fleet__demo"

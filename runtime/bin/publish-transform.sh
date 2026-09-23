@@ -28,18 +28,28 @@ SYSTEM_EMAIL="$LCARS_SYSTEM_ACCOUNT@lcars.local"
 # D2 — les bulles de merge sont NORMALES sur un main, des deux cotes : l'aplatissement ne sert que la
 # branche d'une MR upstream, d'ou le defaut a vide.
 LINEARIZE=""
+PUBLISH_NAME=""
+PUBLISH_EMAIL=""
 
 usage() {
   echo "Usage: $0 --repo OWNER/NAME --forge URL --token-file FICHIER --out DIR [options]" >&2
-  echo "  Options: --vendor-identity F · --filter-repo-bin B · --system-email E · --linearize BRANCHE" >&2
+  echo "  Options: --publish-name N --publish-email E (l'identite publique) · --vendor-identity F" >&2
+  echo "           --filter-repo-bin B · --system-email E · --linearize BRANCHE" >&2
   exit 1
 }
 
 # The two patterns that decide what gets REWRITTEN (the boundary) are the ones that decide what gets
 # REFUSED (the certification). A boundary drifted from the certification selects less than the
 # certification refuses — a publish that dies at the last gate instead of one that never had the marker.
+# ⚠ INTERNE = TOUTE ADRESSE QUI NE PEUT ÊTRE L'IDENTITÉ PUBLIQUE DE PERSONNE : le domaine de la forge
+# locale, l'adresse système, et une adresse SANS DOMAINE ROUTABLE (pas de point après le `@`).
+# `captain@Nico-SuperCharged` — l'identité de l'hôte, qui a signé tous les livrables d'un banc le
+# 2026-09-23 — passait pour humaine et serait partie telle quelle vers la forge publique.
 internal_ident_re() { # <system_email>
-  printf '@lcars\.local|%s' "$(printf '%s' "$1" | sed 's/[.[\*^$]/\\&/g')"
+  printf '@lcars\.local|%s|@[^.@]+$' "$(printf '%s' "$1" | sed 's/[.[\*^$]/\\&/g')"
+}
+is_internal_email() { # <email> <system_email>
+  printf '%s\n' "$1" | grep -qiE "$(internal_ident_re "$2")"
 }
 # ⚠ `\s` ET NON `[[:space:]]` : ce motif est lu par DEUX moteurs. La classe POSIX est valide en ERE
 # (grep) et n'existe PAS en Python, qui la lit comme un ensemble imbrique et emet un `FutureWarning`
@@ -109,6 +119,8 @@ while [[ $# -gt 0 ]]; do
     --filter-repo-bin) FILTER_REPO_BIN="$2"; shift 2 ;;
     --system-email) SYSTEM_EMAIL="$2"; shift 2 ;;
     --linearize) LINEARIZE="$2"; shift 2 ;;
+    --publish-name) PUBLISH_NAME="$2"; shift 2 ;;
+    --publish-email) PUBLISH_EMAIL="$2"; shift 2 ;;
     *) echo "publish-transform: option inconnue: $1" >&2; usage ;;
   esac
 done
@@ -142,23 +154,30 @@ GIT_CONFIG_COUNT=1 \
   GIT_CONFIG_VALUE_0="Authorization: token ${TOKEN}" \
   git clone "$FORGE/$REPO.git" "$OUT_DIR"
 
+# L'IDENTITÉ PUBLIQUE SE DÉCLARE, ELLE NE SE DÉDUIT PAS. Par ordre : celle de la liaison de publication
+# (`--publish-email`, posée par `lcars approve`), puis l'identité git globale de celui qui publie
+# (`--global`, pas le `[user]` local d'un dépôt). Une identité interne n'est jamais retenue. Aucune →
+# arrêt : l'ancienne déduction prenait le committer externe le plus récent de l'historique, c'est-à-dire
+# n'importe qui.
 # ⚠ `--global`, ET PAS `--get` NU : sans lui git resout local > global, et lance depuis un depot qui
 # porte un `[user]` local le script prendrait CETTE identite au lieu de celle du conteneur.
-HUMAN_NAME="$(git config --global --get user.name 2>/dev/null || true)"
-HUMAN_EMAIL="$(git config --global --get user.email 2>/dev/null || true)"
-
-if [[ -z "$HUMAN_EMAIL" || "$HUMAN_EMAIL" == *"@lcars.local" ]]; then
-  # ⚠ `!seen` ET SURTOUT PAS `{print; exit}` : `exit` ferme le tuyau des la premiere ligne retenue,
-  # `git log` recoit SIGPIPE des que sa sortie depasse le tampon de pipe (~64 Ko), `pipefail` remonte
-  # 141 et `set -e` abat le script. Toute fixture est trop petite pour le montrer.
-  HUMAN_LINE="$(cd "$OUT_DIR" && git log --all --format='%cn|%ce' | awk -F'|' '$2 !~ /@lcars\.local$/ && !seen {print; seen=1}')"
-  [[ -n "$HUMAN_LINE" ]] || { echo "publish-transform: aucune identite git declaree, et tous les commits sont a des comptes internes (@lcars.local) — l'humain reste inconnu" >&2; exit 2; }
-  HUMAN_NAME="${HUMAN_LINE%%|*}"
-  HUMAN_EMAIL="${HUMAN_LINE##*|}"
-  echo "publish-transform: identite humaine DEDUITE de l historique ($HUMAN_NAME <$HUMAN_EMAIL>) — aucune n etait declaree"
+if [[ -n "${PUBLISH_EMAIL:-}" ]]; then
+  HUMAN_NAME="${PUBLISH_NAME:-}"
+  HUMAN_EMAIL="$PUBLISH_EMAIL"
+  ORIGINE="de la liaison de publication"
 else
-  echo "publish-transform: identite humaine DECLAREE ($HUMAN_NAME <$HUMAN_EMAIL>)"
+  HUMAN_NAME="$(git config --global --get user.name 2>/dev/null || true)"
+  HUMAN_EMAIL="$(git config --global --get user.email 2>/dev/null || true)"
+  ORIGINE="git config --global"
 fi
+
+if [[ -z "$HUMAN_EMAIL" ]] || is_internal_email "$HUMAN_EMAIL" "$SYSTEM_EMAIL"; then
+  echo "publish-transform: aucune identite PUBLIQUE declaree (${HUMAN_EMAIL:-rien} — interne ou absente)." >&2
+  echo "  Declare celle sous laquelle ce depot sort :" >&2
+  echo "    lcars approve $REPO --publish-name \"Ton Nom\" --publish-email ton@adresse.publique" >&2
+  exit 2
+fi
+echo "publish-transform: identite publique $ORIGINE : $HUMAN_NAME <$HUMAN_EMAIL>"
 [[ -n "$HUMAN_NAME" ]] || HUMAN_NAME="$HUMAN_EMAIL"
 
 # A wrong boundary cannot leak, it can only stop the publish: the certification below rescans the

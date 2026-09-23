@@ -54,13 +54,13 @@ make_fixture() {
 
 run_transform() {
   run "$SCRIPT" --repo fleet/demo --forge "$TMP/forge" --token-file "$TMP/token" \
-    --out "$TMP/out" --vendor-identity "$TMP/vendor.identity" --filter-repo-bin "$FR"
+    --out "$TMP/out" --vendor-identity "$TMP/vendor.identity" --filter-repo-bin "$FR" "$@"
 }
 
 @test "D1: la transformation complete — les 3 reecritures, mesurees sur l'historique produit" {
   need_filter_repo
   make_fixture
-  run_transform
+  run_transform --publish-name "Lord Zurp" --publish-email "human@example.com"
   [ "$status" -eq 0 ]
 
   # root auto_init: author AND committer deviennent l'humain pre-scanne
@@ -78,7 +78,7 @@ run_transform() {
   [[ "$msgs" != *"@lcars.local"* ]]
 }
 
-@test "D1: historique 100% systeme → exit 2 (l'humain ne peut pas etre derive)" {
+@test "D1: aucune identite publique declaree → exit 2 (elle ne se deduit pas)" {
   need_filter_repo
   local src="$TMP/src" bare="$TMP/forge/fleet/demo.git"
   mkdir -p "$src"; git -C "$src" init -q -b main

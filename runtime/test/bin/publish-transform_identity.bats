@@ -81,7 +81,7 @@ Co-authored-by: LCARS-engineer <engineer@lcars.local>"
 
 run_transform() {
   run "$SCRIPT" --repo fleet/proj --forge "$FORGE" --token-file "$TOKEN" \
-    --out "$OUT" --vendor-identity "$VENDOR" --filter-repo-bin "$FR"
+    --out "$OUT" --vendor-identity "$VENDOR" --filter-repo-bin "$FR" "$@"
 }
 
 emails_after() { git -C "$OUT" log --all --format='%ae %ce' | tr ' ' '\n' | sort -u; }
@@ -113,7 +113,7 @@ emails_after() { git -C "$OUT" log --all --format='%ae %ce' | tr ' ' '\n' | sort
 @test "ZERO internal attribution survives — author, committer and trailer alike" {
   need_filter_repo
   fixture >/dev/null
-  run_transform
+  run_transform --publish-name "Lord Zurp" --publish-email "lord@zurp.example"
   [ "$status" -eq 0 ]
 
   # The whole point, asserted on the OBJECTS and not on the script's own certificate: a witness that
@@ -133,7 +133,7 @@ refute_internal() {
 
   GIT_CONFIG_GLOBAL="$gc" run_transform
   [ "$status" -eq 0 ]
-  [[ "$output" == *"identite humaine DECLAREE"* ]]
+  [[ "$output" == *"identite publique git config --global"* ]]
 
   # That commit had NO human anywhere: the only honest source is the container's declared identity.
   local line
@@ -161,7 +161,7 @@ refute_internal() {
 @test "the co-author trailer becomes the vendor, whatever role carried it" {
   need_filter_repo
   fixture >/dev/null
-  run_transform
+  run_transform --publish-name "Lord Zurp" --publish-email "lord@zurp.example"
   [ "$status" -eq 0 ]
 
   git -C "$OUT" log --all --format='%B' | grep -qi 'Co-Authored-By: Claude'
@@ -174,7 +174,7 @@ refute_internal() {
   need_filter_repo
   local foreign
   foreign="$(fixture)"
-  run_transform
+  run_transform --publish-name "Lord Zurp" --publish-email "lord@zurp.example"
   [ "$status" -eq 0 ]
 
   git -C "$OUT" cat-file -e "$foreign^{commit}"
@@ -183,29 +183,56 @@ refute_internal() {
 
 # ─── The fallback, and its own guard ────────────────────────────────────────────────────────────
 
-@test "no declared identity: the human is DEDUCED from history, and it is said" {
+@test "no declared identity: REFUSED — the public identity is declared, never deduced" {
+  # The old path took the most recent external committer in the log: anybody. A publication that
+  # does not know under whose name it leaves does not leave.
   need_filter_repo
   fixture >/dev/null
   run_transform
-  [ "$status" -eq 0 ]
-
-  # Silence here would be the defect: an identity picked by log ordering must announce that it was
-  # picked, not pass for a decision.
-  [[ "$output" == *"DEDUITE de l historique"* ]]
-  refute_internal
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"aucune identite PUBLIQUE declaree"* ]]
+  [[ "$output" == *"lcars approve fleet/proj --publish-name"* ]]
 }
 
-@test "a DECLARED identity that is itself internal is refused, not used" {
+@test "a declared identity that is itself internal is refused, not used" {
   need_filter_repo
   fixture >/dev/null
   local gc="$TMP/gitconfig"
   printf '[user]\n\tname = system_chief\n\temail = system_chief@lcars.local\n' > "$gc"
 
-  # A pod, or a container whose global git carries a role account, would otherwise substitute the very
-  # thing this pass exists to remove — and the certification would refuse afterwards, blaming the
-  # history for a choice the script made.
   GIT_CONFIG_GLOBAL="$gc" run_transform
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"aucune identite PUBLIQUE declaree"* ]]
+}
+
+@test "the binding's --publish-email wins over git config, and says where it came from" {
+  need_filter_repo
+  fixture >/dev/null
+  local gc="$TMP/gitconfig"
+  printf '[user]\n\tname = Someone Else\n\temail = other@example.com\n' > "$gc"
+
+  GIT_CONFIG_GLOBAL="$gc" run_transform --publish-name "Lord Zurp" --publish-email "lord@zurp.example"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"DEDUITE de l historique"* ]]
-  refute_internal
+  [[ "$output" == *"identite publique de la liaison de publication : Lord Zurp <lord@zurp.example>"* ]]
+  local line
+  line="$(git -C "$OUT" log --format='%ae|%ce|%s' | grep 'chore(chief)')"
+  [[ "$line" == "lord@zurp.example|lord@zurp.example|"* ]]
+}
+
+@test "a HOST identity (no routable domain) is internal: rewritten, certified, never published" {
+  # 2026-09-23: every fleet deliverable of a bench was signed `captain@Nico-SuperCharged`. Not on the
+  # forge domain, it passed for human and would have left as is.
+  need_filter_repo
+  local w="$TMP/work"
+  git init -q -b main "$w"
+  commit_as "$w" "Upstream Dev" "dev@upstream.example" "Upstream Dev" "dev@upstream.example" "upstream"
+  commit_as "$w" "captain" "captain@Nico-SuperCharged" "captain" "captain@Nico-SuperCharged" "fix: livrable"
+  git clone -q --bare "$w" "$FORGE/fleet/proj.git"
+
+  run_transform --publish-name "Lord Zurp" --publish-email "lord@zurp.example"
+  [ "$status" -eq 0 ]
+  emails_after | refute_out "Nico-SuperCharged"
+  run emails_after
+  [[ "$output" == *"lord@zurp.example"* ]]
+  [[ "$output" == *"dev@upstream.example"* ]]
 }
