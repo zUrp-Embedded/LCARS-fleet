@@ -4,6 +4,7 @@ defmodule Fleet.Project.GitOpsCommitterTest do
   """
   use ExUnit.Case, async: true
 
+  alias Fleet.Credentials.ForgeIdentity
   alias Fleet.Project.GitOps
 
   @moduletag :tmp_dir
@@ -21,7 +22,7 @@ defmodule Fleet.Project.GitOpsCommitterTest do
   end
 
   test "`committer: :author` signs an act of the system on BOTH sides", %{dir: dir} do
-    system = Fleet.Credentials.ForgeIdentity.system_identity()
+    system = ForgeIdentity.system_identity()
 
     assert :ok =
              GitOps.run(["-C", dir, "commit", "-qm", "chore(import): init"],
@@ -36,8 +37,8 @@ defmodule Fleet.Project.GitOpsCommitterTest do
   test "without it, the committer is the resolved HUMAN — never Git's own login@hostname", %{
     dir: dir
   } do
-    {:ok, human} = Fleet.Credentials.ForgeIdentity.human_identity()
-    system = Fleet.Credentials.ForgeIdentity.system_identity()
+    {:ok, human} = ForgeIdentity.human_identity()
+    system = ForgeIdentity.system_identity()
 
     assert :ok = GitOps.run(["-C", dir, "commit", "-qm", "x"], author: system)
     assert committer(dir) =~ "| #{human.name} <#{human.email}>"
