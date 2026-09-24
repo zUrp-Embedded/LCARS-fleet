@@ -55,14 +55,27 @@ defmodule Fleet.MCP.PodTools.ProbeTest do
     end
   end
 
+  # A REAL `GET /actions/runs/{id}` response (Gitea 1.26.1): a finished run is `status: "completed"`,
+  # its outcome is `conclusion`. Stubs start from it and override only the field a case is about —
+  # a hand-built shape once said `status: "success"`, and every real probe timed out behind it.
+  @run_capture Path.expand("../../fixtures/forge/action_run.json", __DIR__)
+               |> File.read!()
+               |> Jason.decode!()
+  @external_resource Path.expand("../../fixtures/forge/action_run.json", __DIR__)
+
+  def run_capture, do: @run_capture
+
   defmodule ActionsStub do
     @moduledoc false
+    alias Fleet.MCP.PodTools.ProbeTest
+
     def dispatch_workflow(repo, wf, ref, inputs, _opts) do
       send(self(), {:dispatch, repo, wf, ref, inputs})
       {:ok, %{run_id: 77}}
     end
 
-    def run(_repo, _id, _opts), do: {:ok, %{"status" => "success", "conclusion" => "success"}}
+    def run(_repo, _id, _opts),
+      do: {:ok, Map.put(ProbeTest.run_capture(), "conclusion", "success")}
 
     def run_logs(_repo, _id, _opts) do
       {:ok,
@@ -222,6 +235,26 @@ defmodule Fleet.MCP.PodTools.ProbeTest do
       assert d.test_cmd == "make build\nmake test"
     end
 
+    test "la PROSE autour du bloc de code n'est pas la commande — seul le code l'est" do
+      # 2026-09-23: a `## Test` with a sentence after its fenced command reached the probe whole;
+      # the apostrophe of « C'est » broke the probe's shell on every run.
+      d =
+        declared(
+          "## Test\n\n```sh\nbash host/run_all.sh\n```\n\nC'est TOUTE la suite, et `host/run.sh` en fait partie.\n\n## Doc\n\nx\n"
+        )
+
+      assert d.test_cmd == "bash host/run_all.sh"
+    end
+
+    test "plusieurs blocs de code : la commande est leur contenu, dans l'ordre" do
+      d =
+        declared(
+          "## Test\n\nD'abord :\n\n```\nmake build\n```\n\npuis :\n\n```\nmake test\n```\n"
+        )
+
+      assert d.test_cmd == "make build\nmake test"
+    end
+
     test "section absente → chaîne vide, jamais une devinette" do
       d = declared("# projet\n\nrien de contractuel ici\n")
       assert d.harness == ""
@@ -236,6 +269,58 @@ defmodule Fleet.MCP.PodTools.ProbeTest do
 
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :mcp_probe_forge_client, NoFile)
       assert {:ok, %{harness: "", test_cmd: ""}} = Probe.declarations("fleet/p", "sha")
+    end
+  end
+
+  describe "le workflow du PROJET est vérifié avant d'être lancé" do
+    @template "priv/catalogue/project_template/main/.gitea/workflows/probe-test-relevance.yml"
+
+    test "le modèle livré passe ses inputs par `env:` — rien à redire" do
+      assert Probe.unsafe_lines(File.read!(Path.join(File.cwd!(), @template))) == []
+    end
+
+    test "une copie qui colle un input dans son script est dénoncée, ligne à l'appui" do
+      # Lignes exactes de la copie de basilisk sur le banc (2026-09-23), celle qui a cassé la sonde.
+      old = """
+          steps:
+            - name: Sonder
+              env:
+                FORGE_TOKEN: ${{ github.token }}
+              run: |
+                harness="${{ inputs.harness }}"
+                if [ -z "${{ inputs.test_cmd }}" ]; then
+      """
+
+      assert Probe.unsafe_lines(old) == [
+               ~s(harness="${{ inputs.harness }}"),
+               ~s(if [ -z "${{ inputs.test_cmd }}" ]; then)
+             ]
+    end
+
+    defmodule UnsafeWorkflowForge do
+      @moduledoc false
+      def repo_full_name(_id, _opts), do: {:ok, "fleet/chifoumi"}
+
+      def pr_refs(_repo, _pr, _opts),
+        do:
+          {:ok,
+           %{base_ref: "main", base_sha: "b", head_ref: "lcars/issue-3-engineer", head_sha: "h"}}
+
+      def get_file(_repo, "CLAUDE.md", _opts),
+        do: {:ok, %{content: "## Test\n\n```\nsh t.sh\n```\n\n## Harness\n\nt/\n", sha: "x"}}
+
+      def get_file(_repo, ".gitea/workflows/" <> _, _opts),
+        do: {:ok, %{content: "run: |\n  cmd=\"${{ inputs.test_cmd }}\"\n", sha: "y"}}
+    end
+
+    test "une copie dangereuse n'est JAMAIS lancée : la sonde rend `inapplicable`, avec la cause" do
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :mcp_probe_forge_client, UnsafeWorkflowForge)
+
+      assert {:ok, facts} = Probe.run(judge_pod_id(), "test-relevance")
+      assert facts["verdict"] == "inapplicable"
+      assert facts["reason"] == "probe-workflow-unsafe"
+      assert facts["detail"] =~ "env:"
+      refute_received {:dispatch, _, _, _, _}
     end
   end
 
@@ -273,8 +358,12 @@ defmodule Fleet.MCP.PodTools.ProbeTest do
   describe "l'état du run voyage avec les faits" do
     defmodule Cancelled do
       @moduledoc false
+      alias Fleet.MCP.PodTools.ProbeTest
       def dispatch_workflow(_r, _w, _ref, _i, _o), do: {:ok, %{run_id: 5}}
-      def run(_r, _i, _o), do: {:ok, %{"status" => "cancelled", "conclusion" => "cancelled"}}
+
+      def run(_r, _i, _o),
+        do: {:ok, Map.put(ProbeTest.run_capture(), "conclusion", "cancelled")}
+
       def run_logs(_r, _i, _o), do: {:ok, "le runner a été interrompu avant toute mesure\n"}
     end
 
@@ -285,16 +374,45 @@ defmodule Fleet.MCP.PodTools.ProbeTest do
       assert {:ok, facts} = Probe.run(judge_pod_id(), "test-relevance")
 
       refute Map.has_key?(facts, "verdict")
-      assert facts["status"] == "cancelled"
+      assert facts["status"] == "completed"
       assert facts["conclusion"] == "cancelled"
+    end
+  end
+
+  describe "la fin d'un run se lit sur la forme que Gitea envoie" do
+    defmodule RealCapture do
+      @moduledoc false
+      alias Fleet.MCP.PodTools.ProbeTest
+      def dispatch_workflow(_r, _w, _ref, _i, _o), do: {:ok, %{run_id: 57}}
+      def run(_r, _i, _o), do: {:ok, ProbeTest.run_capture()}
+      def run_logs(_r, _i, _o), do: {:ok, "LCARS-PROBE verdict=blind harness=host/\n"}
+    end
+
+    test "la capture brute d'un run fini (completed / failure) rend ses faits, pas un timeout" do
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :forge_actions, RealCapture)
+
+      assert {:ok, facts} =
+               Probe.run(judge_pod_id(), "test-relevance", %{}, max_wait_ms: 5, poll_ms: 1)
+
+      assert facts["status"] == "completed"
+      assert facts["conclusion"] == "failure"
+      assert facts["verdict"] == "blind"
     end
   end
 
   describe "l'attente est bornée, et son épuisement est DIT" do
     defmodule NeverEnds do
       @moduledoc false
+      alias Fleet.MCP.PodTools.ProbeTest
       def dispatch_workflow(_r, _w, _ref, _i, _o), do: {:ok, %{run_id: 9}}
-      def run(_r, _i, _o), do: {:ok, %{"status" => "running"}}
+      # Any status other than "completed" is a run still going; no in-flight run was captured.
+      def run(_r, _i, _o),
+        do:
+          {:ok,
+           ProbeTest.run_capture()
+           |> Map.put("status", "in_progress")
+           |> Map.delete("conclusion")}
+
       def run_logs(_r, _i, _o), do: {:ok, "jamais atteint"}
     end
 

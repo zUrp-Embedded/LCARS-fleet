@@ -338,6 +338,13 @@ if config_env() != :test and not tool_mode? do
 
   # Space Forge writes for feed readability. Notification-queue lag can still visually
   # combine updates; an operator can increase the spacing. This parser requires a positive value.
+  # How long `run_probe` waits for a dispatched probe (queue + job). The template caps the job at
+  # 15 min; the default (20 min) adds room to queue behind a PR's own CI on a single runner.
+  if ms = System.get_env("LCARS_PROBE_MAX_WAIT_MS") do
+    config :lcars_fleet,
+      mcp_probe_max_wait_ms: Fleet.EnvParse.positive_ms("LCARS_PROBE_MAX_WAIT_MS", ms)
+  end
+
   if ms = System.get_env("LCARS_FORGE_WRITE_SPACING_MS") do
     config :lcars_fleet,
       pilot_forge_write_spacing_ms: Fleet.EnvParse.positive_ms("LCARS_FORGE_WRITE_SPACING_MS", ms)

@@ -44,6 +44,18 @@ l'assertion.
   — il prend `Enum.max_by(& &1["id"])` — mais un lecteur qui aurait cru la phrase et pris
   `List.first/1` aurait rendu le verdict du PREMIER job.
 
+## `action_run.json` — un run Actions terminé (ajout du 2026-09-23)
+
+`GET /api/v1/repos/fleet/basilisk/actions/runs/57` : une sonde `workflow_dispatch` terminée en échec.
+**Même image** que les trois autres (`gitea/gitea@sha256:4c4256497e2e237ddebdd30986c7ce52cb6f936b3e90c34bb9f4665714599f62`,
+vérifié par `docker inspect` sur le conteneur), mais prise sur le **banc d'un autre** (beta, celui du captain) :
+**à refaire sur un banc à soi** — c'est la règle ci-dessous, et cette capture ne la tient pas encore.
+
+Ce qu'elle a établi : un run fini porte `status: "completed"` et son issue dans `conclusion`
+(`success` / `failure` ; sur les 50 derniers runs du dépôt, aucune autre paire). `Probe` attendait
+un `status` dans `success|failure|cancelled|skipped`, forme inventée par son témoin : aucune sonde n'a
+jamais rendu de mesure à un juge.
+
 ## Comment les refaire
 
 ```sh
