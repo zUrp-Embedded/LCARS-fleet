@@ -60,6 +60,9 @@ defmodule Fleet.Spawner.Pod.StateFs do
   @spec rm_terminal_artifacts(String.t(), String.t(), keyword()) :: :ok | {:error, [term()]}
   def rm_terminal_artifacts(state_dir, pod_dir, opts \\ [])
       when is_binary(state_dir) and is_binary(pod_dir) and is_list(opts) do
+    # Transcripts outlive the pod: removing its directory must not remove how it worked.
+    :ok = Fleet.Spawner.Pod.TranscriptArchive.archive(pod_dir)
+
     results = [
       safe_rm_rf(state_dir, Paths.state_fs_root_for(opts), :state_dir),
       safe_rm_rf(pod_dir, Paths.pod_dir_root(opts), :pod_dir)

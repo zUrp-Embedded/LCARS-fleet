@@ -79,6 +79,10 @@ config :lcars_fleet, pilot_start_ops_object_sync: false
 # production admission check explicitly; this is not an operator setting.
 config :lcars_fleet, pilot_require_onboarded: false
 
+# Pod teardown archives transcripts; a test run must never write into the real ~/.lcars.
+config :lcars_fleet,
+  spawner_transcript_archive_root: Path.join(System.tmp_dir!(), "lcars-test-transcripts")
+
 # Leave event authorization registry loading off; validation tests populate it explicitly.
 config :lcars_fleet, event_router_load_event_registry: false
 

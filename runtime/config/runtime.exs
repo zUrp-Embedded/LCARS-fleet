@@ -338,6 +338,16 @@ if config_env() != :test and not tool_mode? do
 
   # Space Forge writes for feed readability. Notification-queue lag can still visually
   # combine updates; an operator can increase the spacing. This parser requires a positive value.
+  # Where ended pods' transcripts are kept, and how many pods' worth (oldest removed first).
+  if path = System.get_env("LCARS_TRANSCRIPT_ARCHIVE_ROOT") do
+    config :lcars_fleet,
+      spawner_transcript_archive_root: Fleet.EnvParse.path("LCARS_TRANSCRIPT_ARCHIVE_ROOT", path)
+  end
+
+  if max = System.get_env("LCARS_TRANSCRIPT_ARCHIVE_MAX") do
+    config :lcars_fleet, spawner_transcript_archive_max: String.to_integer(max)
+  end
+
   if ms = System.get_env("LCARS_FORGE_WRITE_SPACING_MS") do
     config :lcars_fleet,
       pilot_forge_write_spacing_ms: Fleet.EnvParse.positive_ms("LCARS_FORGE_WRITE_SPACING_MS", ms)
