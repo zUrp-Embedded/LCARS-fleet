@@ -34,6 +34,12 @@ defmodule Fleet.Spawner.Pod.Egress do
                    "This is the SANDBOX refusing, not the destination: nothing was sent.\r\n" <>
                    "A pod installs no system package (apt & co.): ask with the `toolchain_request` " <>
                    "tool; a test suite that needs one is proved by the CI, not in the pod.\r\n"
+  # An ALLOWED host the proxy could not reach (DNS down, network cut): not a policy refusal. Answering
+  # the allowlist's 403 here told agents « blocked » for hosts they are allowed to reach (2026-09-23,
+  # a laptop waking up with no DNS yet).
+  @upstream_down "HTTP/1.1 502 Bad Gateway\r\n\r\n" <>
+                   "The LCARS pod proxy could not reach this ALLOWED host (network or DNS failure). " <>
+                   "Not a policy refusal: retry later.\r\n"
   @connect_timeout_ms 10_000
 
   @doc """
@@ -354,13 +360,7 @@ defmodule Fleet.Spawner.Pod.Egress do
   defp serve(client, allowed, pod_id) do
     with {:ok, line} <- :gen_tcp.recv(client, 0, @connect_timeout_ms),
          {:ok, host, port} <- decide(line, allowed),
-         {:ok, upstream} <-
-           :gen_tcp.connect(
-             upstream_address(host),
-             port,
-             [:binary, active: false],
-             @connect_timeout_ms
-           ) do
+         {:ok, upstream} <- connect_upstream(host, port) do
       :ok = :gen_tcp.send(client, @accept)
       splice(client, upstream)
     else
@@ -369,10 +369,28 @@ defmodule Fleet.Spawner.Pod.Egress do
         _ = :gen_tcp.send(client, refusal_for(reason))
         :gen_tcp.close(client)
 
-      {:error, reason} ->
-        Logger.warning("Egress[#{pod_id}]: upstream failed (#{inspect(reason)})")
-        _ = :gen_tcp.send(client, @refuse)
+      {:error, {:upstream, host, port, reason}} ->
+        Logger.warning("Egress[#{pod_id}]: upstream #{host}:#{port} failed (#{inspect(reason)})")
+        _ = :gen_tcp.send(client, @upstream_down)
         :gen_tcp.close(client)
+
+      {:error, reason} ->
+        Logger.warning("Egress[#{pod_id}]: client request unreadable (#{inspect(reason)})")
+        :gen_tcp.close(client)
+    end
+  end
+
+  # The failure names the host it was for: an `:nxdomain` without a host says nothing to whoever
+  # reads the log.
+  defp connect_upstream(host, port) do
+    case :gen_tcp.connect(
+           upstream_address(host),
+           port,
+           [:binary, active: false],
+           @connect_timeout_ms
+         ) do
+      {:ok, socket} -> {:ok, socket}
+      {:error, reason} -> {:error, {:upstream, host, port, reason}}
     end
   end
 

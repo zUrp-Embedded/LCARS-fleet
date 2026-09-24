@@ -751,12 +751,17 @@ def depose(login, slug, contenu=b"firmware", nom="firmware.bin",
     c = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     c.settimeout(timeout)
     c.connect(DEPOT)
-    f = c.makefile("rw", encoding="utf-8", newline="\n")
-    f.write("deposit %s %s %s %s %s\n%s\n" % (
+    requete = "deposit %s %s %s %s %s\n%s\n" % (
         login, slug, empreinte or digest, reelle if taille is None else taille, nom,
-        chemin or spool))
-    f.flush()
-    rep = (f.readline() or "").rstrip("\n")
+        chemin or spool)
+    # ⚠ LA PORTE PEUT REFUSER AVANT D'AVOIR LU LA REQUETE (pair qui n'est pas le deck : verdict des
+    # l'accept, puis fermeture). Sous charge, l'ecriture du client arrive apres la fermeture : un
+    # `BrokenPipe` ici n'est pas une panne du test, c'est le refus deja ecrit dans la socket — on le lit.
+    try:
+        c.sendall(requete.encode("utf-8"))
+    except (BrokenPipeError, ConnectionResetError):
+        pass
+    rep = (c.makefile("r", encoding="utf-8", newline="\n").readline() or "").rstrip("\n")
     c.close()
     return rep
 

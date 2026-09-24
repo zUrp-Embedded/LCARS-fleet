@@ -101,6 +101,20 @@ teardown() { rm -rf "$TMP"; }
   [ "$(cat "$TOKDIR/engineer.gitea_token")" = "tok-mort" ]
 }
 
+@test "--check: a token that answers 403 on /user (minted before read:user) → FAIL, it must be re-minted" {
+  # 2026-09-23: role tokens without read:user; the runtime could not resolve their login (dedup never
+  # verified, role markers never recognised). A 403 used to count as alive, so nothing ever converged.
+  printf 'tok-vieux-scope\n' > "$TOKDIR/engineer.gitea_token"
+  printf '403' > "$MOCK/probe_code"
+  run "$SCRIPT" --forge http://f --owner "$(id -un)" --tokens-dir "$TOKDIR" --roles engineer --check
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"FAIL  engineer"* ]]
+}
+
+@test "the mint asks for read:user — the runtime resolves a role token's own login" {
+  grep -qE '^SCOPES="write:repository,write:issue,read:user"$' "$SCRIPT"
+}
+
 @test "le compte est le LOGIN, et le FICHIER aussi" {
   # `<catalogue>_<role>` est la forme du compte forge, parce qu'un username Gitea est unique a
   # l'INSTANCE : sans prefixe, deux catalogues nommant chacun un `dev` se partagent un compte.
