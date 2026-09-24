@@ -354,7 +354,13 @@ defmodule Fleet.Project.Onboard.Faces do
   @spec commit(String.t(), String.t()) :: :ok | {:error, term()}
   def commit(dir, message) do
     with :ok <- GitOps.run(["-C", dir, "add", "-A"], auth: false) do
-      GitOps.run(["-C", dir, "commit", "-m", message], auth: false, author: onboard_author())
+      # An act of the system on a face the system publishes: signed by it on both sides. A human
+      # committer here made the workshop guard refuse the fleet's own import commit (2026-09-23).
+      GitOps.run(["-C", dir, "commit", "-m", message],
+        auth: false,
+        author: onboard_author(),
+        committer: :author
+      )
     end
   end
 

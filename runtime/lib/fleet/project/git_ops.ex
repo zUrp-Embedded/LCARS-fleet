@@ -8,7 +8,10 @@ defmodule Fleet.Project.GitOps do
 
   @doc """
   Runs Git through Shell with :auth (boolean, default false) and optional :author
-  (%{name: ..., email: ...}). Other options are not forwarded; use Git arguments
+  (%{name: ..., email: ...}). With an author, the committer is the resolved human, or the
+  author itself with `committer: :author` (an act of the system, signed by it on both sides).
+  An unresolvable human committer refuses the command: Git's own fallback is `login@hostname`,
+  an address no account carries. Other options are not forwarded; use Git arguments
   such as -C to select the working directory. Success discards captured output.
   """
   @spec run([String.t()], keyword()) :: :ok | {:error, term()}
@@ -32,8 +35,10 @@ defmodule Fleet.Project.GitOps do
   end
 
   defp exec(args, opts) do
-    with {:ok, forge_env} <- forge_env(Keyword.get(opts, :auth, false)) do
-      env = forge_env ++ identity_env(Keyword.get(opts, :author))
+    with {:ok, forge_env} <- forge_env(Keyword.get(opts, :auth, false)),
+         {:ok, identity} <-
+           identity_env(Keyword.get(opts, :author), Keyword.get(opts, :committer)) do
+      env = forge_env ++ identity
 
       case Fleet.Credentials.Shell.git(args, env: env) do
         {:ok, {out, 0}} ->
@@ -59,17 +64,26 @@ defmodule Fleet.Project.GitOps do
   defp forge_env(true), do: ForgeAuth.git_env_result()
   defp forge_env(false), do: {:ok, []}
 
-  # Explicit author, human committer from ForgeIdentity when available. If resolution
-  # fails, no committer override is supplied; Git's own identity resolution applies.
-  defp identity_env(%{name: name, email: email}) do
-    committer =
-      case Fleet.Credentials.ForgeIdentity.human_identity() do
-        {:ok, %{name: cn, email: ce}} -> [{"GIT_COMMITTER_NAME", cn}, {"GIT_COMMITTER_EMAIL", ce}]
-        _ -> []
-      end
-
-    [{"GIT_AUTHOR_NAME", name}, {"GIT_AUTHOR_EMAIL", email}] ++ committer
+  defp identity_env(%{name: name, email: email} = author, committer) do
+    with {:ok, %{name: cn, email: ce}} <- committer_of(author, committer) do
+      {:ok,
+       [
+         {"GIT_AUTHOR_NAME", name},
+         {"GIT_AUTHOR_EMAIL", email},
+         {"GIT_COMMITTER_NAME", cn},
+         {"GIT_COMMITTER_EMAIL", ce}
+       ]}
+    end
   end
 
-  defp identity_env(_), do: []
+  defp identity_env(_author, _committer), do: {:ok, []}
+
+  defp committer_of(author, :author), do: {:ok, author}
+
+  defp committer_of(_author, _human) do
+    case Fleet.Credentials.ForgeIdentity.human_identity() do
+      {:ok, %{name: _, email: _} = human} -> {:ok, human}
+      other -> {:error, {:committer_unresolved, other}}
+    end
+  end
 end

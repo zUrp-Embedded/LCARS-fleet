@@ -5,7 +5,10 @@ defmodule Fleet.Credentials.ForgeIdentity do
   Spawn and check policy share identity constants here to avoid mismatched emails.
 
   Normally Human.current/0 resolves the runtime OS user. Name comes from global Git config,
-  then that login's GECOS, then login; email comes from global Git config, then login@hostname.
+  then that login's GECOS, then login; email comes from global Git config, then the login's forge
+  account address, `login@lcars.local` — the address every forge account is provisioned with
+  (`forge-recipe/forge.tf`, `instance/accounts.tf`, `deploy/lib/forge-bootstrap.sh`). Never the
+  hostname: `login@<hostname>` maps to no account, on the forge or anywhere else.
   These are bounded command reads, not a catalogue membership or user-existence check.
   An explicit human does not switch the OS user whose global Git config is read.
 
@@ -93,6 +96,11 @@ defmodule Fleet.Credentials.ForgeIdentity do
   @spec system_identity() :: %{name: String.t(), email: String.t()}
   def system_identity, do: %{name: @system_name, email: @system_email}
 
+  @doc "The address a login's forge account is provisioned with: `login@lcars.local`."
+  @spec forge_email(String.t()) :: String.t()
+  def forge_email(login) when is_binary(login),
+    do: "#{strip_control(login)}@#{@role_email_domain}"
+
   @doc """
   Builds the role trailer email after stripping ASCII controls; does not validate email syntax
   or account existence. Accepts a non-empty input even if stripping leaves an empty local part.
@@ -136,11 +144,12 @@ defmodule Fleet.Credentials.ForgeIdentity do
         {:ok, %{name: strip_control(name), email: strip_control(email)}}
 
       _ ->
-        name =
-          sanitize_identity(git_config("user.name")) || sanitize_identity(gecos_name(human)) ||
-            human
+        read = Keyword.get(opts, :git_config, &git_config/1)
 
-        email = sanitize_identity(git_config("user.email")) || "#{human}@#{hostname()}"
+        name =
+          sanitize_identity(read.("user.name")) || sanitize_identity(gecos_name(human)) || human
+
+        email = sanitize_identity(read.("user.email")) || forge_email(human)
         {:ok, %{name: name, email: email}}
     end
   end
@@ -177,11 +186,6 @@ defmodule Fleet.Credentials.ForgeIdentity do
     end
   rescue
     _ -> nil
-  end
-
-  defp hostname do
-    {:ok, h} = :inet.gethostname()
-    List.to_string(h)
   end
 
   defp blank_to_nil(nil), do: nil

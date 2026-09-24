@@ -26,7 +26,11 @@ HUMAN_EMAIL = os.environb[b"LCARS_PUB_HUMAN_EMAIL"]
 # certification asks. A narrower test here sends survivors straight into the refusal — blocked,
 # never leaked, but with a clone the script itself is unable to clean.
 def internal(email):
-    return email.lower().endswith(b"@lcars.local")
+    # The SAME three shapes as `internal_ident_re` in publish-transform.sh: the local forge domain,
+    # the system address (which is on that domain), and an address with no routable domain — no dot
+    # after the `@`, like the host identity `captain@Nico-SuperCharged`.
+    e = email.lower()
+    return e.endswith(b"@lcars.local") or b"." not in e.rsplit(b"@", 1)[-1]
 
 
 # ⚠ BOTH SIDES ARE READ BEFORE EITHER IS WRITTEN. Testing the LIVE `commit.author_email` below would

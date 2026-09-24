@@ -822,6 +822,8 @@ cmd_publish_run() {
 
   local -a extra=()
   [[ -n "$linearize" ]] && extra=(--linearize "$linearize")
+  local pub_email; pub_email="$(_json_field "$binding" publish_email)"
+  [[ -n "$pub_email" ]] && extra+=(--publish-name "$(_json_field "$binding" publish_name)" --publish-email "$pub_email")
 
   local rc=0
   "$rail" --project "$repo" --forge "$FORGE_BASE_URL" --forge-token-file "$tokfile" \
@@ -876,10 +878,12 @@ cmd_publish_status() {
 
 cmd_approve() {
   # Empty = "derive it from the destination", done below, after the existence probe.
-  local repo="" forge="" as="" base="" visibility="private"
+  local repo="" forge="" as="" base="" visibility="private" pub_name="" pub_email=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --forge) forge="$2"; shift 2 ;;
+      --publish-name) pub_name="$2"; shift 2 ;;
+      --publish-email) pub_email="$2"; shift 2 ;;
       --as) as="$2"; shift 2 ;;
       --base) base="$2"; shift 2 ;;
       --public) visibility="public"; shift ;;
@@ -888,7 +892,7 @@ cmd_approve() {
       *) if [[ -z "$repo" ]]; then repo="$1"; shift; else die "approve: argument en trop « $1 »"; fi ;;
     esac
   done
-  [[ -n "$repo" ]] || die "approve: usage — approve <owner/nom-interne> [--forge <name> --as <repo-dest>] [--base main] [--public]"
+  [[ -n "$repo" ]] || die "approve: usage — approve <owner/nom-interne> [--forge <name> --as <repo-dest>] [--base main] [--public] [--publish-name <nom> --publish-email <adresse publique>]"
   [[ "$repo" == */* ]] || die "approve: « $repo » n'est pas un owner/nom (repo interne)"
   # Org-qualified binding key (owner__name), NOT the name alone: two projects with the same name in
   # two orgs must not collide on one binding. MUST match ProjectPublish.binding_key/1 (`owner/name`
@@ -913,6 +917,7 @@ cmd_approve() {
     dest_host="$(_json_field "$binding" dest_host)"
     dest_repo="$(_json_field "$binding" dest_repo)"
     base="$(_json_field "$binding" base)"
+    [[ -n "$pub_email" ]] || { pub_email="$(_json_field "$binding" publish_email)"; pub_name="${pub_name:-$(_json_field "$binding" publish_name)}"; }
     [[ -n "$base" ]] || die "approve: la liaison $binding ne declare pas de « base ».
   Relie a nouveau en la nommant : approve $repo --forge <name> --as <repo-dest> --base <branche>"
   fi
@@ -945,8 +950,11 @@ cmd_approve() {
   tokfile="$(_authority_token_file "$(_forge_account)" "$work_base")" \
     || die "approve: pas de jeton de forge (cause ci-dessus)"
 
+  # L'identité PUBLIQUE voyage avec la liaison : c'est sous elle que ce dépôt sort (jamais déduite).
+  local -a pub=()
+  [[ -n "$pub_email" ]] && pub=(--publish-name "${pub_name:-$pub_email}" --publish-email "$pub_email")
   "$(dirname "$(readlink -f "$0")")/publish-transform.sh" \
-    --repo "$repo" --forge "$FORGE_BASE_URL" --token-file "$tokfile" --out "$work" \
+    --repo "$repo" --forge "$FORGE_BASE_URL" --token-file "$tokfile" --out "$work" "${pub[@]}" \
     || die "approve: production du clone certifie echouee (voir ci-dessus)"
   cd "$work"
 
@@ -998,8 +1006,8 @@ cmd_approve() {
     fi
     git push -q "$dest_url" "HEAD:refs/heads/$base" \
       || die "approve: echec du peuplement initial vers $dest_host/$dest_repo"
-    python3 -c 'import json,sys;json.dump({"host":sys.argv[2],"dest_host":sys.argv[3],"dest_repo":sys.argv[4],"base":sys.argv[5]},open(sys.argv[1],"w"),indent=2)' \
-      "$binding" "$host" "$dest_host" "$dest_repo" "$base"
+    python3 -c 'import json,sys;d={"host":sys.argv[2],"dest_host":sys.argv[3],"dest_repo":sys.argv[4],"base":sys.argv[5]};d.update({"publish_name":sys.argv[6],"publish_email":sys.argv[7]} if sys.argv[7] else {});json.dump(d,open(sys.argv[1],"w"),indent=2)' \
+      "$binding" "$host" "$dest_host" "$dest_repo" "$base" "${pub_name:-$pub_email}" "$pub_email"
     chmod 600 "$binding"
     echo "approve: « $slug » lie a $dest_host/$dest_repo et peuple ($base)."
   else

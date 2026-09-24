@@ -208,8 +208,17 @@ defmodule Fleet.MCP.PodTools.ProjectPublish do
       b["base"],
       "--work",
       work
-    ]
+    ] ++ publish_identity(b)
   end
+
+  # The public identity the repo leaves under is part of the binding (`lcars approve`); without it
+  # the transform refuses — it is never deduced from history.
+  @doc false
+  @spec publish_identity(map()) :: [String.t()]
+  def publish_identity(%{"publish_email" => email} = b) when is_binary(email) and email != "",
+    do: ["--publish-name", b["publish_name"] || email, "--publish-email", email]
+
+  def publish_identity(_binding), do: []
 
   # Resolve the co-installed rail from launcher configuration without an MCP-to-Spawner call.
   defp rail_path do

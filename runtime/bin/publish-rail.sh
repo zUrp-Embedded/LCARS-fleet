@@ -66,7 +66,8 @@ while [[ $# -gt 0 ]]; do
     --work) WORK="$2"; shift 2 ;;
     --branch) BRANCH="$2"; shift 2 ;;
     --base) BASE="$2"; shift 2 ;;
-    --vendor-identity|--filter-repo-bin|--system-email|--linearize) PASSTHROUGH+=("$1" "$2"); shift 2 ;;
+    --vendor-identity|--filter-repo-bin|--system-email|--linearize|--publish-name|--publish-email)
+      PASSTHROUGH+=("$1" "$2"); shift 2 ;;
     *) echo "publish-rail: option inconnue: $1" >&2; usage ;;
   esac
 done

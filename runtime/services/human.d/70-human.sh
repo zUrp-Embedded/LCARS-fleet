@@ -71,12 +71,23 @@ GITCONFIG_EMAIL() { git config --global --get user.email 2>/dev/null || true; }
 
 # Le compte forge de LCARS_LOGIN, en « full_name<TAB>email ». Vide si la forge ne répond pas, si le
 # jeton système n'est pas là, ou si ce login n'a pas de compte — trois absences qu'on ne comble pas.
+# ⚠ UN COMPTE DONT L'ADRESSE EST MASQUÉE N'EST PAS UN COMPTE ABSENT. Gitea ne montre l'adresse d'un
+# autre compte qu'à un administrateur, et le compte système ne l'est pas : le compte existe (il a un
+# `login`), son adresse revient vide. Lue comme « pas de compte », elle faisait sortir ce module en
+# silence à chaque passe, et l'humain n'a jamais eu d'identité git (mesuré le 2026-09-23 : tous les
+# livrables signés `captain@<hostname>`). L'adresse masquée est alors celle du provisionnement,
+# `<login>@lcars.local` — celle que TOUS les comptes forge reçoivent (forge.tf, accounts.tf,
+# forge-bootstrap.sh) — et la troisième colonne dit d'où elle vient.
 forge_account() {
   [[ -n "$FORGE_BASE_URL" ]] || return 0
   [[ -r "$LCARS_SYSTEM_TOKEN_FILE" ]] || return 0
   forge_curl "$LCARS_SYSTEM_TOKEN_FILE" -s -m 10 \
        "$FORGE_BASE_URL/api/v1/users/$LCARS_LOGIN" 2>/dev/null \
-    | jq -r 'if type=="object" and ((.email // "") != "") then "\(.full_name // "")\t\(.email)" else empty end' \
+    | jq -r --arg conv "$LCARS_LOGIN@lcars.local" \
+        'if type=="object" and ((.login // "") != "") then
+           if (.email // "") != "" then "\(.full_name // "")\t\(.email)\tcompte"
+           else "\(.full_name // "")\t\($conv)\tprovisionnement" end
+         else empty end' \
        2>/dev/null || true
 }
 
@@ -102,13 +113,22 @@ apply_git_identity() {
   if [[ -z "$acct" ]]; then
     return 0
   fi
+  # Découpe par expansion, PAS par `read` : la tabulation est un blanc d'IFS, et `read` fusionnerait
+  # le champ vide d'un compte sans nom complet — tout se décalerait d'une colonne.
+  local rest source
   name="${acct%%$'\t'*}"
-  email="${acct#*$'\t'}"
+  rest="${acct#*$'\t'}"
+  email="${rest%%$'\t'*}"
+  source="${rest#*$'\t'}"
   [[ -n "$name" ]] || name="$LCARS_LOGIN"
   git config --global user.name  "$name"  || { p_fail "git config user.name pour $LCARS_LOGIN"; return 1; }
   git config --global user.email "$email" || { p_fail "git config user.email pour $LCARS_LOGIN"; return 1; }
   LCARS_CHANGED=$((LCARS_CHANGED + 1))
-  p_chg "identité git posée : $name <$email> (depuis son compte forge — c'est elle qui mappe ses commits, avatar compris)"
+  if [[ "$source" == "provisionnement" ]]; then
+    p_chg "identité git posée : $name <$email> (adresse du compte masquée à ce jeton : celle du provisionnement, que tout compte forge reçoit)"
+  else
+    p_chg "identité git posée : $name <$email> (depuis son compte forge — c'est elle qui mappe ses commits, avatar compris)"
+  fi
 }
 
 # Sondes d'identité — verdicts + consignes, AUCUNE mutation, TOUJOURS en warn : les credentials
