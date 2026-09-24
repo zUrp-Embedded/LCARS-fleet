@@ -124,6 +124,26 @@ defmodule Fleet.Spawner.Pod.EgressTest do
   end
 
   describe "start/3 — over a real unix socket" do
+    test "an ALLOWED host that cannot be reached gets 502, not the allowlist's 403 — and the log names it",
+         %{tmp_dir: tmp} do
+      # `.invalid` never resolves (RFC 2606): the proxy's own DNS failure, on a host the policy allows.
+      path = sock(tmp)
+      {:ok, listen} = Egress.start(path, ["nowhere.invalid"], pod_id: "test")
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          c = connect(path)
+          :ok = :gen_tcp.send(c, "CONNECT nowhere.invalid:443 HTTP/1.1\r\n\r\n")
+          assert {:ok, answer} = :gen_tcp.recv(c, 0, 15_000)
+          assert answer =~ "502 Bad Gateway"
+          refute answer =~ "allowlist"
+          Process.sleep(50)
+        end)
+
+      assert log =~ "upstream nowhere.invalid:443 failed"
+      :gen_tcp.close(listen)
+    end
+
     test "a refused host gets 403 on the wire, and the connection closes", %{tmp_dir: tmp} do
       path = sock(tmp)
       {:ok, listen} = Egress.start(path, ["api.anthropic.com"], pod_id: "test")
@@ -182,7 +202,10 @@ defmodule Fleet.Spawner.Pod.EgressTest do
 
     test "an allowed name the DNS does not know stays CLOSED, though the search list would answer it",
          %{tmp_dir: tmp, port: port} do
-      assert tunnel(tmp, "nx.invalid", port) =~ "403 Forbidden"
+      answer = tunnel(tmp, "nx.invalid", port)
+      refute answer =~ "200 Connection Established"
+      # Closed as an UNREACHABLE allowed host (502), not as a policy refusal (403): it is allowed.
+      assert answer =~ "502 Bad Gateway"
     end
 
     test "an allowed name the hosts file declares is served", %{tmp_dir: tmp, port: port} do
