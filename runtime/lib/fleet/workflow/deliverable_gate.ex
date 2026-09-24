@@ -33,7 +33,7 @@ defmodule Fleet.Workflow.DeliverableGate do
 
   @type reason ::
           {:base_not_ancestor, String.t()}
-          | {:bad_identity, [String.t()]}
+          | {:bad_identity, [String.t()], [String.t()]}
           | {:missing_coauthor_trailer, String.t(), [String.t()]}
           | {:secret_detected, String.t(), String.t()}
           | {:forbidden_path_in_diff, String.t()}
@@ -141,7 +141,7 @@ defmodule Fleet.Workflow.DeliverableGate do
            # ce que la forge a deja : pas le travail de cette livraison, pas juge ici
            "--not",
            "--remotes=origin",
-           "--format=%ae%n%ce"
+           "--format=%h%x1f%s%x1f%ae%x1f%ce%x1e"
          ]) do
       {out, 0} -> identity_verdict(out, allowed)
       {out, rc} -> {:error, classify_git_error(out, rc)}
@@ -150,20 +150,37 @@ defmodule Fleet.Workflow.DeliverableGate do
 
   defp identity_verdict("", _allowed), do: :ok
 
+  # The refusal names the COMMITS, not only the addresses: a pod that sees only an email guesses which
+  # commit carries it. On 2026-09-23 an architect read `bad_identity: captain@<host>` after its own edit
+  # and wrote itself a rule never to commit — the offender was the fleet's own import commit.
   defp identity_verdict(out, allowed) do
     allowed_set = MapSet.new(allowed)
 
-    emails =
+    offending =
       out
-      # Remove only the record terminator so empty identity fields remain rejectable.
-      |> String.replace_suffix("\n", "")
-      |> String.split("\n")
-      |> Enum.map(&String.trim/1)
+      |> String.split("\x1e", trim: true)
+      |> Enum.map(&String.split(String.trim_leading(&1, "\n"), "\x1f"))
+      |> Enum.flat_map(fn
+        [sha, subject, ae, ce] ->
+          # Exact membership after trimming; an empty email is rejected unless "" is allowed.
+          case Enum.reject([String.trim(ae), String.trim(ce)], &MapSet.member?(allowed_set, &1)) do
+            [] -> []
+            bad -> [{"#{sha} #{subject}", bad}]
+          end
 
-    # Exact membership after trimming; an empty email is rejected unless the allowed set contains "".
-    case Enum.reject(emails, &MapSet.member?(allowed_set, &1)) do
-      [] -> :ok
-      bad -> {:error, {:bad_identity, bad |> Enum.map(&label_email/1) |> Enum.uniq()}}
+        _malformed ->
+          []
+      end)
+
+    case offending do
+      [] ->
+        :ok
+
+      _ ->
+        emails =
+          offending |> Enum.flat_map(&elem(&1, 1)) |> Enum.map(&label_email/1) |> Enum.uniq()
+
+        {:error, {:bad_identity, emails, Enum.map(offending, &elem(&1, 0))}}
     end
   end
 

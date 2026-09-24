@@ -152,8 +152,11 @@ defmodule Fleet.Workflow.DeliverableGateTest do
         "fraud"
       ])
 
-    assert {:error, {:bad_identity, ["architect@lcars.local"]}} =
+    assert {:error, {:bad_identity, ["architect@lcars.local"], [commit]}} =
              Gate.check_identity(dir, base, @role_emails)
+
+    # The refusal names the commit, not only the address: the pod must not have to guess which one.
+    assert commit =~ ~r/^[0-9a-f]{7,} fraud$/
   end
 
   test "F-03 — history rewrite (base no longer an ancestor) → check_base_ancestor BLOCKS",
@@ -300,7 +303,8 @@ defmodule Fleet.Workflow.DeliverableGateTest do
         "chore(scratch): note d'atelier"
       ])
 
-    assert {:error, {:bad_identity, [^sys]}} = Gate.check_identity(dir, base, @role_emails)
+    assert {:error, {:bad_identity, [^sys], _commits}} =
+             Gate.check_identity(dir, base, @role_emails)
 
     assert {:error, {:missing_coauthor_trailer, "engineer", [_ | _]}} =
              Gate.check_coauthor_trailer(dir, base, "engineer")
@@ -325,7 +329,8 @@ defmodule Fleet.Workflow.DeliverableGateTest do
         "note"
       ])
 
-    assert {:error, {:bad_identity, [^sys]}} = Gate.check_identity(dir, base, @role_emails)
+    assert {:error, {:bad_identity, [^sys], _commits}} =
+             Gate.check_identity(dir, base, @role_emails)
   end
 
   test "le commit du producteur SANS trailer reste refuse",
@@ -364,9 +369,9 @@ defmodule Fleet.Workflow.DeliverableGateTest do
         "blank identity"
       ])
 
-    assert {:error, {:bad_identity, bad}} = Gate.check_identity(dir, base, @role_emails)
+    assert {:error, {:bad_identity, bad, _commits}} = Gate.check_identity(dir, base, @role_emails)
     assert "<empty-email>" in bad
-    assert {:error, {:bad_identity, _}} = Gate.verify(dir, base, @role_emails)
+    assert {:error, {:bad_identity, _, _}} = Gate.verify(dir, base, @role_emails)
   end
 
   test "MA-09 (%x00 anti-regression) — a CLEAN multi-commit deliverable ALWAYS passes", %{

@@ -398,7 +398,9 @@ defmodule Fleet.Workflow.DeliverableTest do
         target_branch: "deliverables/x"
       }
 
-      assert {:error, {:bad_identity, ["architect@lcars.local"]}} = Deliverable.publish(opts)
+      assert {:error, {:bad_identity, ["architect@lcars.local"], _commits}} =
+               Deliverable.publish(opts)
+
       # This checks main only, not absence of deliverables/x or the number of push attempts.
       {after_push, 0} = g(bare, ["rev-parse", "main"])
       assert before == after_push
