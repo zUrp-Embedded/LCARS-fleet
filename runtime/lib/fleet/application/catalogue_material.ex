@@ -86,7 +86,10 @@ defmodule Fleet.Application.CatalogueMaterial do
   Reading is ANONYMOUS by design (`allow_anonymous: true`): a catalogue store is public by
   construction, and a container that was never given any authority must still converge its
   material. A caller that passes a token source keeps it — anonymity is only the answer to
-  having none.
+  having none. The AMBIENT account of the forge config (`:pilot_forge`, which a release always
+  carries) is not a source this read asks for: it is resolved through the authority rail, which
+  serves only fleet humans, and the tool door runs as `nobody` — it would turn a public read into
+  a refusal (`:not_a_worker`) on every machine.
 
   `opts` are forwarded to the forge client. `:store_repo`, `:base_url`, `:bundled`, `:forge_repo`
   and `:forge_files` are the test seams and never reach it.
@@ -100,10 +103,13 @@ defmodule Fleet.Application.CatalogueMaterial do
       repo: Keyword.get(opts, :forge_repo, ForgeRepo),
       files: Keyword.get(opts, :forge_files, Files),
       # `put_new`, so a caller that HAS an authority keeps it: this is the answer to having no
-      # token, never a downgrade of one that was named.
+      # token, never a downgrade of one that was named. `account: nil` masks the AMBIENT account
+      # only (the client merges these opts over `:pilot_forge`) — the anonymous answer is LAST in
+      # the resolution, and an ambient account would always outrank it.
       opts:
         opts
         |> Keyword.drop([:store_repo, :base_url, :bundled, :forge_repo, :forge_files])
+        |> Keyword.put_new(:account, nil)
         |> Keyword.put_new(:allow_anonymous, true)
     }
 
