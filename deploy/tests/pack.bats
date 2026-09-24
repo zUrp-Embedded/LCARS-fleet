@@ -118,7 +118,7 @@ case "$1" in
       absent) echo "no such manifest: $3" >&2; exit 1 ;;
       *) echo "Get https://registre: dial tcp: i/o timeout" >&2; exit 1 ;;
     esac ;;
-  push) exit "${STUB_PUSH_RC:-0}" ;;
+  push) echo "a1b2c3: Pushing"; [[ -z "${STUB_PUSH_SLEEP:-}" ]] || sleep "$STUB_PUSH_SLEEP"; echo "a1b2c3: Pushed"; exit "${STUB_PUSH_RC:-0}" ;;
   buildx) [[ -z "${STUB_SANS_BUILDX:-}" ]] || { echo "docker: 'buildx' is not a docker command." >&2; exit 1; } ;;
 esac
 exit 0
@@ -541,6 +541,7 @@ case "$1 $2" in
   "api --paginate") printf '%s\n' ${STUB_GH_TAGS:-} ;;
   "api repos/"*) exit "${STUB_GH_COMMIT_RC:-0}" ;;
   "release create"|"release edit") exit 0 ;;
+  "release upload") exit "$([[ -n "${STUB_GH_UPLOAD_KO:-}" && "$*" == *"$STUB_GH_UPLOAD_KO"* ]] && echo 1 || echo 0)" ;;
 esac
 exit 0
 EOF
@@ -555,8 +556,12 @@ publier_gh() { run env LCARS_PACK_TAG=v9.9 LCARS_PACK_FORGE=https://github.com L
   [[ "$output" == *"par gh, sous son identifiant"*"release publiée par gh"* ]]
   local sha; sha="$(git -C "$R" rev-parse HEAD)"
   grep -q "^GH api repos/fleet/lcars-fleet/git/commits/$sha" "$CALLS"
-  grep -qE "^GH release create v9\.9 -R fleet/lcars-fleet --draft --target $sha --title lcars v9\.9 --notes-file .* .*install\.sh" "$CALLS"
-  [[ "$(grep -n '^GH release create' "$CALLS" | cut -d: -f1)" -lt "$(grep -n '^GH release edit' "$CALLS" | cut -d: -f1)" ]]
+  grep -qE "^GH release create v9\.9 -R fleet/lcars-fleet --draft --target $sha --title lcars v9\.9 --notes-file [^ ]+$" "$CALLS"
+  grep -qE "^GH release upload v9\.9 -R fleet/lcars-fleet .*/install\.sh$" "$CALLS"
+  [[ "$output" == *"pack: asset → install.sh"* ]]
+  [ "$(grep -c '^GH release upload' "$CALLS")" -eq "$(find "$LCARS_PACK_DIR/dist/v9.9" -maxdepth 1 -type f | wc -l)" ]
+  [[ "$(grep -n '^GH release create' "$CALLS" | cut -d: -f1)" -lt "$(grep -n '^GH release upload' "$CALLS" | head -1 | cut -d: -f1)" ]]
+  [[ "$(grep -n '^GH release upload' "$CALLS" | tail -1 | cut -d: -f1)" -lt "$(grep -n '^GH release edit' "$CALLS" | cut -d: -f1)" ]]
   grep -q '^GH release edit v9.9 -R fleet/lcars-fleet --draft=false' "$CALLS"
   refute grep -q '^CURL' "$CALLS"
   refute grep -q '^GH auth token' "$CALLS"
@@ -602,4 +607,41 @@ publier_gh() { run env LCARS_PACK_TAG=v9.9 LCARS_PACK_FORGE=https://github.com L
   grep -q '^GH auth token --hostname github.com' "$CALLS"
   grep -q '^DOCKER login ghcr.io -u fleet --password-stdin' "$CALLS"
   refute grep -q 'jeton-du-helper-gh' "$CALLS"
+}
+
+@test "--publish : la montée de l'image se VOIT, couche par couche — et un push refusé reste un refus malgré le tube" {
+  gh_double; docker_double
+  run env LCARS_PACK_TAG=v9.9 LCARS_PACK_FORGE=https://github.com LCARS_PACK_OWNER=fleet bash "$R/deploy/pack.sh" --publish
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"pack: push: a1b2c3: Pushing"*"pack: push: a1b2c3: Pushed"* ]]
+  : > "$CALLS"
+  STUB_PUSH_RC=1 run env LCARS_PACK_TAG=v9.9 LCARS_PACK_FORGE=https://github.com LCARS_PACK_OWNER=fleet bash "$R/deploy/pack.sh" --publish
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"push de ghcr.io/fleet/lcars-fleet:v9.9 refusé"* ]]
+  refute grep -q '^GH release create' "$CALLS"
+}
+
+@test "--publish par gh : un asset refusé laisse un BROUILLON NOMMÉ, jamais une release publiée" {
+  gh_double
+  STUB_GH_UPLOAD_KO=install.sh publier_gh
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"asset install.sh refusé — la release « v9.9 » reste en BROUILLON"* ]]
+  refute grep -q '^GH release edit' "$CALLS"
+}
+
+@test "--publish : un pack TUÉ pendant le push sort, nettoie son stage ET referme la session du registre" {
+  gh_double; docker_double
+  local log="$BATS_TEST_TMPDIR/pack.out"
+  env TMPDIR="$BATS_TEST_TMPDIR/tmp" STUB_PUSH_SLEEP=30 LCARS_PACK_TAG=v9.9 LCARS_PACK_FORGE=https://github.com LCARS_PACK_OWNER=fleet \
+    bash "$R/deploy/pack.sh" --publish > "$log" 2>&1 &
+  local pid=$! i
+  mkdir -p "$BATS_TEST_TMPDIR/tmp"
+  for i in $(seq 1 200); do grep -q 'pack: push: a1b2c3: Pushing' "$log" && break; sleep 0.1; done
+  grep -q 'pack: push: a1b2c3: Pushing' "$log"
+  kill -TERM "$pid"
+  local rc=0; wait "$pid" || rc=$?
+  [ "$rc" -eq 143 ]
+  grep -q '^DOCKER logout ghcr.io' "$CALLS"
+  refute grep -q '^GH release create' "$CALLS"
+  [ -z "$(ls -A "$BATS_TEST_TMPDIR/tmp")" ]
 }

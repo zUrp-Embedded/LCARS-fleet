@@ -165,7 +165,18 @@ ROOT="lcars_install"
 say "tar → $OUT  (racine : $ROOT/)"
 mkdir -p "$PACK_DIR" || die "tiroir à paquets inaccessible : $PACK_DIR (LCARS_PACK_DIR le pose ailleurs)"
 STAGE="$(mktemp -d)"
-trap 'rm -rf "$STAGE"' EXIT INT TERM
+# UN SEUL NETTOYAGE, SUR TOUTES LES SORTIES : le stage, et la session du registre si --publish l'a ouverte.
+# Un signal SORT (130, 143) et la sortie nettoie — un handler de signal qui ne sort pas laisserait le
+# script reprendre là où il était, stage effacé ; un trap EXIT posé plus loin laisserait, sur un signal,
+# la session du registre ouverte dans le magasin de docker.
+_registre_ouvert=""
+_nettoie() {
+  rm -rf "$STAGE"
+  [[ -z "$_registre_ouvert" ]] || "$PROV_DOCKER_BIN" logout "$_registre_ouvert" >/dev/null 2>&1 || true
+}
+trap _nettoie EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 mkdir -p "$STAGE/$ROOT"
 git archive --format=tar HEAD | tar -x -C "$STAGE/$ROOT" || die "git archive en échec"
 printf '%s\n' "$REV" > "$STAGE/$ROOT/$PROV_SOURCE_STAMP"
@@ -274,7 +285,7 @@ if [[ "$IMAGE" -eq 1 ]]; then
   _registry="${IMAGE_REMOTE%%/*}"
   _jeton | "$PROV_DOCKER_BIN" login "$_registry" -u "$OWNER" --password-stdin >/dev/null 2>&1 \
     || die "--publish : le registre $_registry refuse le jeton de $OWNER (portée write:package ?)"
-  trap 'rm -rf "$STAGE"; "$PROV_DOCKER_BIN" logout "$_registry" >/dev/null 2>&1 || true' EXIT
+  _registre_ouvert="$_registry"
   _rc=0; _insp="$("$PROV_DOCKER_BIN" manifest inspect "$IMAGE_REMOTE" 2>&1 >/dev/null)" || _rc=$?
   if [[ "$_rc" -eq 0 ]]; then
     # un tag publié ne se réécrit pas ; à la révision du kit, c'est l'image d'une publication arrêtée après son push, qui se reprend
@@ -288,7 +299,11 @@ if [[ "$IMAGE" -eq 1 ]]; then
     [[ "${_insp,,}" == *"no such manifest"* || "${_insp,,}" == *"manifest unknown"* || "${_insp,,}" == *"not found"* ]] \
       || die "--publish : le registre ne dit pas si $IMAGE_REMOTE existe (${_insp:0:200}) — rien n'est poussé"
     say "image → $IMAGE_REMOTE…"
-    "$PROV_DOCKER_BIN" tag "$IMAGE_NAME:$TAG" "$IMAGE_REMOTE" && "$PROV_DOCKER_BIN" push "$IMAGE_REMOTE" >/dev/null \
+    # la montée se VOIT : une ligne par couche (Preparing, Pushing, Pushed, le digest), préfixée, sur stderr —
+    # un push de plusieurs centaines de Mo sur un lien lent ne se distingue pas d'un push bloqué sans elle.
+    # pipefail (en tête) rend le code de docker, pas celui de sed.
+    "$PROV_DOCKER_BIN" tag "$IMAGE_NAME:$TAG" "$IMAGE_REMOTE" \
+      && "$PROV_DOCKER_BIN" push "$IMAGE_REMOTE" 2>&1 | sed -u 's/^/pack: push: /' >&2 \
       || die "--publish : push de $IMAGE_REMOTE refusé — la release n'est pas créée, rien à réparer sur la forge"
     say "image publiée : $IMAGE_REMOTE"
   fi
@@ -300,16 +315,23 @@ if [[ "$IMAGE" -eq 1 ]]; then
 fi
 say "publication → $FORGE/$OWNER/$REPO, release $TAG…"
 if [[ "$PAR_GH" -eq 1 ]]; then
-  # le même ordre que fp_publish_dist : brouillon sur le sha avec tous les assets, puis la publication le ferme
+  # le même ordre que fp_publish_dist : le brouillon sur le sha, les assets UN PAR UN — chacun se dit, un
+  # kit de cent Mo sur un lien lent ne passe pas pour un envoi bloqué —, puis la publication le ferme
   _notes="$STAGE/notes.md"
   fp_release_body "$DIST" "$COMMIT" "$FORGE/$OWNER/$REPO/releases/download/$TAG" "$IMAGE_REMOTE" > "$_notes"
-  _assets=(); for _f in "$DIST"/*; do [[ -f "$_f" ]] && _assets+=("$_f"); done
-  gh release create "$TAG" -R "$OWNER/$REPO" --draft --target "$COMMIT" --title "lcars $TAG" \
-      --notes-file "$_notes" "${_assets[@]}" >/dev/null \
-    || die "publication interrompue — gh a pu laisser un BROUILLON « $TAG » sur $OWNER/$REPO : à supprimer sur la forge avant de rejouer"
+  gh release create "$TAG" -R "$OWNER/$REPO" --draft --target "$COMMIT" --title "lcars $TAG" --notes-file "$_notes" >/dev/null \
+    || die "publication interrompue à la création du brouillon « $TAG » sur $OWNER/$REPO — vérifier sur la forge qu'aucun brouillon n'y reste avant de rejouer"
+  _n=0
+  for _f in "$DIST"/*; do
+    [[ -f "$_f" ]] || continue
+    say "asset → $(basename "$_f") ($(du -h "$_f" | cut -f1))"
+    gh release upload "$TAG" -R "$OWNER/$REPO" "$_f" >/dev/null \
+      || die "asset $(basename "$_f") refusé — la release « $TAG » reste en BROUILLON sur $OWNER/$REPO : à supprimer sur la forge avant de rejouer"
+    _n=$((_n + 1))
+  done
   gh release edit "$TAG" -R "$OWNER/$REPO" --draft=false >/dev/null \
-    || die "brouillon « $TAG » créé avec ses ${#_assets[@]} assets, mais sa publication est refusée — « gh release edit $TAG -R $OWNER/$REPO --draft=false » la ferme"
-  say "release publiée par gh : ${#_assets[@]} assets"
+    || die "brouillon « $TAG » créé avec ses $_n assets, mais sa publication est refusée — « gh release edit $TAG -R $OWNER/$REPO --draft=false » la ferme"
+  say "release publiée par gh : $_n assets"
 else
   FP_IMAGE="$IMAGE_REMOTE" fp_publish_dist "$FORGE" "$OWNER" "$REPO" "$TAG" "$DIST" "$COMMIT" \
     || die "publication interrompue — voir ci-dessus"
