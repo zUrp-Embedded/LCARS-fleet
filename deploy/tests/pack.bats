@@ -529,3 +529,77 @@ publier() { # publier — une publication complète vers une forge https doublé
   refute grep -qE '[0-9a-f]{40}' <<<"$code"
   refute grep -qE '/home/commons|/local/LCARS|/opt/lcars|/usr/share/lcars' <<<"$code"
 }
+
+# ─── --publish vers GitHub PAR gh : sans fichier, gh publie sous son propre identifiant ───────────
+gh_double() { # STUB_GH_AUTH=0 déconnecté · STUB_GH_TAGS=les tags déjà présents · STUB_GH_COMMIT_RC
+  cat > "$BIN/gh" <<'EOF'
+#!/usr/bin/env bash
+echo "GH $*" >> "$CALLS"
+case "$1 $2" in
+  "auth status") exit "$([[ "${STUB_GH_AUTH:-1}" == 1 ]] && echo 0 || echo 1)" ;;
+  "auth token")  echo "jeton-du-helper-gh" ;;
+  "api --paginate") printf '%s\n' ${STUB_GH_TAGS:-} ;;
+  "api repos/"*) exit "${STUB_GH_COMMIT_RC:-0}" ;;
+  "release create"|"release edit") exit 0 ;;
+esac
+exit 0
+EOF
+  chmod 0755 "$BIN/gh"
+}
+publier_gh() { run env LCARS_PACK_TAG=v9.9 LCARS_PACK_FORGE=https://github.com LCARS_PACK_OWNER=fleet bash "$R/deploy/pack.sh" --no-image --publish; }
+
+@test "--publish vers GitHub sans fichier : gh mesure, crée le BROUILLON sur le sha avec les assets, puis le publie — aucun curl" {
+  gh_double
+  publier_gh
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"par gh, sous son identifiant"*"release publiée par gh"* ]]
+  local sha; sha="$(git -C "$R" rev-parse HEAD)"
+  grep -q "^GH api repos/fleet/lcars-fleet/git/commits/$sha" "$CALLS"
+  grep -qE "^GH release create v9\.9 -R fleet/lcars-fleet --draft --target $sha --title lcars v9\.9 --notes-file .* .*install\.sh" "$CALLS"
+  [[ "$(grep -n '^GH release create' "$CALLS" | cut -d: -f1)" -lt "$(grep -n '^GH release edit' "$CALLS" | cut -d: -f1)" ]]
+  grep -q '^GH release edit v9.9 -R fleet/lcars-fleet --draft=false' "$CALLS"
+  refute grep -q '^CURL' "$CALLS"
+  refute grep -q '^GH auth token' "$CALLS"
+}
+
+@test "--publish vers GitHub : gh déconnecté est un refus qui nomme « gh auth login », rien n'est envoyé" {
+  gh_double
+  STUB_GH_AUTH=0 publier_gh
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"gh n'est pas connecté à github.com — « gh auth login »"* ]]
+  refute grep -q '^GH release' "$CALLS"
+}
+
+@test "--publish vers GitHub : un tag déjà là (publié ou brouillon) est refusé avant tout envoi" {
+  gh_double
+  STUB_GH_TAGS="v9.8 v9.9" publier_gh
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"la release « v9.9 » existe déjà sur fleet/lcars-fleet"* ]]
+  refute grep -q '^GH release' "$CALLS"
+}
+
+@test "--publish vers GitHub : un commit non poussé est refusé avant tout envoi" {
+  gh_double
+  STUB_GH_COMMIT_RC=1 publier_gh
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"n'est pas lisible sur fleet/lcars-fleet"*"git push"* ]]
+  refute grep -q '^GH release' "$CALLS"
+}
+
+@test "--publish vers GitHub AVEC un fichier nommé : le chemin curl est gardé, gh n'est pas interrogé" {
+  gh_double
+  printf 'jeton-fichier\n' > "$BATS_TEST_TMPDIR/jeton"
+  run env LCARS_PACK_TAG=v9.9 LCARS_PACK_FORGE=https://github.com LCARS_PACK_OWNER=fleet \
+    LCARS_PACK_TOKEN_FILE="$BATS_TEST_TMPDIR/jeton" bash "$R/deploy/pack.sh" --no-image --publish
+  [[ "$output" == *"jeton trouvé"* ]]
+  refute grep -q '^GH' "$CALLS"
+}
+
+@test "--publish vers GitHub avec image : docker login reçoit le jeton de gh par son entrée, jamais en argv" {
+  gh_double; docker_double
+  run env LCARS_PACK_TAG=v9.9 LCARS_PACK_FORGE=https://github.com LCARS_PACK_OWNER=fleet bash "$R/deploy/pack.sh" --publish
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -q '^GH auth token --hostname github.com' "$CALLS"
+  grep -q '^DOCKER login ghcr.io -u fleet --password-stdin' "$CALLS"
+  refute grep -q 'jeton-du-helper-gh' "$CALLS"
+}

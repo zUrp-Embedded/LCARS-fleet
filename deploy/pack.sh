@@ -16,7 +16,8 @@
 #                             version (défaut : ceux d'un origin en http ou https)
 #         LCARS_PACK_TOKEN_FILE  le fichier du jeton du --publish (write:repository et write:package), lu par
 #                             curl et par docker login sur leur entrée ; un jeton ne s'accepte pas par l'environnement,
-#                             dont héritent le gate, npm et leurs scripts
+#                             dont héritent le gate, npm et leurs scripts. Sans lui, sur GitHub, c'est gh qui publie,
+#                             sous son propre identifiant (gh auth login) : aucun jeton en clair
 #         LCARS_SITE_BASE     la base d'URL de la doc, la même que 44-media
 #         LCARS_DOOR_BASE     la base d'URL inscrite dans l'installeur, pour un tiroir servi localement ; refusée avec --publish
 #         LCARS_MINISIGN_PUBKEY, LCARS_MINISIGN_SECKEY   la clé publique inscrite dans l'installeur et le fichier de la clé
@@ -25,7 +26,8 @@
 # PRÉ-REQUIS : git, erl, mix, npm — un poste en livraison source les a tous ; claude dans ~/.local/bin, que
 #         la suite ExUnit du runtime exige de qui la joue ; bats et shellcheck, que la porte
 #         de l'installeur exige ; docker compose, sans lequel cette porte saute les témoins des composes et les
-#         compte ; docker et son plugin buildx, sauf --no-image ; jq avec --publish ; minisign avec les clés
+#         compte ; docker et son plugin buildx, sauf --no-image ; jq avec --publish, et gh connecté pour un --publish
+#         vers GitHub sans LCARS_PACK_TOKEN_FILE ; minisign avec les clés
 # EXIT  : 0 la version est dans le tiroir, et publiée avec --publish · 1 refus (root, arbre modifié, option
 #         inconnue, jeton par l'environnement), gate rouge, build ou doc en échec, kit incomplet, docker injoignable
 #         ou sans buildx, publication refusée (dont une image du tag déjà publiée à une autre révision)
@@ -230,14 +232,47 @@ fi
 # la release se mesure avant l'image : un refus de la forge ne doit pas laisser une image publiée sans sa release
 [[ -n "$FORGE" && -n "$OWNER" ]] || die "--publish : forge ou owner indéterminables (origin n'est pas http) — LCARS_PACK_FORGE et LCARS_PACK_OWNER les posent"
 FP_TOKEN_FILE="${LCARS_PACK_TOKEN_FILE:-}"
-[[ -n "$(read_token "$FP_TOKEN_FILE")" ]] \
-  || die "--publish : aucun jeton — LCARS_PACK_TOKEN_FILE=<fichier> (portées write:repository + write:package), lisible et non vide"
-say "publication : forge $FORGE · jeton trouvé"
-fp_precheck "$FORGE" "$OWNER" "$REPO" "$TAG" "$COMMIT" \
-  || die "publication refusée avant tout envoi — voir ci-dessus"
+# ⚠ SUR GITHUB, SANS FICHIER, C'EST gh QUI PUBLIE : il porte son identifiant lui-même, et c'est sa
+# fonction — sortir un jeton pour le passer en clair a curl est ce qu'il evite. Un fichier NOMME garde
+# le chemin curl, et une autre forge n'a que lui.
+PAR_GH=0
+if [[ -z "$FP_TOKEN_FILE" && "$(fp_dialect "$FORGE")" == github ]]; then
+  PAR_GH=1
+  GH_HOTE="${FORGE#*://}"; GH_HOTE="${GH_HOTE%%/*}"
+  command -v gh >/dev/null 2>&1 \
+    || die "--publish vers GitHub sans LCARS_PACK_TOKEN_FILE : gh absent — c'est lui qui publie, sous son identifiant"
+  gh auth status --hostname "$GH_HOTE" >/dev/null 2>&1 \
+    || die "--publish : gh n'est pas connecté à $GH_HOTE — « gh auth login » (portées repo + write:packages), ou LCARS_PACK_TOKEN_FILE=<fichier>"
+fi
+_jeton() { if [[ "$PAR_GH" -eq 1 ]]; then gh auth token --hostname "$GH_HOTE"; else read_token "$FP_TOKEN_FILE"; fi; }
+
+# la même garde que fp_precheck, mesurée par gh : ni release ni BROUILLON du tag (GET /releases/tags/ ne
+# voit que les publiées, la liste voit les deux), et le commit est poussé
+_gh_precheck() {
+  local tags
+  tags="$(gh api --paginate "repos/$OWNER/$REPO/releases?per_page=100" --jq '.[].tag_name')" \
+    || { echo "pack: REFUS — gh ne liste pas les releases de $OWNER/$REPO : une garde qui ne peut pas mesurer ne laisse pas passer" >&2; return 1; }
+  if grep -qxF -- "$TAG" <<<"$tags"; then
+    echo "pack: REFUS — la release « $TAG » existe déjà sur $OWNER/$REPO (publiée ou brouillon). Un tag publié ne se réécrit jamais — pour la refaire, la supprimer sur la forge, ce script ne le fait pas." >&2
+    return 1
+  fi
+  gh api "repos/$OWNER/$REPO/git/commits/$COMMIT" --silent >/dev/null 2>&1 \
+    || { echo "pack: REFUS — le commit $COMMIT n'est pas lisible sur $OWNER/$REPO : on publie un commit poussé, pas un arbre local (git push, puis rejouer)" >&2; return 1; }
+}
+
+if [[ "$PAR_GH" -eq 1 ]]; then
+  say "publication : forge $FORGE · par gh, sous son identifiant"
+  _gh_precheck || die "publication refusée avant tout envoi — voir ci-dessus"
+else
+  [[ -n "$(read_token "$FP_TOKEN_FILE")" ]] \
+    || die "--publish : aucun jeton — LCARS_PACK_TOKEN_FILE=<fichier> (portées write:repository + write:package), lisible et non vide ; vers GitHub, gh connecté suffit"
+  say "publication : forge $FORGE · jeton trouvé"
+  fp_precheck "$FORGE" "$OWNER" "$REPO" "$TAG" "$COMMIT" \
+    || die "publication refusée avant tout envoi — voir ci-dessus"
+fi
 if [[ "$IMAGE" -eq 1 ]]; then
   _registry="${IMAGE_REMOTE%%/*}"
-  read_token "$FP_TOKEN_FILE" | "$PROV_DOCKER_BIN" login "$_registry" -u "$OWNER" --password-stdin >/dev/null 2>&1 \
+  _jeton | "$PROV_DOCKER_BIN" login "$_registry" -u "$OWNER" --password-stdin >/dev/null 2>&1 \
     || die "--publish : le registre $_registry refuse le jeton de $OWNER (portée write:package ?)"
   trap 'rm -rf "$STAGE"; "$PROV_DOCKER_BIN" logout "$_registry" >/dev/null 2>&1 || true' EXIT
   _rc=0; _insp="$("$PROV_DOCKER_BIN" manifest inspect "$IMAGE_REMOTE" 2>&1 >/dev/null)" || _rc=$?
@@ -264,6 +299,19 @@ if [[ "$IMAGE" -eq 1 ]]; then
   say "image tirable sans identifiants : $IMAGE_REMOTE"
 fi
 say "publication → $FORGE/$OWNER/$REPO, release $TAG…"
-FP_IMAGE="$IMAGE_REMOTE" fp_publish_dist "$FORGE" "$OWNER" "$REPO" "$TAG" "$DIST" "$COMMIT" \
-  || die "publication interrompue — voir ci-dessus"
+if [[ "$PAR_GH" -eq 1 ]]; then
+  # le même ordre que fp_publish_dist : brouillon sur le sha avec tous les assets, puis la publication le ferme
+  _notes="$STAGE/notes.md"
+  fp_release_body "$DIST" "$COMMIT" "$FORGE/$OWNER/$REPO/releases/download/$TAG" "$IMAGE_REMOTE" > "$_notes"
+  _assets=(); for _f in "$DIST"/*; do [[ -f "$_f" ]] && _assets+=("$_f"); done
+  gh release create "$TAG" -R "$OWNER/$REPO" --draft --target "$COMMIT" --title "lcars $TAG" \
+      --notes-file "$_notes" "${_assets[@]}" >/dev/null \
+    || die "publication interrompue — gh a pu laisser un BROUILLON « $TAG » sur $OWNER/$REPO : à supprimer sur la forge avant de rejouer"
+  gh release edit "$TAG" -R "$OWNER/$REPO" --draft=false >/dev/null \
+    || die "brouillon « $TAG » créé avec ses ${#_assets[@]} assets, mais sa publication est refusée — « gh release edit $TAG -R $OWNER/$REPO --draft=false » la ferme"
+  say "release publiée par gh : ${#_assets[@]} assets"
+else
+  FP_IMAGE="$IMAGE_REMOTE" fp_publish_dist "$FORGE" "$OWNER" "$REPO" "$TAG" "$DIST" "$COMMIT" \
+    || die "publication interrompue — voir ci-dessus"
+fi
 say "→ ${FORGE%/}/${OWNER}/${REPO}/releases/tag/${TAG}"
