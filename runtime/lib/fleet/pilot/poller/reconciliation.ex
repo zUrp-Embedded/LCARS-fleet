@@ -12,7 +12,9 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   a producer must not indefinitely protect a dead judge's PR lock.
 
   Instance references come from PodId; project pods derive their issue from the
-  active task, and assigned gate evaluations add their resume issue. Repo-qualified
+  active task, assigned gate evaluations add their resume issue, and an assigned task
+  that holds a PR lock (review, rework: `lock_pr` in its metadata) owns that PR — the
+  only way a producer owns a PR lock, and only while its rework task is assigned. Repo-qualified
   refs avoid number-only collisions but inherit PodId's lossy slug matching.
 
   A snapshot error or unknown ownership read preserves prior suspects and prevents
@@ -243,8 +245,13 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
     pod_refs = Enum.reduce_while(pods, MapSet.new(), &pod_owned_step(&1, &2, tq, repo))
 
     case pod_refs do
-      :error -> :error
-      %MapSet{} -> MapSet.union(pod_refs, gate_eval_owned_refs(tq, repo))
+      :error ->
+        :error
+
+      %MapSet{} ->
+        pod_refs
+        |> MapSet.union(gate_eval_owned_refs(tq, repo))
+        |> MapSet.union(pr_lock_owned_refs(tq, repo))
     end
   rescue
     _ -> :error
@@ -284,6 +291,23 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
           is_integer(n),
           into: MapSet.new(),
           do: {repo, :issue, n}
+    else
+      MapSet.new()
+    end
+  end
+
+  # An ASSIGNED task that holds a PR lock owns it, whatever its pod is named: a producer reworking
+  # its PR runs as `…-issue-<n>-<role>` while the lock sits on the PR. Only the assigned task counts —
+  # a producer that already delivered holds nothing, so it cannot hide a dead judge.
+  defp pr_lock_owned_refs(tq, repo) do
+    if Fleet.Opts.exported?(tq, :list_active, 0) do
+      for %{metadata: meta, state: item_state} <- tq.list_active(),
+          item_state in @pulled_states,
+          meta["repo"] == repo,
+          n = meta["lock_pr"],
+          is_integer(n),
+          into: MapSet.new(),
+          do: {repo, :pr, n}
     else
       MapSet.new()
     end
