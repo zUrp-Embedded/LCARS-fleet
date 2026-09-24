@@ -1032,7 +1032,8 @@ cmd_approve() {
 _cwd_lisible
 
 case "${1:-help}" in
-  tool|help|-h|--help) ;;
+  tool) ;;
+  help|-h|--help) [[ -z "${HOME:-}" ]] || _etat_humain help ;;
   *) _etat_humain "$1" ;;
 esac
 
