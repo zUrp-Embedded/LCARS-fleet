@@ -288,7 +288,11 @@ if [[ "$IMAGE" -eq 1 ]]; then
     [[ "${_insp,,}" == *"no such manifest"* || "${_insp,,}" == *"manifest unknown"* || "${_insp,,}" == *"not found"* ]] \
       || die "--publish : le registre ne dit pas si $IMAGE_REMOTE existe (${_insp:0:200}) — rien n'est poussé"
     say "image → $IMAGE_REMOTE…"
-    "$PROV_DOCKER_BIN" tag "$IMAGE_NAME:$TAG" "$IMAGE_REMOTE" && "$PROV_DOCKER_BIN" push "$IMAGE_REMOTE" >/dev/null \
+    # la montée se VOIT : une ligne par couche (Preparing, Pushing, Pushed, le digest), préfixée, sur stderr —
+    # un push de plusieurs centaines de Mo sur un lien lent ne se distingue pas d'un push bloqué sans elle.
+    # pipefail (en tête) rend le code de docker, pas celui de sed.
+    "$PROV_DOCKER_BIN" tag "$IMAGE_NAME:$TAG" "$IMAGE_REMOTE" \
+      && "$PROV_DOCKER_BIN" push "$IMAGE_REMOTE" 2>&1 | sed -u 's/^/pack: push: /' >&2 \
       || die "--publish : push de $IMAGE_REMOTE refusé — la release n'est pas créée, rien à réparer sur la forge"
     say "image publiée : $IMAGE_REMOTE"
   fi

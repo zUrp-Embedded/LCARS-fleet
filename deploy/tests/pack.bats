@@ -118,7 +118,7 @@ case "$1" in
       absent) echo "no such manifest: $3" >&2; exit 1 ;;
       *) echo "Get https://registre: dial tcp: i/o timeout" >&2; exit 1 ;;
     esac ;;
-  push) exit "${STUB_PUSH_RC:-0}" ;;
+  push) echo "a1b2c3: Pushing"; echo "a1b2c3: Pushed"; exit "${STUB_PUSH_RC:-0}" ;;
   buildx) [[ -z "${STUB_SANS_BUILDX:-}" ]] || { echo "docker: 'buildx' is not a docker command." >&2; exit 1; } ;;
 esac
 exit 0
@@ -602,4 +602,16 @@ publier_gh() { run env LCARS_PACK_TAG=v9.9 LCARS_PACK_FORGE=https://github.com L
   grep -q '^GH auth token --hostname github.com' "$CALLS"
   grep -q '^DOCKER login ghcr.io -u fleet --password-stdin' "$CALLS"
   refute grep -q 'jeton-du-helper-gh' "$CALLS"
+}
+
+@test "--publish : la montée de l'image se VOIT, couche par couche — et un push refusé reste un refus malgré le tube" {
+  gh_double; docker_double
+  run env LCARS_PACK_TAG=v9.9 LCARS_PACK_FORGE=https://github.com LCARS_PACK_OWNER=fleet bash "$R/deploy/pack.sh" --publish
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"pack: push: a1b2c3: Pushing"*"pack: push: a1b2c3: Pushed"* ]]
+  : > "$CALLS"
+  STUB_PUSH_RC=1 run env LCARS_PACK_TAG=v9.9 LCARS_PACK_FORGE=https://github.com LCARS_PACK_OWNER=fleet bash "$R/deploy/pack.sh" --publish
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"push de ghcr.io/fleet/lcars-fleet:v9.9 refusé"* ]]
+  refute grep -q '^GH release create' "$CALLS"
 }
