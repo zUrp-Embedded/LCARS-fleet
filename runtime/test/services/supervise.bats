@@ -78,9 +78,11 @@ setup() {
   # finirait par atteindre la borne au bout d'une semaine — donc par abandonner sur une machine
   # parfaitement saine, et de la maniere la plus difficile a diagnostiquer qui soit.
   #
-  # Fenetre d'UNE seconde et delai d'une seconde : chaque relance sort de la fenetre precedente,
-  # donc la borne n'est jamais atteinte et c'est le `timeout` qui arrete — 124, ici ATTENDU.
-  run timeout 8 "$SUT" --name essai --log "$LOG" --burst 2 --interval 1 --delay 1 -- \
+  # Fenetre d'UNE seconde et delai de DEUX : chaque relance sort de la fenetre precedente avec une
+  # marge d'une seconde, donc la borne n'est jamais atteinte et c'est le `timeout` qui arrete — 124,
+  # ici ATTENDU. Avec un delai EGAL a la fenetre, la moindre gigue sous charge faisait retomber une
+  # relance dans la fenetre, et le test abandonnait en rouge (mesure : gate du 2026-09-24).
+  run timeout 10 "$SUT" --name essai --log "$LOG" --burst 2 --interval 1 --delay 2 -- \
     bash -c "echo passage >> '$MARQUE'; exit 1"
   [ "$status" -eq 124 ]
   refute grep -q 'ABANDON' "$LOG"
