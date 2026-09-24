@@ -1757,6 +1757,28 @@ defmodule Fleet.Spawner.PodTest do
       assert log =~ "pod-a"
     end
 
+    test "work_item.enqueued / .assigned on its own topic are EXPECTED — no state change, no warning" do
+      # 61 such warnings on one bench day (2026-09-23): every dispatch emits them to the pod.
+      data = %{conditions: MapSet.new(), pod_id: "pod-a"}
+
+      for type <- [:"work_item.enqueued", :"work_item.assigned"] do
+        ev = %Fleet.Event{
+          source: :task_queue,
+          type: type,
+          timestamp: DateTime.utc_now(),
+          pod_id: "pod-a",
+          payload: %{}
+        }
+
+        log =
+          ExUnit.CaptureLog.capture_log(fn ->
+            assert :keep_state_and_data = Pod.handle_event(:info, ev, :monitoring, data)
+          end)
+
+        refute log =~ "no clause for it"
+      end
+    end
+
     # Payload completion has no deliverable.published event to lift a publishing guard.
     test "submit of a payload pipe → NO :publishing condition (nothing to protect)" do
       StubBackend.set_reply(interactive_reply(session_id: "s-pub-payload"))

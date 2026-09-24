@@ -577,6 +577,13 @@ defmodule Fleet.Spawner.Pod do
       ),
       do: :keep_state_and_data
 
+  # The pod learns of its work through turn.flag and get_work_item, not through these broadcasts:
+  # they are expected on its topic at every dispatch. Left to the catch-all below they logged a
+  # warning each time (61 on one bench day), drowning the warnings that mean something.
+  def handle_event(:info, %Event{source: :task_queue, type: type}, _state, _data)
+      when type in [:"work_item.enqueued", :"work_item.assigned"],
+      do: :keep_state_and_data
+
   def handle_event(
         :info,
         %Event{type: :"deliverable.published", pod_id: pid},
