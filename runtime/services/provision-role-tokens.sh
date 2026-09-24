@@ -72,7 +72,11 @@ ROLES="system_architect system_chief system_gatekeeper fleet_engineer fleet_scri
 OWNER="$LCARS_AUTHORITY_USER"
 DIR_GROUP="$LCARS_FLEET_GROUP"
 TOKEN_NAME="lcars-fleet"
-SCOPES="write:repository,write:issue"
+# `read:user` : le runtime vérifie l'AUTEUR RÉEL d'un marqueur de rôle et déduplique ses commentaires en
+# demandant à la forge le login du jeton (`GET /user`). Sans ce scope, Gitea répond 403 : le 2026-09-23,
+# 16 commentaires sont partis sans déduplication vérifiée, et un marqueur de rôle n'était jamais reconnu
+# comme signé par son rôle. Un scope de LECTURE, sur le compte lui-même.
+SCOPES="write:repository,write:issue,read:user"
 # ⚠ THE SYSTEM ACCOUNT'S SCOPES ARE WIDER THAN A ROLE'S, AND EACH ADDITION IS MEASURED:
 #
 #   write:organization  it creates the org repos; without it the token is valid and the creation
@@ -131,10 +135,11 @@ if [[ -n "$PASSWORDS_FILE" && ! -r "$PASSWORDS_FILE" ]]; then
   exit 1
 fi
 
-# ⚠ {200,403} = ALIVE, AND THE 403 IS THE TRAP: a narrowly-scoped token answers 403 on /user while
-# being perfectly alive, merely out of scope for THAT endpoint. Gitea authenticates first, THEN
-# refuses the scope. Only 401 means dead or revoked; anything else — 5xx, timeout, connection
-# failure — counts as undetermined and re-provisions. Never assume valid on a doubt.
+# ⚠ ONLY 200 IS A USABLE TOKEN. Every token carries `read:user` now, so `/user` must answer 200. A 403
+# is a token that is alive but minted with an older, narrower scope — the runtime cannot resolve its
+# login with it — and it is RE-MINTED, which is how machines provisioned before the scope converge.
+# 401 is dead or revoked; anything else — 5xx, timeout, connection failure — counts as undetermined
+# and re-provisions. Never assume valid on a doubt.
 #
 # ⚠ AND THE SECRET NEVER GOES IN ARGV: a password harvested from /proc re-mints tokens FOREVER, so
 # rotating a captured token repairs nothing.
@@ -152,7 +157,7 @@ token_valid() { # $1=token
   local code
   code="$(printf 'header = "Authorization: token %s"\n' "$(curl_cfg_escape "$1")" \
     | curl -K - -s -o /dev/null -w '%{http_code}' -m 10 "$FORGE/api/v1/user")"
-  [[ "$code" == "200" || "$code" == "403" ]]
+  [[ "$code" == "200" ]]
 }
 
 # The key lookup is CASE-INSENSITIVE because Gitea resolves accounts that way — we align with the
@@ -269,7 +274,7 @@ for entry in "${ENTRIES[@]}"; do
   fi
 
   if ! token_valid "$tok"; then
-    echo "FAIL  $account — token obtenu mais sonde /user KO : 401, 5xx ou timeout (un scope restreint rend 403, qui compte comme vivant)" >&2
+    echo "FAIL  $account — token obtenu mais sonde /user KO : 403 (scope read:user absent), 401, 5xx ou timeout" >&2
     fail=1
     continue
   fi
