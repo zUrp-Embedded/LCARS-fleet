@@ -1113,3 +1113,60 @@ floor() { # floor <expr>  → source le convergeur avec le decor, evalue <expr>
   [[ "$output" == *"compte EXISTANT reserve"* ]]
   grep -q '^sshd	' "$BATS_TEST_TMPDIR/refused"
 }
+
+# Roster ILLISIBLE = « je ne sais pas », pas « tout est interdit » : aucun geste, et surtout aucun
+# REFUS publie au deck sous une fausse raison — il y resterait jusqu'au reboot.
+_passe_alice() { # _passe_alice <LCARS_CLI au source> <LCARS_CLI au 2e tour> -> run
+  local fn="$BATS_TEST_TMPDIR/once.sh" pw="$BATS_TEST_TMPDIR/passwd-alice"
+  sed -n '/^converge_once() {/,/^}/p' "$SUT" > "$fn"
+  { cat "$PASSWD_FILE"; echo 'alice:x:1001:1001::/home/alice:/bin/bash'; } > "$pw"
+  GESTES="$BATS_TEST_TMPDIR/gestes.log"; : > "$GESTES"
+  mkdir -p "$BATS_TEST_TMPDIR/homes"
+  run bash -c "
+    set -uo pipefail
+    export PASSWD_FILE='$pw' PASSWD_DEFS='$PASSWD_DEFS' LCARS_CLI='$1' LCARS_SYSADMIN_UID=1000
+    export LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes' LCARS_UID_MAP_FILE='$BATS_TEST_TMPDIR/uid.map'
+    export LCARS_CONVERGER_REFUSED='$BATS_TEST_TMPDIR/refused' LCARS_CONSOLE=0
+    source '$SUT'
+    team_id() { echo 7; }
+    api() { printf '[{\"id\":4,\"login\":\"alice\"}]'; }
+    id() { [[ \"\$*\" == *alice* ]]; }
+    getent() { case \"\$1\" in passwd) [[ \"\$2\" == 1000 ]] ;; group) echo 'fleet:x:2000:' ;; esac; }
+    useradd() { echo \"USERADD \$*\" >> '$GESTES'; }
+    usermod() { echo \"USERMOD \$*\" >> '$GESTES'; }
+    restore_human() { echo \"RESTORE \$1\" >> '$GESTES'; }
+    ensure_console() { echo \"CONSOLE \$1\" >> '$GESTES'; }
+    converge_human() { echo \"CONVERGE \$1\" >> '$GESTES'; }
+    revoke_absent() { :; }; reconcile_humans() { :; }; ensure_all_consoles() { :; }
+    source '$fn'
+    converge_once
+    echo '--- tour 2'
+    export LCARS_CLI='$2'
+    converge_once"
+}
+
+@test "roster ILLISIBLE : rien n'est decide ce tour — aucun geste, aucun REFUS publie" {
+  _passe_alice "$BATS_TEST_TMPDIR/pas-de-cli" "$BATS_TEST_TMPDIR/pas-de-cli"
+  [ "$status" -eq 0 ]
+  [ ! -s "$GESTES" ] || { echo "un geste a ete joue :"; cat "$GESTES"; return 1; }
+  [[ "$output" == *"rien converge ce tour"* ]]
+  [[ "$output" != *"REFUS alice"* ]]
+  [ ! -s "$BATS_TEST_TMPDIR/refused" ]
+}
+
+@test "roster relu a CHAQUE tour tant qu'il manque — la release posee apres le demarrage est vue" {
+  _passe_alice "$BATS_TEST_TMPDIR/pas-de-cli" "$LCARS_CLI"
+  [ "$status" -eq 0 ]
+  local apres="${output#*--- tour 2}"
+  [[ "$apres" != *"ILLISIBLE"* ]] || { echo "$output"; return 1; }
+  grep -q '^CONSOLE alice$' "$GESTES"
+}
+
+@test "un refus publie se RETIRE quand le login converge — le deck ne ment pas jusqu'au reboot" {
+  printf 'alice\tancienne raison\nbob\tsa raison\n' > "$BATS_TEST_TMPDIR/refused"
+  _passe_alice "$LCARS_CLI" "$LCARS_CLI"
+  [ "$status" -eq 0 ]
+  grep -q '^CONSOLE alice$' "$GESTES"
+  refute grep -q '^alice	' "$BATS_TEST_TMPDIR/refused"
+  grep -q '^bob	sa raison$' "$BATS_TEST_TMPDIR/refused"
+}
