@@ -223,6 +223,15 @@ mark_refused() { # mark_refused <login> <raison lisible>
   chmod 0644 "$REFUSED_FILE" 2>/dev/null || true
 }
 
+# UN REFUS PUBLIE SE RETIRE QUAND LE LOGIN CONVERGE : sinon le deck continue de dire a une personne
+# que son login est interdit alors qu'elle a son compte (le fichier vit jusqu'au reboot).
+clear_refused() { # clear_refused <login>
+  already_refused "$1" || return 0
+  local tmp; tmp="$(mktemp "${REFUSED_FILE}.XXXXXX")" || return 0
+  awk -F'\t' -v n="$1" '$1!=n' "$REFUSED_FILE" > "$tmp" && chmod 0644 "$tmp" && mv -f "$tmp" "$REFUSED_FILE" \
+    || rm -f "$tmp"
+}
+
 # Meme idiome de sonde que `PASSWD_FILE` plus haut : un fichier injectable pour les tests, la base
 # reelle sinon. Sans ca, la selection des revoques ne serait epinglee par rien — et c'est la partie
 # qui, en se trompant, ferme la porte a quelqu'un qui travaille.
@@ -514,6 +523,15 @@ converge_once() {
     err "$UID_BOUNDS_WHY — rien converge ce tour (aucun compte cree, restaure ni revoque)"
     return 0
   fi
+  # LE ROSTER DE ROLES, MEME DOCTRINE. Illisible, il ne dit pas « aucun role », il dit « je ne sais
+  # pas » : `reserved` refuserait alors TOUT nom, et ce refus serait PUBLIE au deck sous une fausse
+  # raison (« compte systeme »), pour une personne qui n'a rien d'interdit. Rien n'est decide ce
+  # tour. Relu a chaque tour tant qu'il manque : le service peut demarrer avant sa release.
+  [[ -n "$ROLES" ]] || ROLES="$(lcars_roles || true)"
+  if [[ -z "$ROLES" ]]; then
+    err "roster de roles ILLISIBLE (la release ne repond pas a « lcars tool roles ») — rien converge ce tour (aucun compte cree, restaure ni revoque)"
+    return 0
+  fi
   tid="$(team_id)"
   if [[ -z "$tid" ]]; then
     err "team $ORG/$TEAM introuvable (ou forge injoignable) — rien converge ce tour"
@@ -540,6 +558,7 @@ converge_once() {
            { ! in_group "$login" || [[ "$(login_shell_of "$login")" == "$NOLOGIN" ]]; }; then
         restore_human "$login"
       fi
+      clear_refused "$login"
       ensure_console "$login"
       continue
     fi
@@ -599,6 +618,7 @@ converge_once() {
       # le recopie pas ici, on l'appelle. Une deuxieme implementation du meme etat-cible derive.
       converge_human "$login" \
         || err "$login : user cree mais le provisioning per-humain a echoue — les modules ont dit leur cause ci-dessus ($HUMAN_MODULES)"
+      clear_refused "$login"
       # Meme interrupteur que l'entrypoint : qui coupe les consoles les coupe pour tout le monde.
       ensure_console "$login"
     else
