@@ -124,6 +124,12 @@ READY_ROOM_DIR = "ready-room"
 # INSTALLES porte ce depot. Deviner l'org serait une table de correspondance, donc une seconde
 # verite ; demander a la forge ne peut pas deriver.
 CATALOGUES_DIR = lcars_facts.get("LCARS_CATALOGUES_DIR")
+# ⚠ LE CATALOGUE LIVRE PORTE DES PROJETS, ET IL N'EST DANS AUCUN REPERTOIRE D'INSTALLATION. Il vit
+# dans la release (`priv/catalogue`), fermee a ce service ; le produit le met EN TETE de sa liste
+# (`Fleet.Catalogue.installed_roots/0` : `[root() | installed_dirs()]`). Sans lui, tout projet du
+# catalogue par defaut repondait `unknown_project` (mesure sur un banc le 2026-09-23). Le nom est un
+# miroir de `@bundled_name`, tenu par le mur `layout.deposit_names_single_source`.
+BUNDLED_CATALOGUE = "fleet"
 # LA ZONE DE TRANSIT : le deck y ecrit le fichier, ce service l'y lit, et RIEN d'autre n'en sort.
 # Sur disque et jamais sous `/run` — c'est un tmpfs, donc 50 Mo de transit y seraient 50 Mo de RAM.
 DEPOSIT_SPOOL = lcars_facts.get("LCARS_DEPOSIT_SPOOL")
@@ -151,6 +157,13 @@ DEPOSIT_MAX_BYTES = int(lcars_facts.get("LCARS_DEPOSIT_MAX_BYTES"))
 # pas indefiniment — au-dela, le remplacement se dit impossible plutot que de boucler.
 DEPOSIT_LISTING_MAX = int(os.environ.get("LCARS_DEPOSIT_LISTING_MAX", "5000"))
 DEPOSIT_NAME_RX = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+# ⚠ UN NOM QUE LE HARNAIS D'UN AGENT CHARGE DE LUI-MEME NE SE DEPOSE PAS TEL QUEL. Claude Code lit un
+# `CLAUDE.md` des qu'il travaille dans son repertoire, Codex un `AGENTS.md` : l'un d'eux dans la ready
+# room, ce sont des consignes donnees a l'architect sans qu'il les ait demandees. On ne refuse pas —
+# l'humain a voulu deposer ce fichier — on le RENOMME, et le chemin rendu au deck le dit. Liste
+# courte, comparee sans la casse : c'est un garde-fou sur le nom, pas un filtre de contenu.
+HARNESS_NAMES = ("CLAUDE.md", "CLAUDE.local.md", "AGENTS.md")
+HARNESS_SUFFIX = ".safety"
 # Le login affirme devient lui aussi un segment de chemin : meme forme que partout ailleurs.
 LOGIN_RX = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
@@ -409,16 +422,25 @@ def deposit_message(login, name, digest):
             f"Deposit-Via: deck\n")
 
 
+def harness_safe(name):
+    """Le nom sous lequel le fichier entre dans la ready room : tel quel, ou suffixe s'il est charge seul."""
+    if name.casefold() in (n.casefold() for n in HARNESS_NAMES):
+        return name + HARNESS_SUFFIX
+    return name
+
+
 def installed_orgs():
     """
-    Les catalogues installes sur cette machine, donc les orgs possibles d'un projet.
+    Les catalogues de cette machine, donc les orgs possibles d'un projet : le LIVRE d'abord, puis
+    les installes.
 
-    ⚠ LE NOM SE LIT DANS LE MANIFESTE, ET LE REPERTOIRE EST UN REPLI. Le produit lit la meme
-    arborescence (`Fleet.Catalogue.installed_catalogues/0`) : un repertoire par catalogue, un
-    `catalogue.yaml` dedans, le nom a l'interieur. Pas de YAML ici — une seule scalaire est lue par
-    motif, et le nom du repertoire sert quand la ligne manque.
+    ⚠ LA MEME LISTE QUE LE PRODUIT, DANS LE MEME ORDRE. `Fleet.Catalogue.installed_roots/0` rend
+    `[root() | installed_dirs()]` : le catalogue livre en tete, puis un repertoire par catalogue
+    installe. Le livre est dans la release, que ce service ne lit pas ; son nom est donc un miroir
+    (`BUNDLED_CATALOGUE`). Pour les installes, le nom se lit dans le manifeste et le repertoire est un
+    repli — pas de YAML ici, une seule scalaire est lue par motif.
     """
-    noms = []
+    noms = [BUNDLED_CATALOGUE]
     try:
         entrees = sorted(os.listdir(CATALOGUES_DIR))
     except OSError as exc:
@@ -712,6 +734,10 @@ def serve_deposit(conn):
         log(f"refus depot: projet « {slug} » non resolu ({exc})")
         return done("FAIL:forge_unreachable")
 
+    depose = harness_safe(name)
+    if depose != name:
+        log(f"depot: « {name} » est un nom que le harnais d'un agent charge seul — depose sous « {depose} »")
+        name = depose
     path = f"{READY_ROOM_DIR}/{name}"
     message = deposit_message(login, name, got)
     try:

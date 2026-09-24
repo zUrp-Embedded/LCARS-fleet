@@ -247,6 +247,174 @@ defmodule Fleet.Project.WorktreeSyncTest do
     assert head(proj) == before, "a non-face branch must not have touched a worktree"
   end
 
+  # ── A writer face ALSO moves without a merge: the deck's deposit door commits on the forge ──
+
+  test "DEPOSIT: a commit landed on the forge's workshop WITHOUT a merge reaches the face at refresh",
+       %{seed: seed, doc: doc, sync: sync} do
+    deposit!(seed, "ready-room/passation.zip", "PK\x03\x04")
+    refute File.exists?(Path.join(doc, "ready-room/passation.zip"))
+
+    WorktreeSync.refresh(sync, "fleet/myproj", "workshop")
+    # A call behind the cast: the GenServer serializes, so the refresh has run.
+    _ = :sys.get_state(sync)
+
+    assert File.exists?(Path.join(doc, "ready-room/passation.zip")),
+           "the deposited file must be on the face — where the architect's pod sees it"
+
+    assert head(doc) == remote_head(seed, "workshop")
+  end
+
+  test "refresh leaves a face that has EVERYTHING untouched — no fetch, the live tree is not stashed",
+       %{doc: doc, sync: sync} do
+    # The architect edits this face live; rebasing it every tick for nothing would race its editor.
+    File.write!(Path.join(doc, "in-progress.md"), "half written\n")
+    before = head(doc)
+
+    WorktreeSync.refresh(sync, "fleet/myproj", "workshop")
+    _ = :sys.get_state(sync)
+
+    refute File.exists?(Path.join(doc, ".git/FETCH_HEAD")),
+           "an up-to-date face must be settled by ls-remote alone, never by a fetch"
+
+    assert head(doc) == before
+    assert File.read!(Path.join(doc, "in-progress.md")) == "half written\n"
+  end
+
+  test "refresh keeps the architect's unpushed commit AND brings the deposit down (rebase, not reset)",
+       %{seed: seed, doc: doc, sync: sync} do
+    File.write!(Path.join(doc, "note-arch.md"), "not pushed yet\n")
+    git_in!(doc, ["add", "-A"])
+    git_in!(doc, ["commit", "-qm", "docs: arch"])
+    deposit!(seed, "ready-room/passation.zip", "PK")
+
+    WorktreeSync.refresh(sync, "fleet/myproj", "workshop")
+    _ = :sys.get_state(sync)
+
+    assert File.exists?(Path.join(doc, "ready-room/passation.zip"))
+    assert File.exists?(Path.join(doc, "note-arch.md"))
+  end
+
+  test "refresh on the CODE branch touches nothing — its aligner resets, it is not a writer face",
+       %{seed: seed, proj: proj, sync: sync} do
+    before = head(proj)
+    commit_push!(seed, "hello.sh", "echo hi\n", "feat: hello")
+
+    WorktreeSync.refresh(sync, "fleet/myproj", "main")
+    _ = :sys.get_state(sync)
+
+    assert head(proj) == before
+  end
+
+  test "align_before_push brings the deposit down, through the server or inline without one",
+       %{seed: seed, doc: doc, sync: sync} do
+    deposit!(seed, "ready-room/a.bin", "a")
+    assert :ok = WorktreeSync.align_before_push(sync, doc, "workshop")
+    assert File.exists?(Path.join(doc, "ready-room/a.bin"))
+    assert :up_to_date = WorktreeSync.align_before_push(sync, doc, "workshop")
+
+    # No server under that name (a test, a runtime still booting): the same act, inline.
+    deposit!(seed, "ready-room/b.bin", "b")
+
+    assert :ok =
+             WorktreeSync.align_before_push(:"absent_#{System.unique_integer()}", doc, "workshop")
+
+    assert File.exists?(Path.join(doc, "ready-room/b.bin"))
+  end
+
+  # ── A face whose writer is in the middle of something is REFUSED, never clobbered ──
+  # Measured with git 2.53: `rebase --autostash` exits 0 when the stash does not re-apply, and
+  # leaves conflict markers in the writer's file. Each case below would pass for success without
+  # the guard.
+
+  test "an UNCOMMITTED edit on a path the forge changed: refused, the edit intact, no stash",
+       %{seed: seed, doc: doc, sync: sync} do
+    File.write!(Path.join(doc, "backlog.md"), "the arch is editing\n")
+    deposit!(seed, "backlog.md", "replaced on the forge\n")
+    before = head(doc)
+
+    assert {:error, {:local_work_in_the_way, "workshop", ["backlog.md"]}} =
+             WorktreeSync.align_before_push(sync, doc, "workshop")
+
+    assert File.read!(Path.join(doc, "backlog.md")) == "the arch is editing\n"
+    assert head(doc) == before
+    assert git_out(doc, ["stash", "list"]) == ""
+  end
+
+  test "an UNTRACKED file on the deposited path: refused, the local file intact",
+       %{seed: seed, doc: doc, sync: sync} do
+    File.mkdir_p!(Path.join(doc, "ready-room"))
+    File.write!(Path.join(doc, "ready-room/p.zip"), "local")
+    deposit!(seed, "ready-room/p.zip", "deposited")
+
+    assert {:error, {:local_work_in_the_way, "workshop", ["ready-room/p.zip"]}} =
+             WorktreeSync.align_before_push(sync, doc, "workshop")
+
+    assert File.read!(Path.join(doc, "ready-room/p.zip")) == "local"
+  end
+
+  test "an IGNORED file on the deposited path is not overwritten either",
+       %{seed: seed, doc: doc, sync: sync} do
+    File.write!(Path.join(doc, ".git/info/exclude"), "*.bin\n")
+    File.mkdir_p!(Path.join(doc, "ready-room"))
+    File.write!(Path.join(doc, "ready-room/fw.bin"), "local build")
+    deposit!(seed, "ready-room/fw.bin", "deposited")
+
+    assert {:error, {:local_work_in_the_way, "workshop", ["ready-room/fw.bin"]}} =
+             WorktreeSync.align_before_push(sync, doc, "workshop")
+
+    assert File.read!(Path.join(doc, "ready-room/fw.bin")) == "local build"
+  end
+
+  test "a local COMMIT that conflicts with the forge: rebase aborted, the commit kept, nothing half-done",
+       %{seed: seed, doc: doc, sync: sync} do
+    File.write!(Path.join(doc, "backlog.md"), "arch commit\n")
+    git_in!(doc, ["commit", "-qam", "docs: arch"])
+    before = head(doc)
+    deposit!(seed, "backlog.md", "forge commit\n")
+
+    assert {:error, {:rebase_conflict, "workshop", _}} =
+             WorktreeSync.align_before_push(sync, doc, "workshop")
+
+    assert head(doc) == before
+    assert File.read!(Path.join(doc, "backlog.md")) == "arch commit\n"
+    refute File.exists?(Path.join(doc, ".git/rebase-merge"))
+    refute File.exists?(Path.join(doc, ".git/rebase-apply"))
+  end
+
+  test "refresh remembers a refused face, and forgets it once the face follows again",
+       %{seed: seed, doc: doc, sync: sync} do
+    File.write!(Path.join(doc, "backlog.md"), "the arch is editing\n")
+    deposit!(seed, "backlog.md", "replaced on the forge\n")
+
+    WorktreeSync.refresh(sync, "fleet/myproj", "workshop")
+    assert MapSet.member?(:sys.get_state(sync).refresh_failed, "fleet/myproj")
+
+    git_in!(doc, ["checkout", "--", "backlog.md"])
+    WorktreeSync.refresh(sync, "fleet/myproj", "workshop")
+    refute MapSet.member?(:sys.get_state(sync).refresh_failed, "fleet/myproj")
+    assert File.read!(Path.join(doc, "backlog.md")) == "replaced on the forge\n"
+  end
+
+  defp git_out(dir, args),
+    do: System.cmd("git", ["-C", dir | args]) |> elem(0) |> String.trim()
+
+  # What the deposit door does through the forge's content API: one commit on workshop, no PR.
+  defp deposit!(seed, rel, content) do
+    git_in!(seed, ["checkout", "-q", "workshop"])
+    File.mkdir_p!(Path.dirname(Path.join(seed, rel)))
+    File.write!(Path.join(seed, rel), content)
+    git_in!(seed, ["add", "-A"])
+    git_in!(seed, ["commit", "-qm", "depot(captain): " <> Path.basename(rel)])
+    git_in!(seed, ["push", "-q", "origin", "workshop"])
+    git_in!(seed, ["checkout", "-q", "main"])
+  end
+
+  defp remote_head(seed, branch),
+    do:
+      System.cmd("git", ["-C", seed, "rev-parse", "origin/" <> branch])
+      |> elem(0)
+      |> String.trim()
+
   defp commit_push!(dir, file, content, msg) do
     File.write!(Path.join(dir, file), content)
     git_in!(dir, ["add", "-A"])

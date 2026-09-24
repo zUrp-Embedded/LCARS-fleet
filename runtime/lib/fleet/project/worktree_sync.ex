@@ -11,6 +11,14 @@ defmodule Fleet.Project.WorktreeSync do
 
   Requests do not schedule retries or guarantee convergence. Cast results are
   discarded after logging; calls return operation results subject to their timeout.
+
+  ⚠ A WRITER FACE ALSO MOVES WITHOUT A MERGE. The deck's deposit door commits into the
+  workshop face through the forge's content API: no PR, so no merge-triggered sync ever
+  brings the file down, and the architect's next publication is rejected (seen on a bench,
+  2026-09-23: the push was refused as `stale info` until the face caught up).
+  `refresh/3` (cast by the poller each regular tick) and `align_before_push/3` (called by
+  the architect's own writers) cover that: both read the forge's head first and touch the
+  face only when it is behind.
   """
 
   use GenServer
@@ -41,6 +49,32 @@ defmodule Fleet.Project.WorktreeSync do
     do: GenServer.call(server, {:sync, repo, branch}, 60_000)
 
   @doc """
+  Casts a CHEAP realignment of a writer face (workshop, ops): the forge's head is read with
+  `ls-remote`, and the face is fetched and rebased only when that head is not already in its
+  HEAD. A face that has everything is left untouched — the architect edits it live, and an
+  autostash every tick would race its editor. A code branch is refused: its aligner resets.
+  A failure is logged once per episode, not once per tick.
+  """
+  @spec refresh(GenServer.server(), String.t(), String.t()) :: :ok
+  def refresh(server \\ __MODULE__, repo, branch),
+    do: GenServer.cast(server, {:refresh, repo, branch})
+
+  @doc """
+  Brings a writer-face directory level with the forge BEFORE a local writer commits and pushes
+  there, so the push is not refused for a commit it never saw. Serialized with the other
+  alignments when this server runs, inline otherwise. Returns `:ok`, `:up_to_date` or the git
+  error — callers log it and go on: their local write stays authoritative.
+  """
+  @spec align_before_push(GenServer.server(), String.t(), String.t()) ::
+          :ok | :up_to_date | {:error, term()}
+  def align_before_push(server \\ __MODULE__, dir, branch) do
+    case GenServer.whereis(server) do
+      nil -> align_writer_if_behind(dir, branch)
+      _ -> GenServer.call(server, {:align_dir, dir, branch}, 60_000)
+    end
+  end
+
+  @doc """
   Fetches matching lcars/issue-<n>-* branches into refs/lcars/pr/<n>/* in the code clone.
   Host-side fetching lets a read-only architect mount inspect deliverables without
   writing FETCH_HEAD. Named refs survive unrelated fetches; --force permits rewrites.
@@ -61,7 +95,9 @@ defmodule Fleet.Project.WorktreeSync do
      %{
        root: Keyword.get(opts, :code_root, @code_root),
        ops_root: Keyword.get(opts, :ops_root, Layout.ops_root()),
-       workshop_root: Keyword.get(opts, :workshop_root, Layout.workshop_root())
+       workshop_root: Keyword.get(opts, :workshop_root, Layout.workshop_root()),
+       # Repos whose last refresh failed: the failure is logged on entry, the recovery on exit.
+       refresh_failed: MapSet.new()
      }}
   end
 
@@ -69,6 +105,16 @@ defmodule Fleet.Project.WorktreeSync do
   def handle_cast({:sync, repo, branch}, state) do
     _ = do_sync(repo, branch, state)
     {:noreply, state}
+  end
+
+  @impl GenServer
+  def handle_cast({:refresh, repo, branch}, state) do
+    {:noreply, do_refresh(repo, branch, state)}
+  end
+
+  @impl GenServer
+  def handle_call({:align_dir, dir, branch}, _from, state) do
+    {:reply, align_writer_if_behind(dir, branch), state}
   end
 
   @impl GenServer
@@ -121,6 +167,71 @@ defmodule Fleet.Project.WorktreeSync do
     end
   end
 
+  defp do_refresh(repo, branch, state) do
+    dir =
+      case Layout.face_of(branch) do
+        "workshop" -> Path.join(state.workshop_root, Layout.project_name(repo))
+        "ops" -> Path.join(state.ops_root, Layout.project_name(repo))
+        _ -> nil
+      end
+
+    cond do
+      is_nil(dir) ->
+        Logger.warning(
+          "WorktreeSync: refresh #{repo} — #{inspect(branch)} is not a writer face, nothing done"
+        )
+
+        state
+
+      not File.dir?(Path.join(dir, ".git")) ->
+        state
+
+      true ->
+        note_refresh(repo, dir, branch, align_writer_if_behind(dir, branch), state)
+    end
+  end
+
+  defp note_refresh(repo, dir, branch, {:error, reason}, state) do
+    unless MapSet.member?(state.refresh_failed, repo) do
+      Logger.warning(
+        "WorktreeSync: #{repo} — the forge's #{branch} is AHEAD of #{dir} and the face could not " <>
+          "follow (#{inspect(reason)}); what was deposited stays on the forge. Retried every tick, " <>
+          "logged again only once it recovers"
+      )
+    end
+
+    %{state | refresh_failed: MapSet.put(state.refresh_failed, repo)}
+  end
+
+  defp note_refresh(repo, dir, branch, result, state) do
+    if result == :ok,
+      do: Logger.info("WorktreeSync: #{repo} → #{dir} brought level with the forge's #{branch}")
+
+    if MapSet.member?(state.refresh_failed, repo),
+      do: Logger.info("WorktreeSync: #{repo} — #{branch} follows the forge again")
+
+    %{state | refresh_failed: MapSet.delete(state.refresh_failed, repo)}
+  end
+
+  # `ls-remote` costs one request and touches nothing. A head absent from the local object store
+  # fails `merge-base` like a head that is not an ancestor: both mean « fetch ».
+  defp align_writer_if_behind(dir, branch) do
+    with {:ok, out} <-
+           GitOps.read(["-C", dir, "ls-remote", "origin", "refs/heads/" <> branch], auth: true) do
+      case String.split(out) do
+        [] -> :up_to_date
+        [sha | _] -> follow_head(dir, branch, sha)
+      end
+    end
+  end
+
+  defp follow_head(dir, branch, sha) do
+    case GitOps.run(["-C", dir, "merge-base", "--is-ancestor", sha, "HEAD"], auth: false) do
+      :ok -> :up_to_date
+      {:error, _} -> align_writer(dir, branch)
+    end
+  end
+
   # The human's code directory can contain uncommitted work. Refuse visible dirt
   # rather than accumulating implicit stashes; callers must serialize external writers.
   defp align_code(dir) do
@@ -162,19 +273,52 @@ defmodule Fleet.Project.WorktreeSync do
   end
 
   # Writer faces keep local commits through rebase. FETCH_HEAD works even when a
-  # single-branch clone does not maintain origin/<branch>. Autostash is not a guarantee
-  # of conflict-free restoration. Any rebase error is tagged rebase_conflict; abort
-  # is attempted but its result is ignored.
+  # single-branch clone does not maintain origin/<branch>. Any rebase error is tagged
+  # rebase_conflict; abort is attempted but its result is ignored.
+  #
+  # ⚠ A FAILED AUTOSTASH EXITS 0. When the incoming commits touch a file the writer has
+  # modified, `rebase --autostash` succeeds, keeps the edit in the stash and leaves conflict
+  # markers in the file; an ignored file on an incoming path is overwritten without a word.
+  # The rebase is therefore refused BEFORE it starts when an incoming path carries local work,
+  # and an unmerged path left after it is reported, never read as success.
   defp align_writer(dir, branch) do
-    with :ok <- GitOps.run(["-C", dir, "fetch", "origin", branch], auth: true) do
+    with :ok <- GitOps.run(["-C", dir, "fetch", "origin", branch], auth: true),
+         :ok <- refuse_if_local_work_in_the_way(dir, branch) do
       case GitOps.run(["-C", dir, "rebase", "--autostash", "FETCH_HEAD"], auth: false) do
         :ok ->
-          :ok
+          refuse_if_unmerged(dir, branch)
 
         {:error, reason} ->
           _ = GitOps.run(["-C", dir, "rebase", "--abort"], auth: false)
           {:error, {:rebase_conflict, branch, reason}}
       end
+    end
+  end
+
+  defp refuse_if_local_work_in_the_way(dir, branch) do
+    with {:ok, incoming} <- paths(dir, ["diff", "--name-only", "-z", "HEAD...FETCH_HEAD"]),
+         {:ok, changed} <- paths(dir, ["diff", "--name-only", "-z", "HEAD"]),
+         {:ok, others} <- paths(dir, ["ls-files", "--others", "-z"]) do
+      in_the_way = MapSet.intersection(MapSet.new(incoming), MapSet.new(changed ++ others))
+
+      if MapSet.size(in_the_way) == 0,
+        do: :ok,
+        else:
+          {:error, {:local_work_in_the_way, branch, in_the_way |> Enum.sort() |> Enum.take(10)}}
+    end
+  end
+
+  defp refuse_if_unmerged(dir, branch) do
+    case paths(dir, ["diff", "--name-only", "-z", "--diff-filter=U"]) do
+      {:ok, []} -> :ok
+      {:ok, unmerged} -> {:error, {:unmerged_after_rebase, branch, Enum.take(unmerged, 10)}}
+      {:error, _} = err -> err
+    end
+  end
+
+  defp paths(dir, args) do
+    with {:ok, out} <- GitOps.read(["-C", dir | args], auth: false) do
+      {:ok, String.split(out, <<0>>, trim: true)}
     end
   end
 

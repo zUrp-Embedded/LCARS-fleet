@@ -703,7 +703,9 @@ finally:
 # CE QUI EST EPINGLE ICI :
 #   · le fichier ne passe pas par le fil : la porte lit la ZONE DE TRANSIT, et rien d'autre ;
 #   · un chemin hors de cette zone est refuse — sans cette garde, la porte commiterait un jeton ;
-#   · l'org du projet se resout parmi les catalogues INSTALLES, et l'ambiguite est un refus ;
+#   · l'org du projet se resout parmi le catalogue LIVRE et les catalogues INSTALLES, et
+#     l'ambiguite est un refus ;
+#   · un nom que le harnais d'un agent charge seul (`CLAUDE.md`, `AGENTS.md`) entre renomme ;
 #   · l'humain est l'AUTEUR du commit, le compte systeme le COMMITTER, la branche est `workshop` ;
 #   · le chemin ne porte ni login ni horodatage — le commit les porte deja ;
 #   · un nom deja pris est REMPLACE : second commit, sha du blob en place, historique conserve ;
@@ -712,7 +714,10 @@ DEPOT = os.path.join(WORK, "deposit.sock")
 SPOOL = os.path.join(WORK, "spool")
 CATS = os.path.join(WORK, "catalogues")
 os.makedirs(SPOOL, exist_ok=True)
-for _cat in ("fleet", "reverse"):
+# ⚠ `fleet` N'EST PAS ICI, ET C'EST LE POINT. Le catalogue livre vit dans la release, pas dans le
+# repertoire des installes. Le banc le posait autrefois a cote de `reverse` : il masquait le defaut
+# qu'un banc reel a montre le 2026-09-23 — tout projet du catalogue livre etait `unknown_project`.
+for _cat in ("reverse",):
     os.makedirs(os.path.join(CATS, _cat), exist_ok=True)
     with open(os.path.join(CATS, _cat, "catalogue.yaml"), "w") as fh:
         fh.write("api: 1\nname: %s\n" % _cat)
@@ -881,6 +886,37 @@ check(_v == "FAIL:ambiguous_project",
       "depot: le meme slug dans deux catalogues — la porte ne choisit pas — %s" % _v)
 check(not ECRITS, "depot: et rien n'est ecrit tant que l'org est ambigue")
 REPOS.discard("fleet/samyang-reverse")
+
+# ─── 10 quater (livre). LE CATALOGUE LIVRE PORTE DES PROJETS ────────────────────────────────────
+# Aucun repertoire d'installation ne le nomme : la porte le connait quand meme, comme le produit.
+REPOS.add("fleet/basilisk")
+ECRITS.clear()
+_v = depose("captain", "basilisk")
+check(_v.startswith("OK:") and ECRITS and ECRITS[0]["repo"] == "fleet/basilisk",
+      "depot: un projet du catalogue LIVRE se resout, sans repertoire installe — %s" % _v[:70])
+_vide = os.path.join(WORK, "catalogues-vides")
+os.makedirs(_vide, exist_ok=True)
+mod.CATALOGUES_DIR = _vide
+ECRITS.clear()
+_v = depose("captain", "basilisk")
+check(_v.startswith("OK:"),
+      "depot: et sur une machine SANS aucun catalogue installe — %s" % _v[:70])
+mod.CATALOGUES_DIR = CATS
+REPOS.discard("fleet/basilisk")
+
+# ─── 10 quater (harnais). UN NOM QUE L'AGENT CHARGE SEUL ENTRE RENOMME ──────────────────────────
+# Deposer un `CLAUDE.md` dans la ready room, c'est donner des consignes a l'architect sans qu'il les
+# ait demandees. Le fichier n'est pas refuse : il entre sous un nom que le harnais ne charge pas, et
+# le verdict rend CE nom — le deck l'affiche tel quel.
+for _nom in ("CLAUDE.md", "claude.md", "AGENTS.md", "CLAUDE.local.md"):
+    ECRITS.clear()
+    _v = depose("alice", "samyang-reverse", nom=_nom)
+    check(_v.startswith("OK:") and _v.endswith(" ready-room/%s.safety" % _nom)
+          and ECRITS and ECRITS[-1]["chemin"] == "ready-room/%s.safety" % _nom,
+          "depot: « %s » entre sous « %s.safety » — %s" % (_nom, _nom, _v[-50:]))
+ECRITS.clear()
+_v = depose("alice", "samyang-reverse", nom="README.md")
+check(_v.endswith(" ready-room/README.md"), "depot: un nom ordinaire entre tel quel — %s" % _v[-40:])
 
 # ─── 10 quinquies. CE QUE LA PORTE GARDE POUR ELLE ──────────────────────────────────────────────
 mod.DEPOSIT_PEER = "un-autre-service"
