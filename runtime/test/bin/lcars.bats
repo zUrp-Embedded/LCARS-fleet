@@ -275,3 +275,35 @@ _portes_dispatchees() {
     [[ "$refus" == *"$porte"* ]] || { echo "le refus ne nomme pas « $porte »" >&2; return 1; }
   done < <(_portes_declarees)
 }
+
+# Un service systemd sans `User=` n'a pas de HOME : le convergeur des humains y demande les roles, et
+# une CLI morte au chargement lui faisait lire « aucun role » — tout nom reserve, aucun humain cree.
+_release_factice() {
+  RELEASE="$TMP/rel/lcars_fleet"; mkdir -p "$RELEASE"
+  printf '#!/usr/bin/env bash\necho "architect"\necho "engineer"\n' > "$RELEASE/lcars_fleet"
+  chmod +x "$RELEASE/lcars_fleet"
+  export LCARS_FLEET_BIN="$RELEASE/lcars_fleet"
+}
+
+@test "sans HOME, les portes tool repondent — elles lancent le release sous HOME=/tmp" {
+  _release_factice
+  cd "$TMP"
+  run env -u HOME bash "$SCRIPT" tool roles
+  [ "$status" -eq 0 ]
+  [[ "$output" == *architect* && "$output" == *engineer* ]]
+}
+
+@test "sans HOME, un verbe qui lit ~/.lcars refuse en NOMMANT le HOME — pas un « unbound variable »" {
+  cd "$TMP"
+  run env -u HOME bash "$SCRIPT" list
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"HOME absent"* ]]
+  [[ "$output" != *unbound* ]]
+}
+
+@test "sans HOME, l'aide s'imprime — elle ne lit rien de l'humain" {
+  cd "$TMP"
+  run env -u HOME bash "$SCRIPT" help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"LCARS_API_SOCK=~/.lcars/run/api.sock"* ]]
+}

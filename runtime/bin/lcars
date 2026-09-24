@@ -23,8 +23,23 @@ FACTS_SH="${LCARS_FACTS_SH:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../s
 # shellcheck source=../services/lib/facts.sh
 . "$FACTS_SH"
 
-SOCK_BASE="${LCARS_TMUX_SOCK_BASE:-$HOME/.lcars/run/tmux-sock}"
-API_SOCK="${LCARS_API_SOCK:-$HOME/.lcars/run/api.sock}"
+# ⚠ L'ETAT DE L'HUMAIN VIT SOUS SON HOME, ET SEULS LES VERBES QUI LE LISENT LE DEMANDENT. Un service
+# systemd sans `User=` n'a pas de HOME : evalue ici, au chargement, `set -u` tuerait TOUTE la CLI,
+# portes `tool` comprises, qui s'en passent (elles lancent le release sous HOME=/tmp) — et
+# `lcars_roles` lirait « aucun role » la ou il n'a rien pu lire.
+#
+# PER-HUMAN, sous ~/.lcars — PAS /opt/lcars/var/tokens, qui est le store PARTAGE des jetons worker
+# (root:fleet, indexe par role). Les jetons de FORGES_DIR sont les fichiers de l'humain, et
+# n'entrent JAMAIS dans un pod.
+_etat_humain() { # _etat_humain <verbe> -> pose SOCK_BASE API_SOCK FORGES_DIR PUBLISH_DIR, ou refuse
+  [[ -n "${HOME:-}" ]] \
+    || die "HOME absent — « ${1:-} » lit l'etat de l'humain (~/.lcars) ; seules les portes « tool » s'en passent"
+  SOCK_BASE="${LCARS_TMUX_SOCK_BASE:-$HOME/.lcars/run/tmux-sock}"
+  API_SOCK="${LCARS_API_SOCK:-$HOME/.lcars/run/api.sock}"
+  FORGES_DIR="$HOME/.lcars/forges"
+  PUBLISH_DIR="$HOME/.lcars/publish"
+}
+
 TMUX_BIN="${LCARS_TMUX_BIN:-tmux}"
 
 PROG="$(basename "$0")"
@@ -161,8 +176,8 @@ USAGE
       Cette aide.
 
 ENV
-  LCARS_API_SOCK=$API_SOCK     (la seule voie vers la fleet, socket AF_UNIX host-only)
-  LCARS_TMUX_SOCK_BASE=$SOCK_BASE
+  LCARS_API_SOCK=${API_SOCK:-~/.lcars/run/api.sock}     (la seule voie vers la fleet, socket AF_UNIX host-only)
+  LCARS_TMUX_SOCK_BASE=${SOCK_BASE:-~/.lcars/run/tmux-sock}
 EOF
 }
 
@@ -669,12 +684,6 @@ cmd_catalogue() {
   esac
 }
 
-# PER-HUMAN, sous ~/.lcars — PAS /opt/lcars/var/tokens, qui est le store PARTAGE des jetons worker
-# (root:fleet, indexe par role). Ces jetons-ci sont les fichiers de l'humain, et n'entrent JAMAIS
-# dans un pod.
-FORGES_DIR="$HOME/.lcars/forges"
-PUBLISH_DIR="$HOME/.lcars/publish"
-
 # Plain destination URL — no token, ever: auth is the CLI credential helper (gh/glab), not ours.
 _dest_url() { printf 'https://%s/%s.git' "$1" "$2"; }  # dest_host repo
 
@@ -1021,6 +1030,11 @@ cmd_approve() {
 # Le repertoire courant est verifie AVANT le dispatch, et pour tous les verbes : `help` ne coute
 # rien, et tout le reste finit par lancer le BEAM ou git, qui meurent tous les deux sans le dire.
 _cwd_lisible
+
+case "${1:-help}" in
+  tool|help|-h|--help) ;;
+  *) _etat_humain "$1" ;;
+esac
 
 case "${1:-help}" in
   spawn)  shift; cmd_spawn "$@" ;;
