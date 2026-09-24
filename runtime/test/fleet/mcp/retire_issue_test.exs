@@ -46,7 +46,7 @@ defmodule Fleet.MCP.RetireIssueTest do
     end
 
     def issue_blocks(_repo, _n, _opts), do: {:ok, Process.get(:blocks, [])}
-    def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
+    def issue_dependencies(_repo, _n, _opts), do: {:ok, Process.get(:deps, [])}
     def add_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
 
     def remove_issue_dependency(_repo, n, b, _opts) do
@@ -58,7 +58,11 @@ defmodule Fleet.MCP.RetireIssueTest do
     @impl true
     def create_issue(_repo, _t, _b, _opts), do: {:ok, 99}
     @impl true
-    def add_label(_repo, _n, _l, _opts), do: {:ok, :added}
+    def add_label(_repo, n, label, _opts) do
+      send(self(), {:stamp, n, label})
+      {:ok, :added}
+    end
+
     @impl true
     def repo_label_id(_repo, _name, _opts), do: {:ok, 1}
     @impl true
@@ -93,7 +97,7 @@ defmodule Fleet.MCP.RetireIssueTest do
   defp decoded({:ok, %{content: [%{"text" => txt}]}, _state}), do: Jason.decode!(txt)
 
   describe "the nominal retirement" do
-    test "the reason is posted, then the ticket is closed as RETIRED — not delivered" do
+    test "the ticket is closed as RETIRED, then the reason is posted — not delivered" do
       result = retire() |> decoded()
 
       assert_received {:comment, 42, body}
@@ -132,8 +136,10 @@ defmodule Fleet.MCP.RetireIssueTest do
     test "unclosable PR ABORTS: the ticket stays open rather than half-retired" do
       Process.put(:close_pr_result, {:error, {:http, 500, "boom"}})
 
-      assert {:error, {:retire_aborted, 42, _}, _} = retire()
+      assert {:error, {:retire_incomplete, 42, :pull_request, _}, _} = retire()
       refute_received {:close_issue, 42, _}
+      # Stamped before anything else: the unclosed ticket can never be dispatched again.
+      assert_received {:stamp, 42, "stage/retired"}
     end
   end
 
@@ -190,14 +196,19 @@ defmodule Fleet.MCP.RetireIssueTest do
       end
 
       own = Enum.find_index(trace, &match?({:comment, 42, _}, &1))
-      assert is_integer(own) and own < close, "le motif se poste avant la fermeture"
+
+      assert is_integer(own) and own > close,
+             "le motif se poste APRES la fermeture : un commentaire ne dit que ce qui a eu lieu"
+
+      stamp = Enum.find_index(trace, &match?({:stamp, 42, "stage/retired"}, &1))
+      assert stamp == 0, "le tampon est le PREMIER geste : #{inspect(trace)}"
     end
 
     test "l'ANNONCE qui echoue ABANDONNE : rien n'est ferme, rien n'est leve, rien n'est libere" do
       # This fixture fails the first announcement; no closure or edge removal should follow.
       Process.put(:comment_result, {:error, {:http, 500, "boom"}})
 
-      assert {:error, {:retire_aborted, 42, {:dependent_not_announced, 8, _}}, _} = retire()
+      assert {:error, {:retire_incomplete, 42, :announce, {8, _}}, _} = retire()
       refute_received {:close_issue, 42, _}
       refute_received {:lift, _, _}
     end
@@ -224,8 +235,31 @@ defmodule Fleet.MCP.RetireIssueTest do
     test "a dependent with no addressable number HALTS — an edge we cannot address we cannot lift" do
       Process.put(:blocks, [%{"id" => 8}])
 
-      assert {:error, {:retire_aborted, 42, {:edge_without_number, _}}, _} = retire()
+      assert {:error, {:retire_incomplete, 42, :graph, {:edge_without_number, _}}, _} = retire()
       refute_received {:close_issue, 42, _}
+    end
+  end
+
+  describe "its own blockers" do
+    test "a blocker that cannot be lifted STOPS before the close, and the ticket says so" do
+      # Gitea refuses to close an issue with open dependencies: an unlifted blocker means no close.
+      Process.put(:deps, [%{"number" => 13}])
+      Process.put(:lift_result, {:error, {:http, 500, "boom"}})
+
+      assert {:error, {:retire_incomplete, 42, :lift, {:blockers_not_lifted, [13]}}, _} = retire()
+      assert_received {:stamp, 42, "stage/retired"}
+      refute_received {:close_issue, 42, _}
+      assert_received {:comment, 42, body}
+      assert body =~ "INTERROMPU"
+      assert body =~ "ne sera plus jamais dispatché"
+    end
+
+    test "INVERSE TWIN — a liftable blocker is lifted, then the ticket closes" do
+      Process.put(:deps, [%{"number" => 13}])
+
+      assert %{"retired" => true} = retire() |> decoded()
+      assert_received {:lift, 42, 13}
+      assert_received {:close_issue, 42, :retired}
     end
   end
 

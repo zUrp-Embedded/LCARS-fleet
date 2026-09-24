@@ -34,11 +34,12 @@ defmodule Fleet.Pilot.StepDispatcher do
   @awaits_toolchain_label Labels.awaits_toolchain()
 
   @merged_label Labels.stage_prefix() <> Labels.stage_merged()
+  @retired_label Labels.stage_prefix() <> Labels.stage_retired()
 
   @type decision :: :engage | {:skip, atom()}
 
   @doc """
-  Checks in-flight, merged, architect-wait and toolchain-wait labels, in that order.
+  Checks in-flight, merged, retired, architect-wait and toolchain-wait labels, in that order.
   Accepts an issue or its payload wrapper. Does not check ownership, state, route or role.
   """
   @spec decide(map()) :: decision()
@@ -56,6 +57,11 @@ defmodule Fleet.Pilot.StepDispatcher do
       # F-C066: durable merged marker prevents redispatch after close failure.
       @merged_label in labels ->
         {:skip, :merged}
+
+      # Retirement stamps this BEFORE lifting the ticket's edges and closing it: an open ticket
+      # that carries it is being (or failed to be) retired, and must never be dispatched again.
+      @retired_label in labels ->
+        {:skip, :retired}
 
       # Architect lock suppresses judgement-loop redispatch.
       @awaits_arch_label in labels ->

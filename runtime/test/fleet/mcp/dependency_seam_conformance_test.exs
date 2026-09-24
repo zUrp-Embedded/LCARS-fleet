@@ -42,6 +42,11 @@ defmodule Fleet.MCP.DependencySeamConformanceTest do
   # ─── A seam that cannot write edges ─────────────────────────────────────────────────────────
 
   defmodule BlindForge do
+    def add_label(_repo, n, label, _opts) do
+      send(self(), {:stamp, n, label})
+      {:ok, :added}
+    end
+
     # Missing dependency callbacks must produce a warning instead of invoking an absent function.
     def close_pr(_repo, pr, _opts) do
       send(self(), {:pr_closed, pr})
@@ -57,6 +62,11 @@ defmodule Fleet.MCP.DependencySeamConformanceTest do
   end
 
   defmodule ConformingForge do
+    def add_label(_repo, n, label, _opts) do
+      send(self(), {:stamp, n, label})
+      {:ok, :added}
+    end
+
     def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
     def issue_blocks(_repo, _n, _opts), do: {:ok, []}
     def remove_issue_dependency(_repo, _n, _b, _opts), do: {:ok, %{}}
@@ -102,18 +112,20 @@ defmodule Fleet.MCP.DependencySeamConformanceTest do
         Delegation.Retirement.retire_superseded(BlindForge, "fleet/p", 16, :open, %{"issue" => 17})
 
       refute_received {:close, 16}
-      assert result["supersede_warning"] =~ "encore ouvert"
+      assert result["supersede_warning"] =~ "tamponné retiré"
+      assert_received {:stamp, 16, "stage/retired"}
     end
 
-    test "the refusal happens even though the PR was already closed — that is the costly case" do
+    test "the refusal comes BEFORE the PR is touched — and the old ticket is stamped all the same" do
       result =
         Delegation.Retirement.retire_superseded(BlindForge, "fleet/p", 16, {:open, 21}, %{
           "issue" => 17
         })
 
-      assert_received {:pr_closed, 21}
+      refute_received {:pr_closed, 21}
       refute_received {:close, 16}
-      assert result["supersede_warning"] =~ "encore ouvert"
+      assert_received {:stamp, 16, "stage/retired"}
+      assert result["supersede_warning"] =~ "issue_retire(16)"
     end
 
     test "INVERSE TWIN — a conforming seam closes normally; the guard refuses nothing valid" do

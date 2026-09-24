@@ -290,8 +290,14 @@ de `get_work_item`.) Le CONTENU passe TOUJOURS par MCP, jamais par du texte inje
      (`issue_comment`, posté en ton nom), soit tu **corriges le brief et re-délègues** (`issue_create`
      avec le brief re-cadré ET **`supersedes: <n° de l'ancien ticket>`** — la fleet retire l'ancien
      elle-même : commentaire + fermeture ; SANS ce param l'ancien ticket reste vivant et REPART en
-     dispatch dès ton `submit_result` — boucle zombie). Tu n'as AUCUN outil de fermeture : ne
-     prétends jamais qu'un ticket « est clos », c'est le `supersedes` ou ton humain qui ferme.
+     dispatch dès ton `submit_result` — boucle zombie). Soit tu **retires** un ticket qui ne doit
+     plus tourner et n'a pas de remplaçant (obsolète, doublon, hors périmètre) : `issue_retire`
+     avec le motif. C'est aussi `issue_retire` qui TERMINE un retrait interrompu — un
+     `supersede_warning` nomme l'étape où il s'est arrêté ; le ticket est déjà tamponné
+     `stage/retired`, il ne repartira pas, mais il reste ouvert tant que tu ne l'as pas terminé.
+     **Ne garde jamais un mandat ouvert pour empêcher un ticket de repartir : retire-le.** Un
+     mandat gardé ouvert bouche ta file — tant qu'il vit, aucune autre escalade ne t'arrive.
+     Ne prétends jamais qu'un ticket « est clos » : c'est le résultat de l'outil qui le dit.
   3. **`submit_result`** (rappelle le `work_item_id`) quand c'est traité. C'est ÇA qui retire le label
      d'attente de l'issue et **libère la suivante** : tant que tu ne `submit_result` pas, tu restes
      « occupé » et la file d'escalades ne tourne pas. Tu traites UN mandat à la fois (la forge tient

@@ -41,6 +41,37 @@ defmodule Fleet.Pilot.ArchWakeTest do
     end
   end
 
+  describe "the mandate carries the queue it holds up" do
+    # 2026-09-23: #17 blocked while the architect held #12's mandate; nothing told it anything waited.
+    test "the escalations waiting behind the offered one are NAMED in its mandate" do
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_arch_deliverable_fetch, fn _r, _n ->
+        {:ok, []}
+      end)
+
+      awaits = MapSet.new([{"fleet/alpha", 17}, {"fleet/alpha", 12}, {"fleet/alpha", 19}])
+
+      assert :offered =
+               ArchWake.offer_then_wake(CapturingQueue, OkSpawner, awaits, "test",
+                 ensure: ensure_noop()
+               )
+
+      assert_received {:mandate, attrs}
+      assert attrs.metadata["number"] == 12
+      assert attrs.brief =~ "En attente derrière celle-ci : #17, #19"
+      assert attrs.brief =~ "`issue_retire`"
+    end
+
+    test "INVERSE TWIN — alone in the queue, the mandate names nothing behind it" do
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_arch_deliverable_fetch, fn _r, _n ->
+        {:ok, []}
+      end)
+
+      assert :offered = offer(CapturingQueue, OkSpawner)
+      assert_received {:mandate, attrs}
+      refute attrs.brief =~ "En attente derrière"
+    end
+  end
+
   describe "the mandate SAYS whether the deliverable can be read" do
     # The mandate must distinguish available, absent and unreadable deliverables;
     # otherwise the architect may arbitrate without knowing what it could not read.
