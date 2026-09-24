@@ -634,9 +634,9 @@ publier_gh() { run env LCARS_PACK_TAG=v9.9 LCARS_PACK_FORGE=https://github.com L
   local log="$BATS_TEST_TMPDIR/pack.out"
   env TMPDIR="$BATS_TEST_TMPDIR/tmp" STUB_PUSH_SLEEP=30 LCARS_PACK_TAG=v9.9 LCARS_PACK_FORGE=https://github.com LCARS_PACK_OWNER=fleet \
     bash "$R/deploy/pack.sh" --publish > "$log" 2>&1 &
-  local pid=$! i
+  local pid=$!
   mkdir -p "$BATS_TEST_TMPDIR/tmp"
-  for i in $(seq 1 200); do grep -q 'pack: push: a1b2c3: Pushing' "$log" && break; sleep 0.1; done
+  for _ in $(seq 1 200); do grep -q 'pack: push: a1b2c3: Pushing' "$log" && break; sleep 0.1; done
   grep -q 'pack: push: a1b2c3: Pushing' "$log"
   kill -TERM "$pid"
   local rc=0; wait "$pid" || rc=$?
