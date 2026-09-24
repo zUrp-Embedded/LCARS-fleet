@@ -23,6 +23,7 @@ defmodule Fleet.MCP.PodTools do
 
   use ExMCP.Server
 
+  alias Fleet.MCP.PodTools.CiResults
   alias Fleet.MCP.PodTools.Delegation
   alias Fleet.MCP.PodTools.Probe
   alias Fleet.MCP.PodTools.WorkItems
@@ -71,7 +72,8 @@ defmodule Fleet.MCP.PodTools do
     "forge_link" => :mutation,
     "toolchain_request" => :mutation,
     # Dispatch runs a billable runner, so concurrent identical probes must coalesce.
-    "run_probe" => :mutation
+    "run_probe" => :mutation,
+    "ci_results" => :read
   }
 
   @doc """
@@ -180,6 +182,26 @@ defmodule Fleet.MCP.PodTools do
       },
       "required" => ["probe"]
     })
+  end
+
+  deftool "ci_results" do
+    # vitrine: Lit ce que la CI a prouvé sur la tête de la PR jugée : verdict, runs, fin du journal de chaque échec.
+    meta do
+      name("CI Results")
+
+      description(
+        "LIT ce que la CI a prouvé sur la tête de la PR que tu juges : le verdict de la forge pour " <>
+          "ce SHA, chaque run avec son issue, et la FIN DU JOURNAL de chaque run en échec. La CI " <>
+          "est l'environnement qui fait foi : une suite qui demande des paquets système (un " <>
+          "navigateur, une toolchain) y tourne, jamais dans ton pod — tu lis son résultat, tu ne " <>
+          "la rejoues pas, et tu n'as pas à conclure « prouvé par lecture ».\n\n" <>
+          "Tu ne fournis rien : la PR et son SHA viennent de ton canal. Les runs de sonde " <>
+          "(`probe-*`) sont exclus — c'est `run_probe` qui les rapporte. Un `verdict` `pending` " <>
+          "veut dire que la CI n'a pas fini : reviens-y plutôt que de conclure."
+      )
+    end
+
+    input_schema(%{"type" => "object", "properties" => %{}})
   end
 
   deftool "issue_create" do
@@ -1244,6 +1266,16 @@ defmodule Fleet.MCP.PodTools do
   def handle_tool_call("run_probe", _bad_args, state) do
     {:error, :invalid_arguments, state}
   end
+
+  def handle_tool_call("ci_results", _args, %{pod_id: pod_id} = state)
+      when is_binary(pod_id) and pod_id != "" do
+    case CiResults.run(pod_id) do
+      {:ok, results} -> {:ok, %{content: [json(results)]}, state}
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  def handle_tool_call("ci_results", _args, state), do: {:error, :pod_id_required, state}
 
   # Delegation gates project-bound issue operations using the resolved role and repo.
 
